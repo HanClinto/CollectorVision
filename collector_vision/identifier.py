@@ -4,28 +4,34 @@ Typical usage::
 
     import collector_vision as cvg
 
-    cvid = cvg.Identifier(cvg.Game.MAGIC)
+    # Local gallery file
+    cvid = cvg.Identifier("./magic-scryfall-phash16-2026-04.npz")
+
+    # Auto-download from HuggingFace (re-checks for updates every 7 days)
+    cvid = cvg.Identifier(cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"))
+
     result = cvid.identify("photo.jpg")
     print(result.card_name, result.set_code)
 
-The Identifier downloads and caches the appropriate gallery on first use.
-Heavy objects (detector, embedder, gallery) are loaded lazily and reused
-across calls — create one Identifier per process, not one per image.
+Create one Identifier per process. Heavy objects (detector, gallery) are
+loaded lazily on first call and reused across subsequent calls.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 
-from collector_vision.games import Game, Embedding
 from collector_vision.catalogs.base import CardResult
 
 if TYPE_CHECKING:
     from collector_vision.interfaces import CornerDetector
     from collector_vision.gallery import Gallery
+    from collector_vision.hfd import HFD
 
+# A gallery source is either a local path (str or Path) or an HFD reference
+GallerySource = Union[str, Path, "HFD", "Gallery"]
 
 _SENTINEL = object()  # distinguishes "not passed" from explicit None
 
@@ -35,86 +41,70 @@ class Identifier:
 
     Parameters
     ----------
-    *games:
-        One or more :class:`Game` values.  Galleries for each are downloaded
-        on first use and merged into a single search index.  At least one game
-        is required unless *gallery* is supplied.
-    embedding:
-        Which embedding algorithm to use.  Defaults to
-        :attr:`Embedding.MILO` (neural ArcFace).  Use
-        :attr:`Embedding.PHASH` for CPU-only / no-GPU environments.
+    *galleries:
+        One or more gallery sources — any combination of:
+
+        - ``str`` or ``Path`` — path to a local ``.npz`` gallery file
+        - :class:`~collector_vision.hfd.HFD` — auto-download from HuggingFace
+        - :class:`~collector_vision.gallery.Gallery` — pre-loaded gallery object
+
+        When multiple galleries are supplied they are merged into a single
+        search index.  All galleries must use the same embedding algorithm
+        (encoded in the file's ``embedder_spec``).
     detector:
         Corner detector instance.  Defaults to the bundled
         :class:`~collector_vision.detectors.neural.NeuralCornerDetector`.
         Pass ``detector=None`` to skip detection and treat the full image as
         the card (useful when the input is already a clean crop).
-    gallery:
-        Supply a pre-loaded :class:`~collector_vision.gallery.Gallery`
-        directly.  When provided, *games* and *embedding* are ignored.
-        Intended for power users loading a local gallery file.
-    offline:
-        If ``True``, never make network calls — use only locally cached
-        galleries.  Raises if a required gallery is not cached.
-    cache_dir:
-        Override the default cache directory
-        (``~/.cache/collectorvision/``).
 
     Examples
     --------
-    Default (neural detector + neural embedding, Magic)::
+    Local file::
 
-        cvid = cvg.Identifier(cvg.Game.MAGIC)
+        cvid = cvg.Identifier("./magic-scryfall-phash16-2026-04.npz")
 
-    Hash embedding, no GPU required::
+    Auto-download from HuggingFace::
 
-        cvid = cvg.Identifier(cvg.Game.MAGIC, embedding=cvg.Embedding.PHASH)
+        cvid = cvg.Identifier(cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"))
 
-    Multi-game::
+    Multi-gallery (must share the same embedding algorithm)::
 
-        cvid = cvg.Identifier(cvg.Game.MAGIC, cvg.Game.POKEMON)
+        cvid = cvg.Identifier(
+            cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"),
+            cvg.HFD("CollectorVision/galleries", "pokemon-tcgplayer-phash16"),
+        )
 
-    Canny detector (faster on clean backgrounds)::
+    Canny detector (faster on clean backgrounds, no GPU needed)::
 
         from collector_vision.detectors import CannyCornerDetector
-        cvid = cvg.Identifier(cvg.Game.MAGIC, detector=CannyCornerDetector())
+        cvid = cvg.Identifier(
+            cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"),
+            detector=CannyCornerDetector(),
+        )
 
     No detection — input is already a card crop::
 
-        cvid = cvg.Identifier(cvg.Game.MAGIC, detector=None)
-
-    Local gallery file::
-
-        cvid = cvg.Identifier(gallery=cvg.Gallery.load("my_gallery.npz"))
+        cvid = cvg.Identifier("./magic-scryfall-phash16-2026-04.npz", detector=None)
     """
 
     def __init__(
         self,
-        *games: Game,
-        embedding: Embedding = Embedding.MILO,
+        *galleries: GallerySource,
         detector: "CornerDetector | None" = _SENTINEL,  # type: ignore[assignment]
-        gallery: "Gallery | None" = None,
-        offline: bool = False,
-        cache_dir: Path | None = None,
     ) -> None:
-        if gallery is None and not games:
+        if not galleries:
             raise ValueError(
-                "Provide at least one Game, e.g. Identifier(Game.MAGIC), "
-                "or supply a pre-loaded gallery via gallery=Gallery.load(...)"
+                "Provide at least one gallery source, e.g.:\n"
+                "  Identifier('./magic-scryfall-phash16-2026-04.npz')\n"
+                "  Identifier(HFD('CollectorVision/galleries', 'magic-scryfall-phash16'))"
             )
 
-        self._games = games
-        self._embedding = embedding
-        self._offline = offline
-        self._cache_dir = cache_dir
+        self._sources = galleries
+        self._detector_arg = detector  # _SENTINEL | CornerDetector | None
 
-        # Detector sentinel: _SENTINEL means "use default neural detector"
-        # None means "no detection, treat full image as card"
-        self._detector_arg = detector
-
-        # Lazy-loaded heavy objects
-        self._gallery: Gallery | None = gallery
-        self._detector: CornerDetector | None | _NotLoaded = _NOT_LOADED
-        self._embedder = None  # derived from gallery.embedder on first use
+        # Lazy-loaded
+        self._gallery: Gallery | None = None
+        self._detector: object = _NOT_LOADED  # CornerDetector | None once loaded
 
     # ------------------------------------------------------------------
     # Lazy loaders
@@ -123,22 +113,26 @@ class Identifier:
     def _get_gallery(self) -> "Gallery":
         if self._gallery is None:
             from collector_vision.gallery import Gallery
-            self._gallery = Gallery.for_games(
-                *self._games,
-                embedding=self._embedding,
-                offline=self._offline,
-                cache_dir=self._cache_dir,
-            )
+            from collector_vision.hfd import HFD
+
+            loaded: list[Gallery] = []
+            for src in self._sources:
+                if isinstance(src, Gallery):
+                    loaded.append(src)
+                elif isinstance(src, HFD):
+                    loaded.append(Gallery.load(src.resolve()))
+                else:
+                    loaded.append(Gallery.load(Path(src)))
+
+            self._gallery = loaded[0] if len(loaded) == 1 else Gallery._merge(loaded)
         return self._gallery
 
     def _get_detector(self) -> "CornerDetector | None":
         if self._detector is _NOT_LOADED:
             if self._detector_arg is _SENTINEL:
-                # Default: neural detector
                 from collector_vision.detectors.neural import NeuralCornerDetector
                 self._detector = NeuralCornerDetector()
             else:
-                # Explicit: either a detector instance or None
                 self._detector = self._detector_arg  # type: ignore[assignment]
         return self._detector  # type: ignore[return-value]
 
@@ -157,16 +151,13 @@ class Identifier:
         Parameters
         ----------
         image:
-            Path to the card photo, or a BGR numpy array (as returned by
-            ``cv2.imread``).
+            Path to the card photo, or a BGR numpy array (``cv2.imread`` output).
         top_k:
-            Number of alternatives to include in
-            :attr:`~collector_vision.catalogs.base.CardResult.alternatives`.
+            Number of alternatives to include in the result.
 
         Returns
         -------
-        :class:`~collector_vision.catalogs.base.CardResult` with the best
-        match and up to *top_k*-1 alternatives.
+        :class:`~collector_vision.catalogs.base.CardResult`
         """
         raise NotImplementedError("Identifier.identify() — not yet wired up")
 
@@ -177,17 +168,7 @@ class Identifier:
         top_k: int = 5,
         batch_size: int = 16,
     ) -> "list[CardResult]":
-        """Identify multiple card images in a single batched pass.
-
-        Parameters
-        ----------
-        images:
-            List of paths or BGR numpy arrays.
-        top_k:
-            Alternatives per result.
-        batch_size:
-            Images per embedding forward pass.
-        """
+        """Identify multiple card images in a single batched pass."""
         raise NotImplementedError("Identifier.identify_batch() — not yet wired up")
 
     # ------------------------------------------------------------------
@@ -195,20 +176,17 @@ class Identifier:
     # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
-        games = ", ".join(g.value for g in self._games)
+        srcs = ", ".join(repr(s) for s in self._sources)
         det = (
-            "neural" if self._detector_arg is _SENTINEL
+            "neural (default)" if self._detector_arg is _SENTINEL
             else "none" if self._detector_arg is None
-            else type(self._detector_arg).__name__
+            else repr(self._detector_arg)
         )
-        return (
-            f"Identifier(games=[{games}], embedding={self._embedding.value}, "
-            f"detector={det})"
-        )
+        return f"Identifier({srcs}, detector={det})"
 
 
 class _NotLoaded:
-    """Sentinel type for unloaded lazy objects."""
+    pass
 
 
 _NOT_LOADED = _NotLoaded()
