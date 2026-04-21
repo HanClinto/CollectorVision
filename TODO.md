@@ -44,11 +44,20 @@ Checklist for turning the scaffold into a shippable library.
   - `hamming_search(query_bits_u8, gallery_bits_u8)` → sorted (distance, idx)
   - Used internally by `identify()`; not part of the public API
 
-### 1f. Catalog helpers
-- [ ] Implement `collector_vision/catalogs/scryfall.py` — lightweight wrapper to
-  resolve scryfall_id → human-readable card data (optional, for richer CardResult)
-- [ ] Consider whether catalog lookups should be online-optional or purely from
-  metadata already embedded in the gallery NPZ
+### 1f. Metadata lookup (future module)
+`identify()` returns IDs only — fetching human-readable metadata is the
+caller's responsibility.  A thin lookup helper would be useful both here
+and in CollectorVision-Pipeline (which needs the same data to build galleries).
+Consider a `collector_vision.sources` subpackage:
+
+- [ ] `sources/scryfall.py` — `get(scryfall_id) -> dict` via Scryfall REST API,
+  with local SQLite cache (same shape as `card_lookup.py` in 07_web_scanner)
+- [ ] `sources/tcgplayer.py` — `get(tcgplayer_id) -> dict` with price data
+- [ ] Shared caching layer — cache responses to disk, configurable TTL
+- [ ] This module is also needed by CollectorVision-Pipeline for building
+  gallery metadata; keep the interface identical so Pipeline can import it
+
+Not blocking v0.1.0 — callers can hit the Scryfall API directly for now.
 
 ---
 

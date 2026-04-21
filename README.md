@@ -27,9 +27,12 @@ import collector_vision as cvg
 cvid = cvg.Identifier("./magic-scryfall-milo1-2026-04.npz")
 result = cvid.identify("photo.jpg")
 
-print(result.card_name, result.set_code)
-print(result.ids)  # {"scryfall_id": "...", "tcgplayer_id": "...", ...}
+print(result.ids)        # {"scryfall_id": "...", "tcgplayer_id": "...", ...}
+print(result.confidence) # 0.94
 ```
+
+`identify()` returns stable IDs — look up names, prices, and other metadata
+from [Scryfall](https://scryfall.com/docs/api) or TCGplayer using those IDs.
 
 Create one `Identifier` per process — it holds the gallery in memory and reuses it across calls.
 

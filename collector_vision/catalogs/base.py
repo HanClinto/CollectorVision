@@ -7,12 +7,15 @@ from typing import Any
 
 @dataclass
 class CardResult:
-    """Identification result from a card gallery lookup.
+    """Identification result returned by :meth:`~collector_vision.Identifier.identify`.
 
-    ``ids`` is an open-ended mapping from key to value, populated with
-    whatever identifiers the gallery was built from.  Well-known keys:
+    The library's job is identification — returning stable IDs for the matched
+    card.  All human-readable metadata (name, set, price, legality, image URL)
+    should be fetched from the authoritative source using these IDs.
 
-        scryfall_id           — Scryfall UUID
+    Well-known keys in ``ids``:
+
+        scryfall_id           — Scryfall UUID (uniquely identifies a printing)
         oracle_id             — Scryfall oracle UUID (groups all printings of
                                 the same card text)
         illustration_id       — Scryfall illustration UUID (groups reprints
@@ -22,32 +25,40 @@ class CardResult:
         cardmarket_id         — Cardmarket (MKM) product ID
         mtgo_id               — Magic Online card ID
         arena_id              — MTG Arena card ID
-        multiverse_ids        — list of Gatherer multiverse IDs (may be a
-                                JSON-encoded list string)
-        pokemontcg_id         — Pokémon TCG API card ID (e.g. "base1-4")
+        multiverse_ids        — Gatherer multiverse IDs (JSON-encoded list)
+        pokemontcg_id         — Pokémon TCG API card ID (e.g. ``"base1-4"``)
 
-    Keys present depend entirely on what the gallery builder recorded.
-    Missing keys are simply absent from the dict rather than None.
+    Which keys are present depends entirely on what the gallery was built from.
+    Missing keys are absent from the dict rather than ``None``.
+
+    Fetching metadata
+    -----------------
+    Given a ``scryfall_id``, fetch full card data from Scryfall::
+
+        import urllib.request, json
+        sid = result.ids["scryfall_id"]
+        url = f"https://api.scryfall.com/cards/{sid}"
+        card = json.loads(urllib.request.urlopen(url).read())
+        print(card["name"], card["set"])
+
+    Given a ``tcgplayer_id``, look up pricing via the TCGplayer API or a
+    third-party price service.
     """
-    card_name: str
-    set_code: str
-    confidence: float           # cosine similarity (embedding) or 1 - hamming_norm (hash)
 
-    # Open-ended identifier mapping — whatever the gallery source provides
     ids: dict[str, str] = field(default_factory=dict)
+    """Stable identifiers for the matched card. See class docstring for keys."""
 
-    # Convenience accessor
-    def get_id(self, key: str) -> str | None:
-        """Return the identifier for *key*, or None if not present."""
-        return self.ids.get(key)
+    confidence: float = 0.0
+    """Match quality. Cosine similarity for neural embeddings (0–1, higher is
+    better); normalised Hamming similarity for hash embeddings (0–1)."""
 
-    # Top-k alternatives (same structure, lower confidence)
     alternatives: list["CardResult"] = field(default_factory=list)
+    """Next-best matches in descending confidence order."""
 
-    # Per-frame results when identify() was called with multiple images.
-    # Each entry is the best match for that individual frame before voting.
-    # Empty when identify() was called with a single image.
     frame_results: list["CardResult"] = field(default_factory=list)
+    """Per-frame results when :meth:`~collector_vision.Identifier.identify`
+    was called with multiple images.  Empty for single-image calls."""
 
-    # Raw retrieval metadata for advanced users
-    extra: dict[str, Any] = field(default_factory=dict)
+    def get_id(self, key: str) -> str | None:
+        """Return the identifier for *key*, or ``None`` if not present."""
+        return self.ids.get(key)

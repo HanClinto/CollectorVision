@@ -23,14 +23,16 @@ if TYPE_CHECKING:
 
 
 # Gallery NPZ keys written by the gallery builder
-_KEY_EMBEDDINGS  = "embeddings"   # (N, D) float32  or  (N, B) uint8
-_KEY_CARD_IDS    = "card_ids"     # (N,) str — primary key (e.g. Scryfall UUID)
-_KEY_IDS_JSON    = "ids_json"     # (N,) str — JSON-encoded per-card ids dicts
-_KEY_CARD_NAMES  = "card_names"   # (N,) str
-_KEY_SET_CODES   = "set_codes"    # (N,) str
-_KEY_SOURCE      = "source"       # scalar str — "scryfall", "tcgplayer", …
-_KEY_MODE        = "mode"         # scalar str — "embedding" | "hash"
-_KEY_EMBEDDER    = "embedder_spec"# scalar str — JSON embedder specification
+_KEY_EMBEDDINGS  = "embeddings"    # (N, D) float32  or  (N, B) uint8
+_KEY_CARD_IDS    = "card_ids"      # (N,) str — primary key (e.g. Scryfall UUID)
+_KEY_IDS_JSON    = "ids_json"      # (N,) str — JSON-encoded per-card ids dicts
+_KEY_SOURCE      = "source"        # scalar str — "scryfall", "tcgplayer", …
+_KEY_MODE        = "mode"          # scalar str — "embedding" | "hash"
+_KEY_EMBEDDER    = "embedder_spec" # scalar str — JSON embedder specification
+
+# Keys present in older gallery files — loaded for compatibility but not stored
+_KEY_CARD_NAMES  = "card_names"    # legacy: dropped, look up from source API
+_KEY_SET_CODES   = "set_codes"     # legacy: redundant with scryfall_id
 
 
 class Gallery:
@@ -48,20 +50,16 @@ class Gallery:
         embeddings: np.ndarray,
         card_ids: list[str],
         ids: list[dict],
-        card_names: list[str],
-        set_codes: list[str],
         source: str,
         mode: str,
         embedder_spec: dict,
     ) -> None:
         self.embeddings = embeddings
         self.card_ids = card_ids
-        self.ids = ids                  # parallel list of per-card id dicts
-        self.card_names = card_names
-        self.set_codes = set_codes
+        self.ids = ids          # parallel list of per-card id dicts
         self.source = source
-        self.mode = mode                # "embedding" | "hash"
-        self.embedder_spec = embedder_spec  # raw spec dict from the NPZ
+        self.mode = mode        # "embedding" | "hash"
+        self.embedder_spec = embedder_spec
 
         self._embedder: "Embedder | None" = None  # lazy, created on first access
 
@@ -93,8 +91,6 @@ class Gallery:
             embeddings=data[_KEY_EMBEDDINGS],
             card_ids=data[_KEY_CARD_IDS].tolist(),
             ids=ids,
-            card_names=data[_KEY_CARD_NAMES].tolist() if _KEY_CARD_NAMES in data.files else [""] * n,
-            set_codes=data[_KEY_SET_CODES].tolist() if _KEY_SET_CODES in data.files else [""] * n,
             source=str(data[_KEY_SOURCE]) if _KEY_SOURCE in data.files else "unknown",
             mode=str(data[_KEY_MODE]) if _KEY_MODE in data.files else "embedding",
             embedder_spec=embedder_spec,
@@ -201,8 +197,6 @@ class Gallery:
             embeddings=np.concatenate([g.embeddings for g in galleries], axis=0),
             card_ids=sum((g.card_ids for g in galleries), []),
             ids=sum((g.ids for g in galleries), []),
-            card_names=sum((g.card_names for g in galleries), []),
-            set_codes=sum((g.set_codes for g in galleries), []),
             source="+".join(g.source for g in galleries),
             mode=galleries[0].mode,
             embedder_spec=ref_spec,
