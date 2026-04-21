@@ -47,7 +47,8 @@ class HFD:
     cache_refresh:
         How long to trust the local manifest cache before re-checking
         HuggingFace.  Default is 7 days.  Pass ``timedelta(0)`` to always
-        check, or ``timedelta(days=365)`` to effectively pin.
+        check on every use, or ``None`` to never recheck (use whatever is
+        already cached).
     cache_dir:
         Override the default cache directory.  If ``None``, uses
         ``$COLLECTORVISION_CACHE`` or ``~/.cache/collectorvision/``.
@@ -57,7 +58,7 @@ class HFD:
         self,
         repo: str,
         name: str,
-        cache_refresh: timedelta = _DEFAULT_REFRESH,
+        cache_refresh: timedelta | None = _DEFAULT_REFRESH,
         cache_dir: Path | None = None,
     ) -> None:
         self._repo = repo
@@ -112,9 +113,13 @@ class HFD:
         Falls back to the stale cache on network failure.  Raises only if
         there is no cached copy at all and the network is unavailable.
         """
-        refresh_seconds = self._cache_refresh.total_seconds()
+        if self._cache_refresh is None:
+            # Never recheck — use cache if present, else fetch once
+            if self._manifest_path().exists():
+                return json.loads(self._manifest_path().read_text(encoding="utf-8"))
 
-        if self._manifest_age_seconds() < refresh_seconds:
+        if self._cache_refresh is not None and \
+                self._manifest_age_seconds() < self._cache_refresh.total_seconds():
             # Cache is fresh — no network call needed
             return json.loads(self._manifest_path().read_text(encoding="utf-8"))
 

@@ -50,8 +50,8 @@ The gallery is saved to `~/.cache/collectorvision/`. When a newer version is pub
 ```python
 from datetime import timedelta
 
-# Never re-check (pin forever)
-cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1", cache_refresh=timedelta(days=365))
+# Never recheck — use whatever is cached (pin indefinitely)
+cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1", cache_refresh=None)
 
 # Always check (useful in CI)
 cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1", cache_refresh=timedelta(0))
