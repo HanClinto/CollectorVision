@@ -5,18 +5,29 @@ The canonical manifest lives on HuggingFace Datasets at
 A bundled fallback manifest covers the galleries shipped with the current
 package version so the library works offline without a network call.
 
+Gallery filename convention: {game}-{source}-{algo}-{YYYY-MM}.npz
+  game   — canonical game id, e.g. "magic", "pokemon"
+  source — data provider, e.g. "scryfall", "tcgplayer"
+  algo   — model/hash variant, e.g. "milo1", "phash16"
+  date   — YYYY-MM of the bulk data snapshot
+
+Examples:
+  magic-scryfall-milo1-2026-04.npz
+  magic-scryfall-phash16-2026-04.npz
+  pokemon-tcgplayer-milo1-2026-04.npz
+
 Manifest format (JSON):
 {
   "version": "2026-04",
   "default_variant": "milo1",
   "games": {
     "magic": {
-      "milo1":  "magic-scryfall-2026-04-milo1.npz",
-      "phash16": "magic-scryfall-2026-04-phash16.npz"
+      "milo1":   "magic-scryfall-milo1-2026-04.npz",
+      "phash16": "magic-scryfall-phash16-2026-04.npz"
     },
     "pokemon": {
-      "milo1":  "pokemon-tcgplayer-2026-04-milo1.npz",
-      "phash16": "pokemon-tcgplayer-2026-04-phash16.npz"
+      "milo1":   "pokemon-tcgplayer-milo1-2026-04.npz",
+      "phash16": "pokemon-tcgplayer-phash16-2026-04.npz"
     }
   }
 }
@@ -36,7 +47,9 @@ _BUNDLED_MANIFEST: dict = {
     "version": "0.1.0.dev0",
     "default_variant": "milo1",
     "games": {
-        # Populated as galleries are published.
+        # Entries added here as galleries are published.
+        # Format: game → { variant → filename }
+        # Filename convention: {game}-{source}-{algo}-{YYYY-MM}.npz
     },
 }
 
