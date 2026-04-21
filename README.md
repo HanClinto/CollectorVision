@@ -32,8 +32,8 @@ print(result.ids)        # {"scryfall_id": "...", "tcgplayer_id": "...", ...}
 print(result.confidence) # 0.94
 
 # Look up card metadata from Scryfall
-sid = result.ids["scryfall_id"]
-card = json.loads(urllib.request.urlopen(f"https://api.scryfall.com/cards/{sid}").read())
+sfid = result.ids["scryfall_id"]
+card = json.loads(urllib.request.urlopen(f"https://api.scryfall.com/cards/{sfid}").read())
 print(card["name"], card["set_name"], card["prices"]["usd"])
 ```
 
