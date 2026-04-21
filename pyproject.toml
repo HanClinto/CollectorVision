@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "collectorvision"
+version = "0.1.0.dev0"
+description = "Card identification library for collectible card games (MTG, Pokémon, and more)"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "timm>=0.9",
+    "Pillow>=9.0",
+    "numpy>=1.24",
+    "opencv-python-headless>=4.7",
+    "imagehash>=4.3",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["collector_vision*"]
