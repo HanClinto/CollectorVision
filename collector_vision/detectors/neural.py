@@ -4,7 +4,22 @@ Runs entirely on CPU via onnxruntime — no PyTorch dependency required.
 
 Architecture: MobileViT-XXS backbone + SimCC coordinate heads trained on
 CCG card corners.  Input 384×384 RGB, outputs four normalised (x, y) corner
-coordinates plus a card-presence logit.
+coordinates, a card-presence logit, and a SimCC sharpness scalar.
+
+Card presence heuristic
+-----------------------
+For Reggie (SimCC architecture) the exported ONNX model includes a *sharpness*
+output — the mean peak of the eight softmax coordinate distributions (4 corners
+× 2 axes).  A high peak means the model has a sharp, confident prediction for
+each axis; a low peak means the distributions are flat (no card in view).
+
+In practice, the raw presence logit is unreliable: it fires strongly even on
+blank images.  Sharpness is a much better gate.  When the model emits a
+sharpness output, ``card_present`` is determined by ``sharpness >= min_sharpness``
+and the presence logit is recorded in ``extra`` for diagnostics only.
+
+When the model does not emit sharpness (older checkpoints or non-SimCC models),
+the detector falls back to ``sigmoid(presence_logit) >= presence_threshold``.
 """
 from __future__ import annotations
 
@@ -48,9 +63,19 @@ class NeuralCornerDetector:
     checkpoint:
         Path to the ``.onnx`` file.  The ``.onnx.data`` weight file must sit
         in the same directory.  Defaults to the bundled Reggie weights.
+    min_sharpness:
+        Minimum SimCC mean-peak sharpness to treat a detection as valid.
+        Range [0, 1]; 0.0 (default) disables the gate — all frames are
+        treated as card-present regardless of sharpness.  Only used when
+        the model emits a sharpness output (Reggie does).
+
+        Tune this for card-in-scene video pipelines where you want to skip
+        frames with no card visible.  For Reggie, blank/no-card frames
+        typically score ≤ 0.01; valid card frames typically score 0.03–0.07.
+        A value around 0.02 cleanly separates the two populations.
     presence_threshold:
-        Minimum sigmoid(presence_logit) to treat a detection as valid.
-        Below this the full image is returned as the crop.
+        Fallback gate used when the model does not emit a sharpness output.
+        Minimum ``sigmoid(presence_logit)`` to treat a detection as valid.
     num_threads:
         Number of intra-op threads for onnxruntime.  Defaults to 4 (good
         for Pi; reduce to 1 for profiling).
@@ -59,6 +84,7 @@ class NeuralCornerDetector:
     def __init__(
         self,
         checkpoint: str | Path | None = None,
+        min_sharpness: float = 0.0,
         presence_threshold: float = 0.5,
         num_threads: int = 4,
     ) -> None:
@@ -73,8 +99,11 @@ class NeuralCornerDetector:
                 "Install the full package or supply a checkpoint path."
             )
 
-        self._threshold = presence_threshold
-        self._sess, self._input_name, self._input_size = self._load(checkpoint, num_threads)
+        self._min_sharpness = min_sharpness
+        self._presence_threshold = presence_threshold
+        self._sess, self._input_name, self._input_size, self._has_sharpness = (
+            self._load(checkpoint, num_threads)
+        )
 
     @staticmethod
     def _load(onnx_path: Path, num_threads: int):
@@ -91,9 +120,10 @@ class NeuralCornerDetector:
         input_meta = sess.get_inputs()[0]
         input_name = input_meta.name
         shape = input_meta.shape
-        # Shape is (1, 3, H, W); H may be an int or a symbolic string
         input_size = int(shape[2]) if isinstance(shape[2], int) else 384
-        return sess, input_name, input_size
+        out_names = {o.name for o in sess.get_outputs()}
+        has_sharpness = "sharpness" in out_names
+        return sess, input_name, input_size, has_sharpness
 
     def detect(self, image: np.ndarray) -> DetectionResult:
         """Detect card corners in a BGR uint8 image.
@@ -106,7 +136,8 @@ class NeuralCornerDetector:
         Returns
         -------
         DetectionResult with normalised (x, y) corners in TL, TR, BR, BL order.
-        ``card_present`` is False when the presence score is below the threshold.
+        ``card_present`` is False when sharpness (or presence) is below threshold.
+        ``extra`` contains ``sharpness`` and ``presence`` for diagnostics.
         """
         x = _preprocess(image, self._input_size)
         outs = self._sess.run(None, {self._input_name: x})
@@ -115,18 +146,31 @@ class NeuralCornerDetector:
         presence_logit = float(outs[1].squeeze())
         presence = float(1.0 / (1.0 + np.exp(-presence_logit)))  # sigmoid
 
-        corners = _order_corners(corners_flat.reshape(4, 2).astype(np.float32))
+        extra: dict = {"presence": presence}
 
-        extra: dict = {"presence_logit": presence_logit}
-        if len(outs) > 2:
-            extra["sharpness"] = float(outs[2].squeeze())
+        if self._has_sharpness:
+            sharpness = float(outs[2].squeeze())
+            extra["sharpness"] = sharpness
+            card_present = sharpness >= self._min_sharpness
+            confidence = sharpness
+        else:
+            # Fallback for models without a sharpness output
+            card_present = presence >= self._presence_threshold
+            confidence = presence
+
+        corners = _order_corners(corners_flat.reshape(4, 2).astype(np.float32))
 
         return DetectionResult(
             corners=corners,
-            card_present=presence >= self._threshold,
-            confidence=presence,
+            card_present=card_present,
+            confidence=confidence,
             extra=extra,
         )
 
     def __repr__(self) -> str:
-        return f"NeuralCornerDetector(input_size={self._input_size}, threshold={self._threshold})"
+        gate = (
+            f"min_sharpness={self._min_sharpness}"
+            if self._has_sharpness
+            else f"presence_threshold={self._presence_threshold}"
+        )
+        return f"NeuralCornerDetector(input_size={self._input_size}, {gate})"
