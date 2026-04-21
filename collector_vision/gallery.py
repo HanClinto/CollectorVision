@@ -263,9 +263,7 @@ def _embedder_from_spec(spec: dict) -> "Embedder":
 
     if kind == "neural":
         from collector_vision.embedders.neural import NeuralEmbedder
-        return NeuralEmbedder(
-            image_size=int(spec.get("image_size", 448)),
-        )
+        return NeuralEmbedder()
 
     raise ValueError(
         f"Unknown embedder kind {kind!r} in gallery spec.\n"
