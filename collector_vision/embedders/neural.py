@@ -1,40 +1,54 @@
-"""NeuralEmbedder — ArcFace MobileViT-XXS learned card embedder.
+"""NeuralEmbedder — ONNX-based ArcFace card embedder (Milo).
 
-Produces L2-normalised float32 vectors for cosine-similarity retrieval.
-Loads the bundled weights by default.
+Runs entirely on CPU via onnxruntime — no PyTorch dependency required.
+
+Architecture: MobileViT-XXS backbone + shared linear projection trained with
+multi-task ArcFace loss (illustration_id + set_code).  Input 448×448 RGB,
+outputs a L2-normalised 128-d float32 embedding.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image
 
+_IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+_IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+
+def _preprocess_pil(img: Image.Image, size: int) -> np.ndarray:
+    """PIL Image (any mode) → (1, 3, size, size) float32, ImageNet-normalised."""
+    rgb = img.convert("RGB").resize((size, size), Image.BILINEAR)
+    x   = np.array(rgb, dtype=np.float32) / 255.0
+    x   = (x - _IMAGENET_MEAN) / _IMAGENET_STD
+    return x.transpose(2, 0, 1)[np.newaxis].astype(np.float32)  # (1,3,H,W)
+
 
 class NeuralEmbedder:
-    """MobileViT-XXS + linear projection, trained with ArcFace loss.
+    """Milo — ArcFace MobileViT-XXS card embedder, runs via onnxruntime.
 
     Parameters
     ----------
     checkpoint:
-        Path to a .pt checkpoint.  Defaults to the bundled weights.
-    device:
-        "cpu", "cuda", "mps", or None (auto-detect).
-    image_size:
-        Input resolution.  Must match what the checkpoint was trained with
-        (448 for the bundled model).
+        Path to the ``.onnx`` file.  The ``.onnx.data`` weight file must sit
+        in the same directory.  Defaults to the bundled Milo weights.
     batch_size:
-        Number of images to embed per forward pass.
+        Images to process per ONNX session call.  The default (1) keeps
+        latency low for single-image use; increase for throughput-oriented
+        gallery building (though gallery building typically runs in the
+        CollectorVision-Pipeline project, not here).
+    num_threads:
+        Number of intra-op threads for onnxruntime.
     """
 
     def __init__(
         self,
         checkpoint: str | Path | None = None,
-        device: str | None = None,
-        image_size: int = 448,
-        batch_size: int = 16,
+        batch_size: int = 1,
+        num_threads: int = 4,
     ) -> None:
-        import torch
         from collector_vision import weights as _w
 
         if checkpoint is None:
@@ -46,32 +60,58 @@ class NeuralEmbedder:
                 "Install the full package or supply a checkpoint path."
             )
 
-        if device is None:
-            if torch.backends.mps.is_available():
-                device = "mps"
-            elif torch.cuda.is_available():
-                device = "cuda"
-            else:
-                device = "cpu"
-
-        self._device = device
-        self._image_size = image_size
         self._batch_size = batch_size
-        self._model = self._load(checkpoint, device)
+        self._sess, self._input_name, self._input_size = self._load(checkpoint, num_threads)
 
-    def _load(self, checkpoint: Path, device: str):
-        raise NotImplementedError(
-            "NeuralEmbedder._load() — to be wired up when weights are finalised"
+    @staticmethod
+    def _load(onnx_path: Path, num_threads: int):
+        import onnxruntime as ort
+
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = num_threads
+        opts.inter_op_num_threads = 1
+        sess = ort.InferenceSession(
+            str(onnx_path),
+            sess_options=opts,
+            providers=["CPUExecutionProvider"],
         )
+        input_meta = sess.get_inputs()[0]
+        input_name = input_meta.name
+        shape = input_meta.shape
+        input_size = int(shape[2]) if isinstance(shape[2], int) else 448
+        return sess, input_name, input_size
 
     def embed(self, images: list[Image.Image]) -> np.ndarray:
         """Embed a list of PIL Images.
 
-        Returns (n, dim) float32 array of L2-normalised vectors.
+        Parameters
+        ----------
+        images:
+            List of PIL Images (any mode; converted to RGB internally).
+
+        Returns
+        -------
+        (n, 128) float32 array of L2-normalised embeddings.
         """
-        raise NotImplementedError(
-            "NeuralEmbedder.embed() — to be wired up when weights are finalised"
-        )
+        if not images:
+            return np.zeros((0, 128), dtype=np.float32)
+
+        all_embs: list[np.ndarray] = []
+
+        for i in range(0, len(images), self._batch_size):
+            batch = images[i : i + self._batch_size]
+            # ONNX model was exported for batch_size=1; run each image separately
+            # and stack the results.
+            for img in batch:
+                x   = _preprocess_pil(img, self._input_size)
+                out = self._sess.run(None, {self._input_name: x})[0]
+                emb = out.squeeze().astype(np.float32)  # (128,)
+                norm = float(np.linalg.norm(emb))
+                if norm > 1e-8:
+                    emb = emb / norm
+                all_embs.append(emb)
+
+        return np.stack(all_embs, axis=0)  # (n, 128)
 
     def __repr__(self) -> str:
-        return f"NeuralEmbedder(device={self._device!r}, image_size={self._image_size})"
+        return f"NeuralEmbedder(input_size={self._input_size})"
