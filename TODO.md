@@ -231,6 +231,193 @@ Checklist for turning the scaffold into a shippable library.
 
 ---
 
+## 11. Evaluation and benchmarks
+
+The goal: reproducible, public numbers so users can see what accuracy to expect
+and compare variants against each other and against alternatives.
+
+### 11a. Benchmark dataset
+- [ ] **Define and publish a small public benchmark corpus**
+  - Target: ~500–1000 card images covering a range of capture conditions
+    (phone camera, flatbed scan, video frame, various lighting/backgrounds)
+  - Split by capture type: clean scan / phone clear-bg / phone cluttered-bg / video
+  - Cover multiple card games (Magic, Pokémon at minimum)
+  - Include ground-truth card IDs in a manifest CSV
+  - Upload to HF Datasets as `CollectorVision/benchmark-v1`
+  - License images carefully (CC-BY or original photographer consent)
+- [ ] **Define evaluation metrics**
+  - Top-1 and Top-3 artwork accuracy (matches illustration_id)
+  - Top-1 and Top-3 edition accuracy (matches exact card_id / printing)
+  - Per-capture-condition breakdowns
+  - Query latency (ms/card, CPU and GPU)
+  - Gallery size (bytes/card)
+
+### 11b. Eval harness
+- [ ] **`eval/benchmark.py`** — standalone CLI evaluation script
+  - Downloads benchmark dataset from HF if not cached
+  - Accepts `--gallery magic` or `--gallery-file path.npz`
+  - Accepts `--variant phash16 milo1` (sweep)
+  - Runs `identify()` on each benchmark image
+  - Reports per-condition and overall accuracy + latency table
+  - Writes `results.csv` and `results.md`
+- [ ] **Results reproducibility** — pin gallery version (YYYY-MM) in results so
+  comparisons are against the same reference set
+- [ ] **Baseline comparisons to include**
+  - `phash16` (hash, no GPU)
+  - `milo1` (neural, GPU recommended)
+  - Canny detector vs neural detector (ablation on detection quality)
+  - Optionally: Ximilar / other commercial APIs as reference points
+    (require user to supply their own API key)
+
+### 11c. Published results
+- [ ] **Results table in README** — top-1 edition accuracy by variant × condition
+  - Keep updated with each gallery release
+  - Mark GPU/CPU requirement per variant
+- [ ] **HuggingFace Model Card** (`CollectorVision/milo`) — embed results table
+- [ ] **HuggingFace Space — live demo**
+  - Gradio app: upload an image → shows detected corners → identified card + confidence
+  - Dropdown to select game and variant
+  - Hosted on HF Spaces (free tier for initial launch)
+  - Link from README and PyPI page
+- [ ] **Versioned results archive** in `CollectorVision/galleries` dataset repo
+  - `eval_results/benchmark-v1/{variant}-{YYYY-MM}.json` for each gallery release
+
+---
+
+## 12. API server
+
+A thin HTTP wrapper so the library is usable from any language, and as the
+backend for mobile apps and the HF Space demo.
+
+### 12a. Core server (`collectorvision-server` package or `server/` directory)
+- [ ] **`server/app.py`** — FastAPI application
+  - `GET /health` — liveness check, returns version + loaded gallery info
+  - `GET /games` — list supported games and available variants
+  - `POST /identify` — multipart image upload, returns JSON CardResult
+    - Query params: `game`, `variant`, `top_k`, `detector` (`neural`/`canny`/`fixed`)
+    - Optional JSON body for fixed corners
+  - `POST /identify/batch` — multiple images in one request
+  - `GET /gallery/info` — metadata about the loaded gallery (size, algo, date)
+- [ ] **Gallery pre-loading** — load gallery once at startup, not per request
+- [ ] **Error responses** — structured JSON errors (not HTML 500s)
+  - `{"error": "no_card_detected", "message": "..."}`
+- [ ] **Optional auth** — bearer token via env var `COLLECTORVISION_API_TOKEN`
+  (disabled by default for local use)
+- [ ] **Rate limiting** — optional, via `slowapi` or similar
+
+### 12b. Packaging the server
+- [ ] **`pyproject.toml` extras** — `pip install collectorvision[server]`
+  adds `fastapi`, `uvicorn`, `python-multipart`
+- [ ] **Entry point** — `collectorvision-server` CLI command
+  - `collectorvision-server --game magic --variant phash16 --port 8080`
+- [ ] **Docker image** — `Dockerfile` in `server/`
+  - Base: `python:3.12-slim`
+  - Install collectorvision + server extras
+  - Pre-download gallery at build time (or mount as volume)
+  - Expose port 8080
+  - `ENTRYPOINT ["collectorvision-server"]`
+- [ ] **`docker-compose.yml`** — ready-to-run example with volume for gallery cache
+- [ ] **Publish image to GHCR** — `ghcr.io/hanclinto/collectorvision:latest`
+  - GitHub Actions workflow: build + push on `v*` tags
+
+### 12c. API documentation
+- [ ] **OpenAPI / Swagger UI** — served at `/docs` by FastAPI automatically
+  - Verify all endpoints have good descriptions and example responses
+- [ ] **README section** — "Running the API server" with docker and pip examples
+- [ ] **Client examples** — curl, Python requests, JavaScript fetch snippets in docs
+
+### 12d. Hosted demo API
+- [ ] **HuggingFace Space** (`CollectorVision/demo`)
+  - Gradio front-end calling the FastAPI backend (or pure Gradio)
+  - Rate-limited to prevent abuse
+  - Note in UI: "For production use, run your own instance"
+
+---
+
+## 13. Mobile
+
+Two strategies, in ascending complexity. Start with the API approach; add
+on-device later as demand warrants.
+
+### Strategy A — API-backed (ship now, works immediately)
+
+- [ ] **Document the REST API** clearly so mobile developers can integrate
+  against a self-hosted or hosted instance
+- [ ] **Reference mobile clients** (thin wrappers, not full apps)
+  - [ ] **React Native** — `packages/react-native-collectorvision/`
+    - `identify(imageUri, options)` → Promise<CardResult>
+    - Handles multipart upload to configured server URL
+    - Typed with TypeScript definitions
+    - Published to npm as `react-native-collectorvision`
+  - [ ] **Flutter** — `packages/flutter_collectorvision/`
+    - `CollectorVision.identify(File image, {String game})` → Future<CardResult>
+    - Published to pub.dev as `collectorvision`
+  - [ ] **Swift / iOS native** — `CollectorVisionClient.swift`
+    - Thin URLSession wrapper, available as a Swift package
+  - [ ] **Kotlin / Android native** — thin OkHttp wrapper, published to Maven
+
+### Strategy B — On-device inference (future, heavier lift)
+
+On-device removes the server dependency and latency, enabling offline use and
+reducing privacy concerns. Requires model conversion work.
+
+#### B1. ONNX export (prerequisite for both platforms)
+- [ ] **Export corner detector to ONNX**
+  - `torch.onnx.export(model, dummy_input, "corner_detector.onnx", opset_version=17)`
+  - Verify output matches PyTorch reference on a set of test images (< 1% diff)
+  - Run `onnxsim` to simplify the graph
+  - Target: < 10 MB after simplification
+- [ ] **Export Milo embedder to ONNX**
+  - Same process; verify L2-normalised output matches reference
+  - Target: < 15 MB
+- [ ] **Upload ONNX files to HF Hub** (`CollectorVision/milo`) alongside `.pt`
+- [ ] **Hash embedder** — no ONNX needed; port DCT/wavelet logic natively per platform
+
+#### B2. Android
+- [ ] **ONNX Runtime for Android** — add to `android/` module
+  - `implementation("com.microsoft.onnxruntime:onnxruntime-android:...")`
+  - Preprocess: Bitmap → float32 tensor, normalise
+  - Run corner detector → decode SimCC → warp ROI
+  - Run embedder → L2 normalise → cosine search against bundled gallery
+- [ ] **Bundle gallery** — include phash16 gallery NPZ in assets for offline use
+  (milo1 gallery is too large; phash16 is ~3 MB for Magic)
+- [ ] **Android Archive (AAR)** — publishable library
+  - Publish to Maven Central or GitHub Packages
+  - Artifact: `com.collectorvision:collectorvision-android`
+- [ ] **Sample Android app** — demonstrates camera capture → identify → display result
+
+#### B3. iOS
+- [ ] **CoreML conversion** (preferred over ONNX Runtime on iOS for ANE access)
+  - `coremltools.convert(onnx_model, ...)` → `CornerDetector.mlpackage`
+  - `coremltools.convert(...)` → `MiloEmbedder.mlpackage`
+  - Verify outputs match ONNX reference
+- [ ] **Swift package** — `CollectorVisionKit`
+  - Wraps CoreML model inference
+  - `CollectorVisionKit.identify(pixelBuffer:) async throws -> CardResult`
+  - Published via Swift Package Manager (GitHub URL)
+- [ ] **XCFramework** — for CocoaPods / Carthage users
+- [ ] **Sample iOS app** — AVFoundation camera → identify → display result
+
+#### B4. Cross-platform (optional, higher reach)
+- [ ] **React Native on-device** using ONNX Runtime React Native
+  - `ort-react-native` package for model inference
+  - Single JS API for both platforms
+- [ ] **Flutter on-device** using `onnxruntime` Flutter package
+- [ ] **Capacitor / Ionic plugin** for web-app-style mobile apps
+
+#### B5. On-device gallery considerations
+- [ ] **Gallery format for mobile** — the standard NPZ works but may be slow to load
+  - Consider a flat binary format: header (N, D, dtype) + raw matrix
+  - Or SQLite with a BLOB column (easy random access)
+- [ ] **Gallery size tiers**
+  - phash16 Magic: ~3.4 MB — fine to bundle in app
+  - milo1 Magic: ~54 MB — too large; stream on first use, cache locally
+  - On-device default should be phash16 unless device has Neural Engine / GPU
+- [ ] **Incremental gallery updates** — download only new/changed cards between
+  gallery versions rather than re-downloading the full NPZ
+
+---
+
 ## Milestone summary
 
 | Milestone | Key items |
@@ -242,3 +429,7 @@ Checklist for turning the scaffold into a shippable library.
 | **M4 — Full gallery set** | magic milo1, pokemon phash16 + milo1 all live |
 | **M5 — PyPI v0.1.0** | CI green, tests pass, published to PyPI |
 | **M6 — Automated** | Monthly gallery refresh CI, dependabot, docs site |
+| **M7 — Benchmark** | Public benchmark dataset on HF, eval harness, results in README |
+| **M8 — API server** | FastAPI server, Docker image on GHCR, HF Space demo live |
+| **M9 — Mobile (API)** | React Native + Flutter packages published, API-backed |
+| **M10 — Mobile (on-device)** | ONNX export, Android AAR, iOS Swift package |
