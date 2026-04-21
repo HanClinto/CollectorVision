@@ -43,7 +43,14 @@ result = cv.identify("photo.jpg", gallery=gallery)
 
 ## Corner detection
 
-By default CollectorVision locates the card automatically using the bundled neural detector. Two alternatives are available:
+By default CollectorVision locates the card using the bundled neural detector:
+
+```python
+# default — neural detector, no configuration needed
+result = cv.identify("photo.jpg", gallery=gallery)
+```
+
+Two alternatives are available when the neural detector isn't the right fit:
 
 **Canny** — no GPU required, works well on clean or high-contrast backgrounds:
 
@@ -74,14 +81,30 @@ result = cv.identify("frame.jpg", gallery=gallery, detector=detector)
 result = cv.identify("frame.jpg", gallery=gallery, corners=my_corners)
 ```
 
+**No detection** — if the image is already a clean crop of just the card, skip detection and use the full image:
+
+```python
+result = cv.identify("crop.jpg", gallery=gallery, corners=cv.FULL_IMAGE_CORNERS)
+```
+
 ---
 
 ## Gallery variants
 
-The default gallery uses the neural embedder (Milo). A perceptual hash variant is also available — no GPU required at query time, slightly lower accuracy:
+The default gallery uses the neural embedder (codename "Milo"), which gives the best accuracy and requires a GPU or Apple Silicon for reasonable speed:
 
 ```python
+# default — Milo neural embedder
+gallery = cv.Gallery.for_game("magic")
+result = cv.identify("photo.jpg", gallery=gallery)
+```
+
+A perceptual hash variant runs on any hardware with no GPU required, at the cost of some accuracy:
+
+```python
+# phash16 — no GPU required
 gallery = cv.Gallery.for_game("magic", variant="phash16")
+result = cv.identify("photo.jpg", gallery=gallery)
 ```
 
 ---
