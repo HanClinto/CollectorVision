@@ -72,26 +72,24 @@ Checklist for turning the scaffold into a shippable library.
 
 ---
 
-## 3. Gallery builder
+## 3. Gallery format (CollectorVision's side of the contract)
 
-- [ ] **Create `galleries/build_gallery.py`** — generic builder script
-  - Accepts: game, source, algo variant, snapshot date
-  - Reads reference images from the data source
-  - Embeds with the specified embedder (hash or neural)
-  - Writes `{game}-{source}-{algo}-{YYYY-MM}.npz` with all required keys
-  - Stores `embedder_spec` JSON inside the NPZ
-- [ ] **Build Magic / Scryfall galleries**
-  - `magic-scryfall-milo1-YYYY-MM.npz` (neural, ~108k cards, ~54 MB at 128-d float32)
-  - `magic-scryfall-phash16-YYYY-MM.npz` (hash, ~108k cards, ~3.4 MB at 256-bit)
-- [ ] **Build Pokémon / TCGplayer galleries**
-  - `pokemon-tcgplayer-milo1-YYYY-MM.npz`
-  - `pokemon-tcgplayer-phash16-YYYY-MM.npz`
-- [ ] **Upload galleries to HuggingFace Datasets**
-  - Org: `CollectorVision`
-  - Dataset repo: `CollectorVision/galleries`
-  - Also upload `manifest.json`
+CollectorVision is a *consumer* of gallery NPZ files — it does not build them.
+Gallery construction, data scraping, and publishing live in the companion project
+**CollectorVision-Pipeline** (see section 14). This section covers only what
+CollectorVision itself needs to know about the format.
+
+- [ ] **Document the NPZ format** in `collector_vision/gallery.py` module docstring
+  - All required keys (`embeddings`, `card_ids`, `ids_json`, `embedder_spec`, …)
+  - `embedder_spec` JSON schema with all supported `kind` values
+  - Versioning / forward-compatibility story (unknown keys must be ignored)
+- [ ] **Spec test** — `tests/test_gallery_format.py`
+  - Synthesize a minimal compliant NPZ and verify `Gallery.load()` round-trips cleanly
+  - Verify missing optional keys are handled gracefully (backward compatibility)
 - [ ] **Update bundled manifest** in `collector_vision/manifest.py` (`_BUNDLED_MANIFEST`)
-  to include the real filenames and set `version` to the snapshot date
+  once Pipeline has published the first real gallery files to HF Datasets
+- [ ] Confirm `Manifest.fetch()` → `Gallery.for_game()` → `identify()` works end-to-end
+  against live HF Datasets files
 
 ---
 
@@ -99,8 +97,9 @@ Checklist for turning the scaffold into a shippable library.
 
 - [ ] Create HF organization `CollectorVision`
 - [ ] Create HF Datasets repo `CollectorVision/galleries`
-  - Set license to AGPL-3.0 (or CC-BY for data alone, TBD)
-  - README explaining the gallery file format and embedder_spec
+  - Set license (AGPL-3.0 for derived embeddings; check Scryfall ToS re: derived works)
+  - README explaining the gallery NPZ format, embedder_spec, and how to use with the library
+  - Actual gallery uploads happen via CollectorVision-Pipeline (see section 14)
 - [ ] Create HF Hub repo `CollectorVision/milo`
   - Write model card: architecture (MobileViT-XXS), training data (Scryfall),
     input spec (448×448 RGB, L2-normalised 128-d output), license
@@ -418,6 +417,94 @@ reducing privacy concerns. Requires model conversion work.
 
 ---
 
+## 14. CollectorVision-Pipeline (separate project)
+
+> **This work belongs in a separate repository**, not here. Most CollectorVision
+> users never need it — it is maintainer tooling for keeping galleries up to date.
+> Tracked here only for cross-project visibility.
+>
+> Suggested repo: `github.com/HanClinto/CollectorVision-Pipeline`
+> Suggested PyPI package: `cvg-pipeline` (dev/maintainer install only, not end-user)
+
+The Pipeline project is responsible for the full data → gallery lifecycle:
+- Scraping card data from upstream APIs
+- Downloading reference images
+- Building and publishing gallery NPZ files
+- Updating the manifest on HF Datasets
+- Automated monthly refresh
+
+### 14a. Data sources
+
+#### Magic — Scryfall
+- [ ] Sync `default_cards.json` (English printings, ~80k cards)
+- [ ] Sync `all_cards.json` (all languages, ~517k cards) — optional, for multilingual galleries
+- [ ] Download reference card images (PNG fronts, ~108k files, ~60 GB)
+- [ ] Store locally in a structured cache; track ETags for incremental sync
+- [ ] Respect Scryfall rate limits and bulk-data guidelines
+
+#### Pokémon — TCGplayer / Pokémon TCG API
+- [ ] Sync all-cards JSON from Pokémon TCG API (~18k cards, paginated)
+- [ ] Download card images (large PNG, ~18k files)
+- [ ] Handle API pagination and rate limits
+- [ ] Build SQLite catalog with synthetic `illustration_id` (sha1 of name + artist)
+
+#### Future game sources
+- [ ] Yu-Gi-Oh — YGOPRODeck API or Konami official data
+- [ ] Flesh and Blood — Legend Story Studios official card data
+- [ ] Lorcana — Ravensburger official / community sources
+- [ ] Digimon, One Piece, Dragon Ball Super — community APIs
+
+### 14b. Gallery builder
+- [ ] **`pipeline/build_gallery.py`** — generic CLI
+  - Args: `--game magic --source scryfall --variant milo1 --date 2026-04`
+  - Reads local image cache built by the sync step
+  - Instantiates the appropriate CollectorVision embedder (hash or neural)
+  - Embeds all reference images in batches
+  - Writes `{game}-{source}-{variant}-{YYYY-MM}.npz` with full metadata
+    including `embedder_spec`, `ids_json`, `card_names`, `set_codes`
+- [ ] **Checkpointing** — resume interrupted builds (gallery for Magic = ~108k images,
+  several hours on CPU)
+- [ ] **Verification step** — after build, sample 100 random gallery entries and
+  confirm retrieval of known cards before uploading
+- [ ] **Size budget** — warn if a gallery exceeds 100 MB (check mobile implications)
+
+### 14c. Publishing
+- [ ] **`pipeline/upload_gallery.py`** — upload NPZ + update manifest on HF Datasets
+  - Requires `HUGGINGFACE_TOKEN` env var with write access to `CollectorVision/galleries`
+  - Atomically updates `manifest.json` after upload succeeds
+  - Archives the previous month's gallery (keep last 3 versions)
+- [ ] **Trigger bundled manifest PR** — after upload, open a PR against
+  CollectorVision repo to update `_BUNDLED_MANIFEST` in `manifest.py`
+- [ ] **Gallery changelog** — record count of new/changed/removed cards per release
+
+### 14d. Automation
+- [ ] **GitHub Actions — monthly refresh**
+  - Trigger: schedule (1st of month) + manual `workflow_dispatch`
+  - Steps: sync data → download new images → build galleries → verify → upload → PR
+  - Requires: HF token secret, sufficient Actions storage/compute (large runner or
+    self-hosted for GPU embedding)
+  - Estimated runtime: ~6 hours for Magic milo1 on a mid-range GPU
+- [ ] **Incremental mode** — on monthly runs, only re-embed cards whose source
+  image has changed (use ETag / mtime tracking)
+- [ ] **Failure alerting** — notify (GitHub issue or email) if monthly build fails
+
+### 14e. Separation of concerns checklist
+Things that must stay in CollectorVision-Pipeline (not in CollectorVision):
+- [ ] Any scraping or API-calling code for Scryfall, TCGplayer, etc.
+- [ ] SQLite card catalogs (source of truth for metadata during build)
+- [ ] Raw image storage and download management
+- [ ] `build_gallery.py` and `upload_gallery.py`
+- [ ] HF Datasets write credentials
+- [ ] Training scripts (those live in ccg_card_id for now)
+
+Things that must stay in CollectorVision (not in Pipeline):
+- [ ] Gallery NPZ format spec and `Gallery.load()`
+- [ ] `Manifest` class (read-only consumer of the manifest JSON)
+- [ ] All inference code (identify, embedders, detectors)
+- [ ] `_BUNDLED_MANIFEST` (updated via PR from Pipeline, not auto-committed)
+
+---
+
 ## Milestone summary
 
 | Milestone | Key items |
@@ -429,6 +516,7 @@ reducing privacy concerns. Requires model conversion work.
 | **M4 — Full gallery set** | magic milo1, pokemon phash16 + milo1 all live |
 | **M5 — PyPI v0.1.0** | CI green, tests pass, published to PyPI |
 | **M6 — Automated** | Monthly gallery refresh CI, dependabot, docs site |
+| **M6p — Pipeline v1** | CollectorVision-Pipeline repo; Scryfall + Pokémon sync; first galleries built and uploaded |
 | **M7 — Benchmark** | Public benchmark dataset on HF, eval harness, results in README |
 | **M8 — API server** | FastAPI server, Docker image on GHCR, HF Space demo live |
 | **M9 — Mobile (API)** | React Native + Flutter packages published, API-backed |
