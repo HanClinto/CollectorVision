@@ -4,145 +4,113 @@ Checklist for turning the scaffold into a shippable library.
 
 ---
 
-## 1. Core library (stubs → real code)
+## 1. Core library
 
-### 1a. identify()
-- [ ] Implement `identify()` in `collector_vision/identify.py`
-  - Load image (path or ndarray)
-  - Run detector (or skip if detector=None, treating full image as card)
-  - Dewarp card to fixed resolution
-  - Call `gallery.embedder.embed()` on the dewarped card
-  - Nearest-neighbour lookup in the gallery (cosine for floats, Hamming for hashes)
-  - Return `CardResult` (best match + alternatives)
-- [ ] Implement `identify_batch()` (batched detect + embed, single NN pass)
+### 1a. identify() ✅
+- [x] `Identifier.identify(*images)` with single-image and multi-frame voting
+- [x] Load/detect/dewarp/embed pipeline
+- [x] Per-frame `frame_results` returned when multiple images are passed
+- [x] Cosine and Hamming retrieval in `collector_vision/retrieval.py`
 
-### 1b. NeuralCornerDetector
-- [ ] Wire up `_load()` with the trained SimCC checkpoint
-  - Build / import the model architecture from the ccg_card_id corner detector
-  - Strip ArcFace / training heads; keep backbone + SimCC head
-  - Load state dict, set eval mode
-- [ ] Wire up `detect()` — preprocess → forward → decode SimCC heatmaps → normalised corners
-- [ ] Export a clean inference-only checkpoint (~10 MB target)
-- [ ] Place checkpoint at `collector_vision/weights/corner_detector.pt`
-- [ ] Update `collector_vision/weights/__init__.py` to expose `CORNER_DETECTOR` path
+### 1b. NeuralCornerDetector (Reggie) ✅
+- [x] ONNX-based inference via `onnxruntime` — no PyTorch at runtime
+- [x] SimCC sharpness gate (mean peak of 8 softmax distributions) instead of
+      unreliable presence logit
+- [x] Bundled as `collector_vision/weights/reggie.onnx` (8.2 MB, single file)
 
-### 1c. NeuralEmbedder (Milo)
-- [ ] Wire up `_load()` — backbone + linear projection, eval mode
-- [ ] Wire up `embed()` — resize → normalize → batched forward → L2 normalise → ndarray
-- [ ] Export inference-only checkpoint (~12 MB target; quantize INT8 if needed)
-- [ ] Place checkpoint at `collector_vision/weights/embedder.pt`
-- [ ] Update `collector_vision/weights/__init__.py` to expose `EMBEDDER` path
+### 1c. NeuralEmbedder (Milo) ✅
+- [x] ONNX-based inference via `onnxruntime`
+- [x] 128-d L2-normalised embeddings from 448×448 input
+- [x] Bundled as `collector_vision/weights/milo.onnx` (5.0 MB, single file)
 
-### 1d. CannyCornerDetector
-- [ ] Implement real contour-based card detection in `detectors/canny.py`
-  - Canny edges → findContours → largest quadrilateral → normalised corners
-  - Return DetectionResult with `found=False` if no valid quad found
+### 1d. CannyCornerDetector ✅
+- [x] Contour-based detection in `collector_vision/detectors/canny.py`
+- [x] Returns `DetectionResult(found=False)` when no valid quadrilateral found
 
-### 1e. Nearest-neighbour retrieval helper
-- [ ] Add `collector_vision/retrieval.py`
-  - `cosine_search(query_vec, gallery_embeddings)` → sorted (score, idx)
-  - `hamming_search(query_bits_u8, gallery_bits_u8)` → sorted (distance, idx)
-  - Used internally by `identify()`; not part of the public API
+### 1e. Retrieval helpers ✅
+- [x] `collector_vision/retrieval.py` — `cosine_search()` and `hamming_search()`
 
-### 1f. Metadata lookup (future module)
-`identify()` returns IDs only — fetching human-readable metadata is the
-caller's responsibility.  A thin lookup helper would be useful both here
-and in CollectorVision-Pipeline (which needs the same data to build galleries).
-Consider a `collector_vision.sources` subpackage:
+### 1f. CardResult — crop image (optional, per-call)
+- [ ] Add `include_crop: bool = False` parameter to `Identifier.identify()`
+  - When True, attach the dewarped card BGR image (or a JPEG bytes) to `CardResult`
+  - Useful for server responses, debugging, and the ScanBucket UI preview
+  - Return the intermediate `DetectionResult` as well (similar to how multi-image
+    calls return per-frame `frame_results`)
+  - Keep it optional and off by default — most library users don't need it
+
+### 1g. Metadata lookup (future module)
+`identify()` returns IDs only. A thin lookup helper is planned but not blocking v0.1.0:
 
 - [ ] `sources/scryfall.py` — `get(scryfall_id) -> dict` via Scryfall REST API,
-  with local SQLite cache (same shape as `card_lookup.py` in 07_web_scanner)
+  with local SQLite cache
 - [ ] `sources/tcgplayer.py` — `get(tcgplayer_id) -> dict` with price data
-- [ ] Shared caching layer — cache responses to disk, configurable TTL
-- [ ] This module is also needed by CollectorVision-Pipeline for building
-  gallery metadata; keep the interface identical so Pipeline can import it
-
-Not blocking v0.1.0 — callers can hit the Scryfall API directly for now.
 
 ---
 
-## 2. Model weights
+## 2. Model weights ✅
 
-- [ ] **Finalize corner detector checkpoint** from ccg_card_id training
-  - Pick best epoch (currently training, ~epoch 131–155)
-  - Strip optimizer / scheduler state; keep only model weights
-  - Verify inference on a sample image before bundling
-- [ ] **Finalize Milo embedding checkpoint**
-  - Current best: `mobilevit_xxs_ft_illustration_id+set_code_e15_128d` (v2light_img448_ph10 epoch 15)
-  - Strip optimizer state
-  - Target ≤ 12 MB (quantize if needed)
-- [ ] **Mirror both weights to HuggingFace Hub**
-  - Repo: `CollectorVision/milo` (model hub, not datasets)
-  - Files: `corner_detector.pt`, `embedder.pt`
-  - Include model card describing architecture, training data, license
-- [ ] **Bundle both weights in the PyPI package** (via `MANIFEST.in` + `package_data`)
-  - Verify `collector_vision/weights/*.pt` is included in the wheel
-  - Run `python -c "import collector_vision; print(collector_vision.weights.EMBEDDER)"` after install
+- [x] Corner detector (Reggie) — `reggie.onnx` (8.2 MB, merged from export)
+- [x] Embedder (Milo) — `milo.onnx` (5.0 MB, merged from export)
+- [x] Both are single-file ONNX, no paired `.data` file
+- [x] Bundled in `collector_vision/weights/`; `package_data` configured in `pyproject.toml`
+- [ ] Mirror both to HuggingFace Hub (`CollectorVision/models` or similar)
+  - Write model card: architecture, training data, input spec, license, accuracy table
+- [ ] Verify weights survive `python -m build` → wheel → fresh venv install
 
 ---
 
-## 3. Gallery format (CollectorVision's side of the contract)
+## 3. Gallery format
 
-CollectorVision is a *consumer* of gallery NPZ files — it does not build them.
-Gallery construction, data scraping, and publishing live in the companion project
-**CollectorVision-Pipeline** (see section 14). This section covers only what
-CollectorVision itself needs to know about the format.
+CollectorVision consumes gallery NPZ files — it does not build them.
+Gallery construction lives in **CollectorVision-Pipeline** (section 14).
 
-- [ ] **Document the NPZ format** in `collector_vision/gallery.py` module docstring
-  - All required keys (`embeddings`, `card_ids`, `ids_json`, `embedder_spec`, …)
-  - `embedder_spec` JSON schema with all supported `kind` values
-  - Versioning / forward-compatibility story (unknown keys must be ignored)
-- [ ] **Spec test** — `tests/test_gallery_format.py`
-  - Synthesize a minimal compliant NPZ and verify `Gallery.load()` round-trips cleanly
-  - Verify missing optional keys are handled gracefully (backward compatibility)
-- [ ] **Update bundled manifest** in `collector_vision/manifest.py` (`_BUNDLED_MANIFEST`)
-  once Pipeline has published the first real gallery files to HF Datasets
-- [ ] Confirm `Manifest.fetch()` → `Identifier(Game.MAGIC)` → `identify()` works end-to-end
-  against live HF Datasets files
+**Required NPZ keys:**
+
+| Key | Shape / type | Description |
+|---|---|---|
+| `embeddings` | (N, D) float32 or (N, B) uint8 | Embedding matrix |
+| `card_ids` | (N,) str | Primary key per row (e.g. Scryfall UUID) |
+| `ids_json` | (N,) str | JSON-encoded per-card ids dict |
+| `source` | scalar str | `"scryfall"`, `"tcgplayer"`, … |
+| `mode` | scalar str | `"embedding"` or `"hash"` |
+| `embedder_spec` | scalar str | JSON spec for reconstructing the embedder |
+
+- [ ] Document the NPZ format fully in `collector_vision/gallery.py` module docstring
+- [ ] `tests/test_gallery.py` — `Gallery.load()` round-trips a synthetic NPZ; missing
+      optional keys handled gracefully; `_merge()` rejects incompatible specs
+- [ ] Update `_BUNDLED_MANIFEST` in `manifest.py` once Pipeline publishes first galleries
+- [ ] Confirm `HFD` → `Gallery.load()` → `identify()` works end-to-end against live HF
 
 ---
 
 ## 4. HuggingFace setup
 
 - [ ] Create HF organization `CollectorVision`
-- [ ] Create HF Datasets repo `CollectorVision/galleries`
-  - Set license (AGPL-3.0 for derived embeddings; check Scryfall ToS re: derived works)
-  - README explaining the gallery NPZ format, embedder_spec, and how to use with the library
-  - Actual gallery uploads happen via CollectorVision-Pipeline (see section 14)
-- [ ] Create HF Hub repo `CollectorVision/milo`
-  - Write model card: architecture (MobileViT-XXS), training data (Scryfall),
-    input spec (448×448 RGB, L2-normalised 128-d output), license
-- [ ] Set repo visibility (public after initial galleries are uploaded)
-- [ ] Confirm `Manifest.fetch()` resolves and downloads correctly end-to-end
+- [ ] `CollectorVision/galleries` (Datasets repo) — README, gallery NPZ uploads via Pipeline
+- [ ] `CollectorVision/models` (Hub repo) — `reggie.onnx`, `milo.onnx`, model cards
+- [ ] Verify `HFD("CollectorVision/galleries", "magic-scryfall-milo1").resolve()` end-to-end
 
 ---
 
 ## 5. PyPI publishing
 
 ### 5a. pyproject.toml polish
-- [ ] Pin dependency lower bounds to tested minimum, not latest
-- [ ] Add `[project.urls]` — Homepage, Repository, Bug Tracker
-- [ ] Add `classifiers` — Development Status, Intended Audience, Topic, License,
+- [ ] `[project.urls]` — Homepage, Repository, Bug Tracker
+- [ ] `classifiers` — Development Status, Intended Audience, Topic, License,
       Programming Language
-- [ ] Add `readme = "README.md"` under `[project]`
-- [ ] Add `[project.optional-dependencies]`
-  - `cpu` — `torch` CPU-only variant instructions (document in README; not pip-installable)
-  - `hash` — only `Pillow`, `imagehash`, `scipy` (no torch dependency)
-  - `dev` — `pytest`, `ruff`, `build`, `twine`
-- [ ] Verify `python -m build` produces a clean sdist + wheel
+- [ ] `readme = "README.md"` under `[project]`
+- [ ] Add `python-multipart` to `[server]` extra (required by FastAPI file uploads)
+- [ ] Add `build`, `twine` to `[dev]` extra
+- [ ] Verify `python -m build` produces clean sdist + wheel
 
 ### 5b. First publish
-- [ ] Create PyPI account / org for CollectorVision
-- [ ] Publish to Test PyPI first: `twine upload --repository testpypi dist/*`
-- [ ] Smoke-test `pip install --index-url https://test.pypi.org/simple/ collectorvision`
-- [ ] Publish to PyPI: `twine upload dist/*`
-- [ ] Verify `pip install collectorvision` works from scratch in a fresh venv
+- [ ] Create PyPI account / org
+- [ ] Publish to Test PyPI first
+- [ ] Smoke-test from scratch in a fresh venv
+- [ ] Publish to PyPI
 
 ### 5c. GitHub Actions — publish on tag
-- [ ] `.github/workflows/publish.yml`
-  - Trigger: push of `v*` tags
-  - Steps: checkout → build → twine upload (using PyPI trusted publisher / OIDC)
-  - Gate: only publish if tests pass
+- [ ] `.github/workflows/publish.yml` — trigger on `v*` tags, build + twine upload
 
 ---
 
@@ -152,382 +120,186 @@ CollectorVision itself needs to know about the format.
 - [ ] `.github/workflows/ci.yml`
   - Trigger: push to main, pull requests
   - Matrix: Python 3.10, 3.11, 3.12
-  - Steps: install deps (no torch GPU) → ruff → pytest
+  - Steps: install deps → ruff → pytest
 
-### 6b. Monthly gallery refresh
-- [ ] `.github/workflows/gallery_refresh.yml`
-  - Trigger: schedule (1st of each month) + manual `workflow_dispatch`
-  - Steps:
-    - Sync Scryfall `default_cards.json`
-    - Sync Pokémon TCG API
-    - Run `galleries/build_gallery.py` for each game×variant
-    - Upload resulting NPZ files to HF Datasets
-    - Update `manifest.json` on HF Datasets
-    - Open a PR to update `_BUNDLED_MANIFEST` in `manifest.py`
-  - Note: requires HF token secret + secrets management
-
-### 6c. Dependabot / renovate
-- [ ] Enable Dependabot for `pyproject.toml` dependencies
-- [ ] Enable GitHub security advisories / Dependabot alerts
+### 6b. Dependabot
+- [ ] Enable Dependabot for `pyproject.toml`
+- [ ] Enable GitHub security advisories
 
 ---
 
 ## 7. Testing
 
-### 7a. Unit tests (`tests/`)
-- [ ] `test_games.py` — `parse_game()` happy + error paths
-- [ ] `test_manifest.py` — bundled manifest, `resolve()`, error on unknown game/variant
-- [ ] `test_gallery.py` — `Gallery.load()` with synthetic NPZ, `_merge()`,
-      incompatible spec rejection
-- [ ] `test_hash_embedder.py` — phash, dhash, marr_hildreth on a 1×1 test image
-- [ ] `test_fixed_detector.py` — FixedCornerDetector returns supplied corners as-is
+### 7a. Unit tests
+- [ ] `test_hfd.py` — mock manifest; stale/fresh cache; `cache_refresh=None`; eviction
+- [ ] `test_games.py` — `parse_game()` happy + error paths; enum values
+- [ ] `test_gallery.py` — synthetic NPZ load, `_merge()`, incompatible spec rejection
+- [ ] `test_retrieval.py` — cosine and hamming search correctness + top-k ordering
 - [ ] `test_canny_detector.py` — CannyCornerDetector on a synthetic card image
-- [ ] `test_identify_stubs.py` — verify NotImplementedError raised cleanly
-      (to be flipped to real tests once identify() is implemented)
 
 ### 7b. Integration tests
 - [ ] `tests/integration/test_identify.py`
-  - Requires a small bundled test card image + synthetic gallery NPZ
-  - End-to-end: `Identifier(Game.MAGIC).identify(img)` returns the correct card
-  - Run only when weights are present (`pytest -m integration`)
+  - Synthetic gallery NPZ + test card image (small, checked in)
+  - `Identifier("test_gallery.npz").identify("test_card.jpg")` returns correct ID
+  - Multi-image voting with `frame_results`
+  - `include_crop=True` returns a crop image
+  - Gated by `pytest -m integration` (requires bundled weights)
 
 ### 7c. Smoke test (post-install)
 - [ ] `tests/smoke/test_install.py`
-  - `import collector_vision as cvg` — imports without error
+  - `import collector_vision as cvg` — no error
   - `cvg.__version__` is a string
-  - `cvg.Embedding` and `cvg.Game` enums are importable
-  - No-GPU, no-network, no weights required
+  - `cvg.Game.MAGIC` accessible
+  - `cvg.HFD` callable
+  - `cvg.weights.check()` returns expected keys
 
 ---
 
 ## 8. Documentation
 
-- [ ] **API reference** — add/complete docstrings on all public classes and functions
-- [ ] **Quickstart tutorial** in README (already started; expand with images/outputs)
-- [ ] **How-to: add a new game** — gallery naming, source adapter, manifest entry
-- [ ] **How-to: train a custom embedder** — points to ccg_card_id training scripts
-- [ ] **How-to: build a gallery** — run `build_gallery.py`, upload to HF
-- [ ] **CONTRIBUTING.md** — dev setup, test commands, PR process
-- [ ] **CHANGELOG.md** — start at 0.1.0.dev0, commit-linked
-- [ ] Consider hosting generated API docs on ReadTheDocs or GitHub Pages
-      (Sphinx + autodoc, or mkdocs-material)
+- [ ] Expand README quickstart with real output examples
+- [ ] API reference — docstrings on all public classes
+- [ ] CONTRIBUTING.md — dev setup, test commands, PR process
+- [ ] CHANGELOG.md — start at 0.1.0.dev0
+- [ ] How-to: build a gallery (points to Pipeline)
+- [ ] Consider ReadTheDocs or GitHub Pages
 
 ---
 
 ## 9. Legal / licensing
 
-- [ ] Add contact details to COMMERCIAL_LICENSE.md once email / form is ready
-- [ ] Add SPDX license header comment to each Python source file
-  (`# SPDX-License-Identifier: AGPL-3.0-or-later`)
-- [ ] Decide on gallery data license (gallery NPZs contain embeddings of
-  Scryfall images — check Scryfall ToS re: derived works)
-- [ ] Add `LICENSE` file (full AGPL-3.0 text) if not already present
-- [ ] Verify HF Datasets repo license is set correctly
+- [ ] Add contact details to COMMERCIAL_LICENSE.md
+- [ ] SPDX license headers in each Python source file
+- [ ] Decide on gallery data license (check Scryfall ToS re: derived works)
+- [ ] Verify `LICENSE` file (full AGPL-3.0 text) exists
 
 ---
 
 ## 10. Polish and UX
 
-- [ ] **Progress bars** — use `tqdm` during gallery downloads (optional dependency)
-- [ ] **Logging** — replace `print()` in `_download()` with `logging.getLogger(__name__)`
-- [ ] **Better errors** — if gallery download fails, suggest `offline=True` and cache path
-- [ ] **Version check** — warn if installed package is older than the manifest version
-  (gallery format may have changed)
-- [ ] **Device string validation** — friendly error if user passes `device="gpu"`
-- [ ] **Type stubs / py.typed marker** — add `collector_vision/py.typed` (PEP 561) so
-  type checkers know the package ships inline types
+- [ ] Progress bars in `hfd.py` downloads (optional `tqdm`)
+- [ ] Replace `print()` in `hfd.py` with `logging`
+- [ ] Better error if `HFD` download fails with no local cache
+- [ ] `collector_vision/py.typed` (PEP 561 type stubs marker)
 
 ---
 
 ## 11. Evaluation and benchmarks
 
-The goal: reproducible, public numbers so users can see what accuracy to expect
-and compare variants against each other and against alternatives.
-
 ### 11a. Benchmark dataset
-- [ ] **Define and publish a small public benchmark corpus**
-  - Target: ~500–1000 card images covering a range of capture conditions
-    (phone camera, flatbed scan, video frame, various lighting/backgrounds)
-  - Split by capture type: clean scan / phone clear-bg / phone cluttered-bg / video
-  - Cover multiple card games (Magic, Pokémon at minimum)
-  - Include ground-truth card IDs in a manifest CSV
-  - Upload to HF Datasets as `CollectorVision/benchmark-v1`
-  - License images carefully (CC-BY or original photographer consent)
-- [ ] **Define evaluation metrics**
-  - Top-1 and Top-3 artwork accuracy (matches illustration_id)
-  - Top-1 and Top-3 edition accuracy (matches exact card_id / printing)
-  - Per-capture-condition breakdowns
-  - Query latency (ms/card, CPU and GPU)
-  - Gallery size (bytes/card)
+- [ ] ~500–1000 card images (varied: phone, flatbed, video, backgrounds)
+  uploaded to `CollectorVision/benchmark-v1` on HF Datasets
+- [ ] Ground-truth manifest CSV (`scryfall_id` or `pokemontcg_id` per image)
 
 ### 11b. Eval harness
-- [ ] **`eval/benchmark.py`** — standalone CLI evaluation script
-  - Downloads benchmark dataset from HF if not cached
-  - Accepts `--gallery magic` or `--gallery-file path.npz`
-  - Accepts `--embedding phash milo` (sweep)
-  - Runs `identify()` on each benchmark image
-  - Reports per-condition and overall accuracy + latency table
-  - Writes `results.csv` and `results.md`
-- [ ] **Results reproducibility** — pin gallery version (YYYY-MM) in results so
-  comparisons are against the same reference set
-- [ ] **Baseline comparisons to include**
-  - `phash16` (hash, no GPU)
-  - `milo1` (neural, GPU recommended)
-  - Canny detector vs neural detector (ablation on detection quality)
-  - Optionally: Ximilar / other commercial APIs as reference points
-    (require user to supply their own API key)
+- [ ] `eval/benchmark.py` — CLI; runs `Identifier.identify()` on each image;
+  reports top-1/top-3 accuracy + latency; writes `results.csv`
 
 ### 11c. Published results
-- [ ] **Results table in README** — top-1 edition accuracy by Embedding × condition
-  - Keep updated with each gallery release
-  - Mark GPU/CPU requirement per Embedding
-- [ ] **HuggingFace Model Card** (`CollectorVision/milo`) — embed results table
-- [ ] **HuggingFace Space — live demo**
-  - Gradio app: upload an image → shows detected corners → identified card + confidence
-  - Dropdown to select Game and Embedding
-  - Hosted on HF Spaces (free tier for initial launch)
-  - Link from README and PyPI page
-- [ ] **Versioned results archive** in `CollectorVision/galleries` dataset repo
-  - `eval_results/benchmark-v1/{embedding}-{YYYY-MM}.json` for each gallery release
+- [ ] Results table in README
+- [ ] Embed in Milo model card on HF Hub
+- [ ] HF Space — live demo (upload image → identified card)
 
 ---
 
 ## 12. API server
 
-> **Reference implementation:** `ccg_card_id/07_web_scanner` is a working
-> FastAPI server with an Ximilar-compatible API, browser client, SSL support,
-> and ScanBucket deduplication. The CollectorVision server is a port of this,
-> replacing ccg_card_id's data paths with `Identifier` / `Gallery.for_game()`.
-> Do not redesign the API shape — adopt it wholesale.
+> Reference: `ccg_card_id/07_web_scanner`. A minimal version is already in
+> `examples/server/server.py`. The production port below adds multi-gallery,
+> browser UI, and Docker.
 
-### 12a. API format (Ximilar-compatible — keep as-is from web_scanner)
-
+### 12a. API format (Ximilar-compatible)
 ```
 POST /v1/identify
-  body: {"records": [{"_base64": "...", "detector": "canny", "embedding": "phash"}]}
-  response: {"records": [{...result...}], "_status": {"code": 200, "text": "OK"}}
+  body:     {"records": [{"_base64": "...", "gallery": "magic-scryfall-milo1"}]}
+  response: {"records": [{...}], "_status": {"code": 200, "text": "OK"}}
 
 GET /v1/health
-GET /v1/detectors
-GET /v1/embeddings   (replaces web_scanner's /v1/identifiers)
+GET /v1/galleries    — lists loaded gallery names
 GET /v1/defaults
-GET /v1/memory
 ```
 
-Benefits of Ximilar compatibility: client code is swappable between
-CollectorVision and Ximilar Visual AI without modification.
-
-### 12b. Port from web_scanner
-- [ ] Copy `07_web_scanner/server/app.py` → `server/app.py`
-- [ ] Copy `07_web_scanner/client/` → `server/client/` (browser UI + ScanBucket)
-- [ ] Replace `GallerySearchManager` (disk-scan of ccg_card_id paths) with
-  `Identifier(game, embedding=embedding)` — gallery downloads from HF automatically
-- [ ] Replace `CardLookup` (SQLite) with metadata already in the gallery NPZ
-  (`card_names`, `set_codes`, `ids_json`)
-  - Price data: omit for now (YAGNI until there's a plan for keeping it fresh)
-- [ ] Remove `sys.path` hacks and `ccg_card_id.config` dependency
-- [ ] Rename `/v1/identifiers` → `/v1/embeddings` to match enum rename
-- [ ] Keep SSL self-signed cert generation (required for LAN camera access)
+### 12b. Full server port
+- [ ] Multi-gallery support — dict of `name → Identifier`
+- [ ] Copy browser UI + ScanBucket client from `07_web_scanner/client/`
+- [ ] SSL self-signed cert generation (LAN camera access)
+- [ ] `collectorvision-server` CLI entry point (`pyproject.toml`)
 
 ### 12c. Packaging
-- [ ] **`pyproject.toml` extras** — `pip install collectorvision[server]`
-  adds `fastapi`, `uvicorn`, `python-multipart`
-- [ ] **Entry point** — `collectorvision-server` CLI
-  - `collectorvision-server --game magic --embedding phash --port 8080`
-- [ ] **Docker image** — `Dockerfile` in `server/`
-- [ ] **Publish to GHCR** on `v*` tags via GitHub Actions
+- [ ] `pip install collectorvision[server]`
+- [ ] Docker image; publish to GHCR on `v*` tags
 
 ### 12d. Hosted demo
-- [ ] **HuggingFace Space** (`CollectorVision/demo`) — Gradio or the browser
-  client pointing at a hosted instance; rate-limited
+- [ ] HF Space (`CollectorVision/demo`)
 
 ---
 
 ## 13. Mobile
 
-Two strategies, in ascending complexity. Start with the API approach; add
-on-device later as demand warrants.
+### Strategy A — API-backed (ship now)
+- [ ] Document REST API for mobile developers
+- [ ] React Native client package (npm)
+- [ ] Flutter client package (pub.dev)
+- [ ] Swift / iOS — URLSession wrapper, Swift Package Manager
+- [ ] Kotlin / Android — OkHttp wrapper, Maven
 
-### Strategy A — API-backed (ship now, works immediately)
+### Strategy B — On-device
 
-- [ ] **Document the REST API** clearly so mobile developers can integrate
-  against a self-hosted or hosted instance
-- [ ] **Reference mobile clients** (thin wrappers, not full apps)
-  - [ ] **React Native** — `packages/react-native-collectorvision/`
-    - `identify(imageUri, options)` → Promise<CardResult>
-    - Handles multipart upload to configured server URL
-    - Typed with TypeScript definitions
-    - Published to npm as `react-native-collectorvision`
-  - [ ] **Flutter** — `packages/flutter_collectorvision/`
-    - `CollectorVision.identify(File image, {String game})` → Future<CardResult>
-    - Published to pub.dev as `collectorvision`
-  - [ ] **Swift / iOS native** — `CollectorVisionClient.swift`
-    - Thin URLSession wrapper, available as a Swift package
-  - [ ] **Kotlin / Android native** — thin OkHttp wrapper, published to Maven
-
-### Strategy B — On-device inference (future, heavier lift)
-
-On-device removes the server dependency and latency, enabling offline use and
-reducing privacy concerns. Requires model conversion work.
-
-#### B1. ONNX export (prerequisite for both platforms)
-- [ ] **Export corner detector to ONNX**
-  - `torch.onnx.export(model, dummy_input, "corner_detector.onnx", opset_version=17)`
-  - Verify output matches PyTorch reference on a set of test images (< 1% diff)
-  - Run `onnxsim` to simplify the graph
-  - Target: < 10 MB after simplification
-- [ ] **Export Milo embedder to ONNX**
-  - Same process; verify L2-normalised output matches reference
-  - Target: < 15 MB
-- [ ] **Upload ONNX files to HF Hub** (`CollectorVision/milo`) alongside `.pt`
-- [ ] **Hash embedder** — no ONNX needed; port DCT/wavelet logic natively per platform
+#### B1. ONNX models ✅
+- [x] Reggie exported to ONNX (`reggie.onnx`, 8.2 MB) and verified
+- [x] Milo exported to ONNX (`milo.onnx`, 5.0 MB) and verified
+- [ ] Upload to HF Hub alongside future `.pt` reference files
 
 #### B2. Android
-- [ ] **ONNX Runtime for Android** — add to `android/` module
-  - `implementation("com.microsoft.onnxruntime:onnxruntime-android:...")`
-  - Preprocess: Bitmap → float32 tensor, normalise
-  - Run corner detector → decode SimCC → warp ROI
-  - Run embedder → L2 normalise → cosine search against bundled gallery
-- [ ] **Bundle gallery** — include phash16 gallery NPZ in assets for offline use
-  (milo1 gallery is too large; phash16 is ~3 MB for Magic)
-- [ ] **Android Archive (AAR)** — publishable library
-  - Publish to Maven Central or GitHub Packages
-  - Artifact: `com.collectorvision:collectorvision-android`
-- [ ] **Sample Android app** — demonstrates camera capture → identify → display result
+- [ ] ONNX Runtime for Android; Android Archive (AAR) on Maven Central
+- [ ] Bundle phash16 gallery (~3 MB) for offline; milo1 gallery streamed on demand
 
 #### B3. iOS
-- [ ] **CoreML conversion** (preferred over ONNX Runtime on iOS for ANE access)
-  - `coremltools.convert(onnx_model, ...)` → `CornerDetector.mlpackage`
-  - `coremltools.convert(...)` → `MiloEmbedder.mlpackage`
-  - Verify outputs match ONNX reference
-- [ ] **Swift package** — `CollectorVisionKit`
-  - Wraps CoreML model inference
-  - `CollectorVisionKit.identify(pixelBuffer:) async throws -> CardResult`
-  - Published via Swift Package Manager (GitHub URL)
-- [ ] **XCFramework** — for CocoaPods / Carthage users
-- [ ] **Sample iOS app** — AVFoundation camera → identify → display result
+- [ ] CoreML conversion via `coremltools`; Swift package `CollectorVisionKit`
 
-#### B4. Cross-platform (optional, higher reach)
-- [ ] **React Native on-device** using ONNX Runtime React Native
-  - `ort-react-native` package for model inference
-  - Single JS API for both platforms
-- [ ] **Flutter on-device** using `onnxruntime` Flutter package
-- [ ] **Capacitor / Ionic plugin** for web-app-style mobile apps
-
-#### B5. On-device gallery considerations
-- [ ] **Gallery format for mobile** — the standard NPZ works but may be slow to load
-  - Consider a flat binary format: header (N, D, dtype) + raw matrix
-  - Or SQLite with a BLOB column (easy random access)
-- [ ] **Gallery size tiers**
-  - phash16 Magic: ~3.4 MB — fine to bundle in app
-  - milo1 Magic: ~54 MB — too large; stream on first use, cache locally
-  - On-device default should be phash16 unless device has Neural Engine / GPU
-- [ ] **Incremental gallery updates** — download only new/changed cards between
-  gallery versions rather than re-downloading the full NPZ
+#### B4. On-device gallery considerations
+- [ ] Gallery size tiers: phash16 ~3 MB (bundleable), milo1 ~54 MB (stream on first use)
+- [ ] Consider flat binary format for faster mobile load vs NPZ
 
 ---
 
 ## 14. CollectorVision-Pipeline (separate project)
 
-> **This work belongs in a separate repository**, not here. Most CollectorVision
-> users never need it — it is maintainer tooling for keeping galleries up to date.
-> Tracked here only for cross-project visibility.
->
 > Suggested repo: `github.com/HanClinto/CollectorVision-Pipeline`
-> Suggested PyPI package: `cvg-pipeline` (dev/maintainer install only, not end-user)
-
-The Pipeline project is responsible for the full data → gallery lifecycle:
-- Scraping card data from upstream APIs
-- Downloading reference images
-- Building and publishing gallery NPZ files
-- Updating the manifest on HF Datasets
-- Automated monthly refresh
 
 ### 14a. Data sources
-
-#### Magic — Scryfall
-- [ ] Sync `default_cards.json` (English printings, ~80k cards)
-- [ ] Sync `all_cards.json` (all languages, ~517k cards) — optional, for multilingual galleries
-- [ ] Download reference card images (PNG fronts, ~108k files, ~60 GB)
-- [ ] Store locally in a structured cache; track ETags for incremental sync
-- [ ] Respect Scryfall rate limits and bulk-data guidelines
-
-#### Pokémon — TCGplayer / Pokémon TCG API
-- [ ] Sync all-cards JSON from Pokémon TCG API (~18k cards, paginated)
-- [ ] Download card images (large PNG, ~18k files)
-- [ ] Handle API pagination and rate limits
-- [ ] Build SQLite catalog with synthetic `illustration_id` (sha1 of name + artist)
-
-#### Future game sources
-- [ ] Yu-Gi-Oh — YGOPRODeck API or Konami official data
-- [ ] Flesh and Blood — Legend Story Studios official card data
-- [ ] Lorcana — Ravensburger official / community sources
-- [ ] Digimon, One Piece, Dragon Ball Super — community APIs
+- [ ] Scryfall — sync `default_cards.json`, download PNGs (~108k)
+- [ ] Pokémon TCG API — sync all cards, download images
+- [ ] Future: Yu-Gi-Oh, Flesh and Blood, Lorcana, Digimon, One Piece, DBS
 
 ### 14b. Gallery builder
-- [ ] **`pipeline/build_gallery.py`** — generic CLI
-  - Args: `--game magic --source scryfall --embedding milo1 --date 2026-04`
-  - Reads local image cache built by the sync step
-  - Instantiates the appropriate CollectorVision embedder (hash or neural)
-  - Embeds all reference images in batches
-  - Writes `{game}-{source}-{algo}-{YYYY-MM}.npz` with full metadata
-    including `embedder_spec`, `ids_json`, `card_names`, `set_codes`
-- [ ] **Checkpointing** — resume interrupted builds (gallery for Magic = ~108k images,
-  several hours on CPU)
-- [ ] **Verification step** — after build, sample 100 random gallery entries and
-  confirm retrieval of known cards before uploading
-- [ ] **Size budget** — warn if a gallery exceeds 100 MB (check mobile implications)
+- [ ] `pipeline/build_gallery.py` — writes `{game}-{source}-{algo}-{YYYY-MM}.npz`
+  with keys: `embeddings`, `card_ids`, `ids_json`, `source`, `mode`, `embedder_spec`
 
 ### 14c. Publishing
-- [ ] **`pipeline/upload_gallery.py`** — upload NPZ + update manifest on HF Datasets
-  - Requires `HUGGINGFACE_TOKEN` env var with write access to `CollectorVision/galleries`
-  - Atomically updates `manifest.json` after upload succeeds
-  - Archives the previous month's gallery (keep last 3 versions)
-- [ ] **Trigger bundled manifest PR** — after upload, open a PR against
-  CollectorVision repo to update `_BUNDLED_MANIFEST` in `manifest.py`
-- [ ] **Gallery changelog** — record count of new/changed/removed cards per release
+- [ ] `pipeline/upload_gallery.py` — upload NPZ, update `manifest.json` on HF Datasets
+- [ ] Open PR against CollectorVision to update `_BUNDLED_MANIFEST` after upload
 
 ### 14d. Automation
-- [ ] **GitHub Actions — monthly refresh**
-  - Trigger: schedule (1st of month) + manual `workflow_dispatch`
-  - Steps: sync data → download new images → build galleries → verify → upload → PR
-  - Requires: HF token secret, sufficient Actions storage/compute (large runner or
-    self-hosted for GPU embedding)
-  - Estimated runtime: ~6 hours for Magic milo1 on a mid-range GPU
-- [ ] **Incremental mode** — on monthly runs, only re-embed cards whose source
-  image has changed (use ETag / mtime tracking)
-- [ ] **Failure alerting** — notify (GitHub issue or email) if monthly build fails
-
-### 14e. Separation of concerns checklist
-Things that must stay in CollectorVision-Pipeline (not in CollectorVision):
-- [ ] Any scraping or API-calling code for Scryfall, TCGplayer, etc.
-- [ ] SQLite card catalogs (source of truth for metadata during build)
-- [ ] Raw image storage and download management
-- [ ] `build_gallery.py` and `upload_gallery.py`
-- [ ] HF Datasets write credentials
-- [ ] Training scripts (those live in ccg_card_id for now)
-
-Things that must stay in CollectorVision (not in Pipeline):
-- [ ] Gallery NPZ format spec and `Gallery.load()`
-- [ ] `Manifest` class (read-only consumer of the manifest JSON)
-- [ ] All inference code (identify, embedders, detectors)
-- [ ] `_BUNDLED_MANIFEST` (updated via PR from Pipeline, not auto-committed)
+- [ ] GitHub Actions monthly refresh
+- [ ] Incremental mode (only re-embed changed images)
 
 ---
 
 ## Milestone summary
 
-| Milestone | Key items |
-|---|---|
-| **M0 — Code complete** | identify() + batch, Canny detector, retrieval helper |
-| **M1 — Weights finalized** | Corner + embedder checkpoints exported, bundled, mirrored to HF Hub |
-| **M2 — First gallery** | magic-scryfall-phash16 built + uploaded + downloadable |
-| **M3 — End-to-end works** | `pip install`, `Identifier(Game.MAGIC).identify()` returns a card |
-| **M4 — Full gallery set** | magic milo1, pokemon phash16 + milo1 all live |
-| **M5 — PyPI v0.1.0** | CI green, tests pass, published to PyPI |
-| **M6 — Automated** | Monthly gallery refresh CI, dependabot, docs site |
-| **M6p — Pipeline v1** | CollectorVision-Pipeline repo; Scryfall + Pokémon sync; first galleries built and uploaded |
-| **M7 — Benchmark** | Public benchmark dataset on HF, eval harness, results in README |
-| **M8 — API server** | FastAPI server, Docker image on GHCR, HF Space demo live |
-| **M9 — Mobile (API)** | React Native + Flutter packages published, API-backed |
-| **M10 — Mobile (on-device)** | ONNX export, Android AAR, iOS Swift package |
+| Milestone | Status | Key items |
+|---|---|---|
+| **M0 — Code complete** | ✅ | `identify(*images)`, Reggie + Milo wired, retrieval, Canny |
+| **M1 — Weights finalized** | ✅ | `reggie.onnx` + `milo.onnx` bundled; single-file, clean names |
+| **M1.5 — Examples** | ✅ | `examples/identify_image.py`, `examples/server/` |
+| **M2 — First gallery** | ⬜ | `magic-scryfall-milo1` built in Pipeline, uploaded, `HFD` resolves it |
+| **M3 — End-to-end works** | ⬜ | `pip install`, `Identifier(HFD(...)).identify("photo.jpg")` returns IDs |
+| **M4 — Full gallery set** | ⬜ | Magic + Pokémon milo1 + phash16 galleries live |
+| **M5 — PyPI v0.1.0** | ⬜ | CI green, tests pass, published to PyPI |
+| **M6 — Automated** | ⬜ | Dependabot, docs site, CHANGELOG |
+| **M6p — Pipeline v1** | ⬜ | CollectorVision-Pipeline repo; first galleries built and published |
+| **M7 — Benchmark** | ⬜ | Public benchmark on HF, eval harness, results in README |
+| **M8 — API server** | ⬜ | Full web_scanner port, Docker, HF Space demo |
+| **M9 — Mobile (API)** | ⬜ | React Native + Flutter packages |
+| **M10 — Mobile (on-device)** | ⬜ | Android AAR, iOS Swift package |

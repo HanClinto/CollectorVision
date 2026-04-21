@@ -1,35 +1,30 @@
 """Bundled model weights — resolved at import time to absolute paths.
 
-Corner detector codename: Reggie
-  MobileViT-XXS + SimCC, trained on CCG card corners, 384×384 input.
+Both models are single-file ONNX — no paired .data file required.
 
-Embedder codename: Milo
-  MobileViT-XXS + ArcFace, multi-task (illustration_id + set_code), 448×448 input.
-  Produces L2-normalised 128-d embeddings.
+reggie.onnx  (8.2 MB) — Reggie, corner detector
+    MobileViT-XXS + SimCC, trained on CCG card corners.
+    Input:   (1, 3, 384, 384) float32, ImageNet-normalised
+    Outputs: corners (1, 8)    — normalised [0,1] TL/TR/BR/BL x0,y0…x3,y3
+             presence (1,)     — raw card-presence logit (unreliable; use sharpness)
+             sharpness (1,)    — mean peak of 8 SimCC softmax distributions
 
-Both models use ONNX external data format: the .onnx file contains the graph;
-the .onnx.data file contains the weight tensors.  They must remain in the same
-directory and the .onnx file references its .data file by its exact filename.
+milo.onnx  (5.0 MB) — Milo, card embedder
+    MobileViT-XXS + ArcFace, multi-task (illustration_id + set_code), epoch 15.
+    Input:  (1, 3, 448, 448) float32, ImageNet-normalised
+    Output: embedding (1, 128) float32, L2-normalised
 """
 from pathlib import Path
 
 _WEIGHTS_DIR = Path(__file__).parent
 
-# Reggie — corner detector (codename; the file keeps its training-run name)
-CORNER_DETECTOR = (
-    _WEIGHTS_DIR / "detector_mvit_simcc_lc5_img384_ph10_seedin_blr10_fz2_e45.onnx"
-)
-
-# Milo — card embedder (codename)
-EMBEDDER = (
-    _WEIGHTS_DIR / "identifier_mobilevit_xxs_multitask_illustration_id"
-    "+set_code_shared_128d+128d_mvitxxs_shared2h_arcface_v2light_img448_ph10_e15.onnx"
-)
+CORNER_DETECTOR = _WEIGHTS_DIR / "reggie.onnx"   # Reggie
+EMBEDDER        = _WEIGHTS_DIR / "milo.onnx"     # Milo
 
 
 def check() -> dict[str, bool]:
     """Return which bundled weight files are present."""
     return {
         "reggie (corner_detector)": CORNER_DETECTOR.exists(),
-        "milo (embedder)": EMBEDDER.exists(),
+        "milo (embedder)":          EMBEDDER.exists(),
     }
