@@ -19,6 +19,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from collector_vision.interfaces import Embedder
+    from collector_vision.games import Game
 
 
 # Gallery NPZ keys written by the gallery builder
@@ -114,6 +115,101 @@ class Gallery:
         """Stable algorithm identifier, e.g. 'phash_16' or 'neural_e15'."""
         return self.embedder_spec.get("algo_key")
 
+    @classmethod
+    def for_game(
+        cls,
+        game: "str | Game",
+        variant: str | None = None,
+        cache_dir: "Path | None" = None,
+        offline: bool = False,
+    ) -> "Gallery":
+        """Load the latest published gallery for a single game.
+
+        Parameters
+        ----------
+        game:
+            Game identifier, e.g. ``"magic"``, ``"pokemon"``, or a
+            ``Game`` enum value.
+        variant:
+            Model variant override, e.g. ``"phash16"``.  Defaults to the
+            manifest's ``default_variant`` (currently ``"milo1"``).
+        cache_dir:
+            Local directory for downloaded galleries.  Defaults to
+            ``~/.cache/collectorvision/``.
+        offline:
+            If True, never make network calls — use only locally cached
+            files.  Raises if the gallery is not cached.
+        """
+        from collector_vision.games import parse_game
+        from collector_vision.manifest import Manifest, _default_cache_dir
+
+        game = parse_game(str(game)) if not isinstance(game, Game) else game
+        cache_dir = cache_dir or _default_cache_dir()
+        manifest = Manifest.bundled() if offline else Manifest.fetch(cache_dir)
+
+        filename = manifest.resolve(game, variant)
+        local_path = cache_dir / filename
+
+        if not local_path.exists():
+            if offline:
+                raise FileNotFoundError(
+                    f"Gallery not cached locally: {local_path}\n"
+                    "Run without offline=True to download it."
+                )
+            _download(manifest.url_for(game, variant), local_path)
+
+        return cls.load(local_path)
+
+    @classmethod
+    def for_games(
+        cls,
+        *games: "str | Game",
+        variant: str | None = None,
+        cache_dir: "Path | None" = None,
+        offline: bool = False,
+    ) -> "Gallery":
+        """Load and merge galleries for multiple games.
+
+        All games must use the same variant (and therefore the same embedder)
+        so that query embeddings are compatible with the merged gallery.
+        Raises ``ValueError`` if the loaded galleries have incompatible
+        embedder specs.
+
+        Example::
+
+            gallery = Gallery.for_games("magic", "pokemon", "yugioh")
+        """
+        loaded = [
+            cls.for_game(g, variant=variant, cache_dir=cache_dir, offline=offline)
+            for g in games
+        ]
+        if len(loaded) == 1:
+            return loaded[0]
+        return cls._merge(loaded)
+
+    @classmethod
+    def _merge(cls, galleries: "list[Gallery]") -> "Gallery":
+        """Concatenate multiple compatible galleries into one."""
+        # Validate embedder compatibility
+        ref_spec = galleries[0].embedder_spec
+        for g in galleries[1:]:
+            if g.embedder_spec != ref_spec:
+                raise ValueError(
+                    f"Cannot merge galleries with different embedder specs:\n"
+                    f"  {galleries[0].source}: {ref_spec}\n"
+                    f"  {g.source}: {g.embedder_spec}"
+                )
+        return cls(
+            embeddings=np.concatenate([g.embeddings for g in galleries], axis=0),
+            card_ids=sum((g.card_ids for g in galleries), []),
+            ids=sum((g.ids for g in galleries), []),
+            card_names=sum((g.card_names for g in galleries), []),
+            set_codes=sum((g.set_codes for g in galleries), []),
+            source="+".join(g.source for g in galleries),
+            mode=galleries[0].mode,
+            embedder_spec=ref_spec,
+        )
+
     def __len__(self) -> int:
         return len(self.card_ids)
 
@@ -122,6 +218,22 @@ class Gallery:
             f"Gallery(source={self.source!r}, mode={self.mode!r}, "
             f"n={len(self)}, algo={self.algo_key!r})"
         )
+
+
+def _download(url: str, dest: Path) -> None:
+    """Download a file from *url* to *dest* with a progress indicator."""
+    import urllib.request
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".tmp")
+    try:
+        print(f"Downloading {dest.name} ...")
+        urllib.request.urlretrieve(url, tmp)
+        tmp.rename(dest)
+        print(f"  saved to {dest}")
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 # ---------------------------------------------------------------------------

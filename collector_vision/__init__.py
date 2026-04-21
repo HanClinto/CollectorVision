@@ -2,6 +2,7 @@
 
 from collector_vision.identify import identify, identify_batch
 from collector_vision.gallery import Gallery
+from collector_vision.games import Game
 
-__all__ = ["identify", "identify_batch", "Gallery"]
+__all__ = ["identify", "identify_batch", "Gallery", "Game"]
 __version__ = "0.1.0.dev0"
