@@ -7,21 +7,39 @@ from typing import Any
 
 @dataclass
 class CardResult:
-    """Identification result from any catalog source.
+    """Identification result from a card gallery lookup.
 
-    Fields common to all sources are always populated.  Source-specific IDs
-    (scryfall_id, tcgplayer_product_id, …) are set only when the gallery was
-    built from that source.
+    ``ids`` is an open-ended mapping from key to value, populated with
+    whatever identifiers the gallery was built from.  Well-known keys:
+
+        scryfall_id           — Scryfall UUID
+        oracle_id             — Scryfall oracle UUID (groups all printings of
+                                the same card text)
+        illustration_id       — Scryfall illustration UUID (groups reprints
+                                sharing the same artwork)
+        tcgplayer_id          — TCGplayer product ID
+        tcgplayer_etched_id   — TCGplayer etched-foil variant product ID
+        cardmarket_id         — Cardmarket (MKM) product ID
+        mtgo_id               — Magic Online card ID
+        arena_id              — MTG Arena card ID
+        multiverse_ids        — list of Gatherer multiverse IDs (may be a
+                                JSON-encoded list string)
+        pokemontcg_id         — Pokémon TCG API card ID (e.g. "base1-4")
+
+    Keys present depend entirely on what the gallery builder recorded.
+    Missing keys are simply absent from the dict rather than None.
     """
     card_name: str
     set_code: str
-    confidence: float                        # cosine similarity or 1 - hamming_norm
+    confidence: float           # cosine similarity (embedding) or 1 - hamming_norm (hash)
 
-    # Source-specific identifiers — None when not applicable
-    scryfall_id: str | None = None
-    oracle_id: str | None = None
-    illustration_id: str | None = None
-    tcgplayer_product_id: str | None = None
+    # Open-ended identifier mapping — whatever the gallery source provides
+    ids: dict[str, str] = field(default_factory=dict)
+
+    # Convenience accessor
+    def get_id(self, key: str) -> str | None:
+        """Return the identifier for *key*, or None if not present."""
+        return self.ids.get(key)
 
     # Top-k alternatives (same structure, lower confidence)
     alternatives: list["CardResult"] = field(default_factory=list)
