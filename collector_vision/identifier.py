@@ -11,7 +11,7 @@ Typical usage::
     cvid = cvg.Identifier(cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"))
 
     result = cvid.identify("photo.jpg")
-    print(result.card_name, result.set_code)
+    print(result.ids, result.confidence)
 
 Create one Identifier per process. Heavy objects (detector, gallery) are
 loaded lazily on first call and reused across subsequent calls.
@@ -177,12 +177,73 @@ class Identifier:
         Vote across video frames::
 
             result = cvid.identify("frame1.jpg", "frame2.jpg", "frame3.jpg")
-            print(result.card_name)          # aggregate winner
             print(result.frame_results)      # per-frame breakdown
         """
         if not images:
             raise ValueError("At least one image is required.")
-        raise NotImplementedError("Identifier.identify() — not yet wired up")
+
+        import cv2
+        from PIL import Image
+
+        from collector_vision import retrieval
+        from collector_vision.identify import _load_image, _dewarp
+
+        gallery = self._get_gallery()
+        detector = self._get_detector()
+        embedder = gallery.embedder
+
+        # ── Step 1: load, detect, dewarp ──────────────────────────────────
+        pil_crops: list[Image.Image] = []
+        for img_src in images:
+            bgr = _load_image(img_src)
+
+            if detector is not None:
+                detection = detector.detect(bgr)
+                if detection.card_present and detection.corners is not None:
+                    bgr_crop = _dewarp(bgr, detection.corners)
+                else:
+                    bgr_crop = bgr  # no card detected — use full frame
+            else:
+                bgr_crop = bgr  # caller guarantees a clean crop
+
+            rgb = cv2.cvtColor(bgr_crop, cv2.COLOR_BGR2RGB)
+            pil_crops.append(Image.fromarray(rgb))
+
+        # ── Step 2: embed (single batched forward pass) ───────────────────
+        embs = embedder.embed(pil_crops)  # (n_frames, D) or (n_frames, B)
+
+        # ── Step 3: per-frame nearest-neighbour search ────────────────────
+        is_hash = gallery.mode == "hash"
+        frame_hits: list[list[tuple[float, int]]] = []
+        for emb in embs:
+            if is_hash:
+                hits = retrieval.hamming_search(emb, gallery.embeddings, top_k=top_k)
+            else:
+                hits = retrieval.cosine_search(emb, gallery.embeddings, top_k=top_k)
+            frame_hits.append(hits)
+
+        # ── Step 4: aggregate across frames ───────────────────────────────
+        if len(frame_hits) == 1:
+            agg_hits = frame_hits[0]
+        else:
+            from collections import defaultdict
+            score_map: dict[int, float] = defaultdict(float)
+            for hits in frame_hits:
+                for score, idx in hits:
+                    score_map[idx] += score
+            agg_hits = [
+                (score, idx)
+                for idx, score in sorted(score_map.items(), key=lambda x: x[1], reverse=True)
+            ][:top_k]
+
+        # ── Step 5: build result ──────────────────────────────────────────
+        frame_results: list[CardResult] = []
+        if len(images) > 1:
+            frame_results = [_hits_to_result(h, gallery, top_k) for h in frame_hits]
+
+        result = _hits_to_result(agg_hits, gallery, top_k)
+        result.frame_results = frame_results
+        return result
 
     # ------------------------------------------------------------------
     # Repr
@@ -196,6 +257,26 @@ class Identifier:
             else repr(self._detector_arg)
         )
         return f"Identifier({srcs}, detector={det})"
+
+
+def _hits_to_result(
+    hits: "list[tuple[float, int]]",
+    gallery: "Gallery",
+    top_k: int,
+) -> CardResult:
+    """Build a CardResult from a ranked (score, gallery_index) list."""
+    if not hits:
+        return CardResult()
+    best_score, best_idx = hits[0]
+    alts = [
+        CardResult(ids=gallery.ids[idx], confidence=float(score))
+        for score, idx in hits[1:]
+    ]
+    return CardResult(
+        ids=gallery.ids[best_idx],
+        confidence=float(best_score),
+        alternatives=alts,
+    )
 
 
 class _NotLoaded:
