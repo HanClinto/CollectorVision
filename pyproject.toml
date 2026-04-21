@@ -33,8 +33,5 @@ where = ["."]
 include = ["collector_vision*"]
 
 [tool.setuptools.package-data]
-# ONNX weights bundled in the wheel (graph + external data file for each model)
-collector_vision = [
-    "weights/*.onnx",
-    "weights/*.onnx.data",
-]
+# Single-file ONNX weights bundled in the wheel (reggie.onnx, milo.onnx)
+collector_vision = ["weights/*.onnx"]
