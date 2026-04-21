@@ -19,10 +19,10 @@ Requires Python 3.10+. PyTorch is a dependency; if you want GPU acceleration ins
 ## Quickstart
 
 ```python
-import collector_vision as cv
+import collector_vision as cvg
 
-gallery = cv.Gallery.for_game("magic")
-result = cv.identify("photo.jpg", gallery=gallery)
+gallery = cvg.Gallery.for_game("magic")
+result = cvg.identify("photo.jpg", gallery=gallery)
 
 print(result.card_name, result.set_code)
 print(result.ids)  # {"scryfall_id": "...", "cardmarket_id": "...", ...}
@@ -35,8 +35,8 @@ The gallery downloads on first use and is cached in `~/.cache/collectorvision/`.
 ## Multiple games
 
 ```python
-gallery = cv.Gallery.for_games("magic", "pokemon")
-result = cv.identify("photo.jpg", gallery=gallery)
+gallery = cvg.Gallery.for_games("magic", "pokemon")
+result = cvg.identify("photo.jpg", gallery=gallery)
 ```
 
 ---
@@ -47,7 +47,7 @@ By default CollectorVision locates the card using the bundled neural detector:
 
 ```python
 # default — neural detector, no configuration needed
-result = cv.identify("photo.jpg", gallery=gallery)
+result = cvg.identify("photo.jpg", gallery=gallery)
 ```
 
 Two alternatives are available when the neural detector isn't the right fit:
@@ -57,7 +57,7 @@ Two alternatives are available when the neural detector isn't the right fit:
 ```python
 from collector_vision.detectors import CannyCornerDetector
 
-result = cv.identify("scan.jpg", gallery=gallery, detector=CannyCornerDetector())
+result = cvg.identify("scan.jpg", gallery=gallery, detector=CannyCornerDetector())
 ```
 
 **Fixed corners** — for robots, jigs, or scanners where the card is always in the same position:
@@ -72,19 +72,19 @@ detector = FixedCornerDetector(corners=np.array([
     [0.95, 0.96],  # bottom-right
     [0.05, 0.96],  # bottom-left
 ]))
-result = cv.identify("frame.jpg", gallery=gallery, detector=detector)
+result = cvg.identify("frame.jpg", gallery=gallery, detector=detector)
 ```
 
 **Manual corners** — if you have corners from an external source, pass them directly and skip detection entirely:
 
 ```python
-result = cv.identify("frame.jpg", gallery=gallery, corners=my_corners)
+result = cvg.identify("frame.jpg", gallery=gallery, corners=my_corners)
 ```
 
 **No detection** — if the image is already a clean crop of just the card, skip detection and use the full image:
 
 ```python
-result = cv.identify("crop.jpg", gallery=gallery, corners=cv.FULL_IMAGE_CORNERS)
+result = cvg.identify("crop.jpg", gallery=gallery, corners=cvg.FULL_IMAGE_CORNERS)
 ```
 
 ---
@@ -95,16 +95,16 @@ The default gallery uses the neural embedder (codename "Milo"), which gives the 
 
 ```python
 # default — Milo neural embedder
-gallery = cv.Gallery.for_game("magic")
-result = cv.identify("photo.jpg", gallery=gallery)
+gallery = cvg.Gallery.for_game("magic")
+result = cvg.identify("photo.jpg", gallery=gallery)
 ```
 
 A perceptual hash variant runs on any hardware with no GPU required, at the cost of some accuracy:
 
 ```python
 # phash16 — no GPU required
-gallery = cv.Gallery.for_game("magic", variant="phash16")
-result = cv.identify("photo.jpg", gallery=gallery)
+gallery = cvg.Gallery.for_game("magic", variant="phash16")
+result = cvg.identify("photo.jpg", gallery=gallery)
 ```
 
 ---
@@ -112,7 +112,7 @@ result = cv.identify("photo.jpg", gallery=gallery)
 ## Batch identification
 
 ```python
-results = cv.identify_batch(["a.jpg", "b.jpg", "c.jpg"], gallery=gallery)
+results = cvg.identify_batch(["a.jpg", "b.jpg", "c.jpg"], gallery=gallery)
 ```
 
 ---
@@ -122,7 +122,7 @@ results = cv.identify_batch(["a.jpg", "b.jpg", "c.jpg"], gallery=gallery)
 Once galleries are cached locally, pass `offline=True` to prevent any network calls:
 
 ```python
-gallery = cv.Gallery.for_game("magic", offline=True)
+gallery = cvg.Gallery.for_game("magic", offline=True)
 ```
 
 ---

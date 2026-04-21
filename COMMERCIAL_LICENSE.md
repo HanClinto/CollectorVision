@@ -22,7 +22,6 @@ distribute are also fine.
 
 ## Getting a license
 
-Send a note to [clinto@example.com](mailto:clinto@example.com) with a brief
-description of what you're building. Pricing is based on use case and volume —
-there's no one-size-fits-all fee schedule, and small independent developers
-are treated differently than enterprise deployments.
+Contact us with a brief description of what you're building. Pricing is based
+on use case and volume — there's no one-size-fits-all fee schedule, and small
+independent developers are treated differently than enterprise deployments.
