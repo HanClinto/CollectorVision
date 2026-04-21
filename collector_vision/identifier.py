@@ -142,34 +142,47 @@ class Identifier:
 
     def identify(
         self,
-        image: "str | Path | np.ndarray",
-        *,
+        *images: "str | Path | np.ndarray",
         top_k: int = 5,
     ) -> CardResult:
-        """Identify a single card image.
+        """Identify a card from one or more images.
 
         Parameters
         ----------
-        image:
-            Path to the card photo, or a BGR numpy array (``cv2.imread`` output).
+        *images:
+            One or more paths or BGR numpy arrays (``cv2.imread`` output).
+
+            **Single image** — standard identification; returns the best match.
+
+            **Multiple images** — treated as frames of the same physical card
+            (e.g. consecutive video frames or multiple photos of the same card).
+            Similarity scores are summed across frames before ranking, giving a
+            more confident result than any single frame alone.  The individual
+            per-frame results are available in
+            :attr:`~collector_vision.catalogs.base.CardResult.frame_results`.
+
         top_k:
             Number of alternatives to include in the result.
 
         Returns
         -------
         :class:`~collector_vision.catalogs.base.CardResult`
-        """
-        raise NotImplementedError("Identifier.identify() — not yet wired up")
 
-    def identify_batch(
-        self,
-        images: "list[str | Path | np.ndarray]",
-        *,
-        top_k: int = 5,
-        batch_size: int = 16,
-    ) -> "list[CardResult]":
-        """Identify multiple card images in a single batched pass."""
-        raise NotImplementedError("Identifier.identify_batch() — not yet wired up")
+        Examples
+        --------
+        Single image::
+
+            result = cvid.identify("photo.jpg")
+
+        Vote across video frames::
+
+            result = cvid.identify("frame1.jpg", "frame2.jpg", "frame3.jpg")
+            print(result.card_name)          # aggregate winner
+            print(result.frame_results)      # per-frame breakdown
+        """
+        if not images:
+            raise ValueError("At least one image is required.")
+        raise NotImplementedError("Identifier.identify() — not yet wired up")
 
     # ------------------------------------------------------------------
     # Repr

@@ -61,7 +61,7 @@ cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1", cache_refresh=timed
 
 ## Multiple games
 
-Galleries must use the same embedding algorithm. Mix and match freely within that constraint:
+Can detect against multiple games at once. Just load the galleries for multiple games at the same time.
 
 ```python
 cvid = cvg.Identifier(
@@ -73,10 +73,20 @@ result = cvid.identify("photo.jpg")
 
 ---
 
-## Batch identification
+## Multiple frames, one card
+
+Pass several images of the same physical card and `identify()` votes across
+them — similarity scores are summed before ranking, giving a more confident
+result than any single frame:
 
 ```python
-results = cvid.identify_batch(["a.jpg", "b.jpg", "c.jpg"])
+result = cvid.identify("frame1.jpg", "frame2.jpg", "frame3.jpg")
+print(result.card_name)      # aggregate winner
+print(result.confidence)     # combined confidence
+
+# Individual per-frame results are also available
+for frame in result.frame_results:
+    print(frame.card_name, frame.confidence)
 ```
 
 ---

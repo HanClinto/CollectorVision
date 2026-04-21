@@ -44,5 +44,10 @@ class CardResult:
     # Top-k alternatives (same structure, lower confidence)
     alternatives: list["CardResult"] = field(default_factory=list)
 
+    # Per-frame results when identify() was called with multiple images.
+    # Each entry is the best match for that individual frame before voting.
+    # Empty when identify() was called with a single image.
+    frame_results: list["CardResult"] = field(default_factory=list)
+
     # Raw retrieval metadata for advanced users
     extra: dict[str, Any] = field(default_factory=dict)
