@@ -20,9 +20,8 @@ Usage::
         ], dtype=np.float32)
     )
 
-    # Per-call corners can also be supplied directly to identify():
-    #   cv.identify(image, corners=my_corners)
-    # which bypasses the detector entirely.
+    # To bypass detection entirely on a per-call basis, use detector=None
+    # when constructing the Identifier and pre-crop the image yourself.
 """
 from __future__ import annotations
 

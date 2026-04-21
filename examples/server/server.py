@@ -196,7 +196,7 @@ def _identify_bgr(bgr: np.ndarray, *, top_k: int) -> dict:
     card_present = True
 
     if detector is not None:
-        from collector_vision.identify import _dewarp
+        from collector_vision.identifier import _dewarp
         det_result = detector.detect(bgr)
         sharpness = det_result.extra.get("sharpness")
         card_present = det_result.card_present

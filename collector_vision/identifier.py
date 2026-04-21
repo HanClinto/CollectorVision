@@ -186,7 +186,6 @@ class Identifier:
         from PIL import Image
 
         from collector_vision import retrieval
-        from collector_vision.identify import _load_image, _dewarp
 
         gallery = self._get_gallery()
         detector = self._get_detector()
@@ -257,6 +256,40 @@ class Identifier:
             else repr(self._detector_arg)
         )
         return f"Identifier({srcs}, detector={det})"
+
+
+# ---------------------------------------------------------------------------
+# Image loading and dewarping helpers
+# ---------------------------------------------------------------------------
+
+# Dewarp output size — card aspect ratio ~63.5 × 88.9 mm, generous resolution
+# so the embedder's internal resize doesn't upscale from a tiny source.
+_DEWARP_W = 252  # 4 × 63
+_DEWARP_H = 352  # 4 × 88
+
+
+def _load_image(image: "str | Path | np.ndarray") -> np.ndarray:
+    """Load an image from a path or return a BGR ndarray as-is."""
+    if isinstance(image, np.ndarray):
+        return image
+    import cv2
+    bgr = cv2.imread(str(image))
+    if bgr is None:
+        raise FileNotFoundError(f"Could not read image: {image}")
+    return bgr
+
+
+def _dewarp(bgr: np.ndarray, corners_norm: np.ndarray) -> np.ndarray:
+    """Perspective-warp a card to a flat rectangle given normalised corners."""
+    import cv2
+    h, w = bgr.shape[:2]
+    src = corners_norm * np.array([w, h], dtype=np.float32)
+    dst = np.array(
+        [[0, 0], [_DEWARP_W - 1, 0], [_DEWARP_W - 1, _DEWARP_H - 1], [0, _DEWARP_H - 1]],
+        dtype=np.float32,
+    )
+    M = cv2.getPerspectiveTransform(src, dst)
+    return cv2.warpPerspective(bgr, M, (_DEWARP_W, _DEWARP_H))
 
 
 def _hits_to_result(
