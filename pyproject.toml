@@ -9,17 +9,23 @@ description = "Card identification library for collectible card games (MTG, PokÃ
 license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.10"
 dependencies = [
-    "torch>=2.0",
-    "torchvision>=0.15",
-    "timm>=0.9",
+    "onnxruntime>=1.17",
     "Pillow>=9.0",
     "numpy>=1.24",
     "opencv-python-headless>=4.7",
-    "imagehash>=4.3",
-    "scipy>=1.10",
 ]
 
 [project.optional-dependencies]
+# Hash-based embedders (HashEmbedder) â€” not needed for the default Milo neural gallery
+hash = [
+    "imagehash>=4.3",
+    "scipy>=1.10",
+]
+# Example server
+server = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+]
 dev = ["pytest", "ruff"]
 
 [tool.setuptools.packages.find]
@@ -27,6 +33,8 @@ where = ["."]
 include = ["collector_vision*"]
 
 [tool.setuptools.package-data]
-# Weights are binary files tracked via git LFS; included in the wheel but
-# excluded from source control via .gitignore (see note there).
-collector_vision = ["weights/*.pt"]
+# ONNX weights bundled in the wheel (graph + external data file for each model)
+collector_vision = [
+    "weights/*.onnx",
+    "weights/*.onnx.data",
+]
