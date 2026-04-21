@@ -22,6 +22,7 @@ PyTorch is a dependency; install the GPU-accelerated variant for your platform f
 Download a gallery file for your game from [HuggingFace](https://huggingface.co/datasets/CollectorVision/galleries), then:
 
 ```python
+import urllib.request, json
 import collector_vision as cvg
 
 cvid = cvg.Identifier("./magic-scryfall-milo1-2026-04.npz")
@@ -29,10 +30,12 @@ result = cvid.identify("photo.jpg")
 
 print(result.ids)        # {"scryfall_id": "...", "tcgplayer_id": "...", ...}
 print(result.confidence) # 0.94
-```
 
-`identify()` returns stable IDs — look up names, prices, and other metadata
-from [Scryfall](https://scryfall.com/docs/api) or TCGplayer using those IDs.
+# Look up card metadata from Scryfall
+sid = result.ids["scryfall_id"]
+card = json.loads(urllib.request.urlopen(f"https://api.scryfall.com/cards/{sid}").read())
+print(card["name"], card["set_name"], card["prices"]["usd"])
+```
 
 Create one `Identifier` per process — it holds the gallery in memory and reuses it across calls.
 
