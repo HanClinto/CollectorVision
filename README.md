@@ -21,90 +21,68 @@ Requires Python 3.10+. PyTorch is a dependency; if you want GPU acceleration ins
 ```python
 import collector_vision as cvg
 
-gallery = cvg.Gallery.for_game("magic")
-result = cvg.identify("photo.jpg", gallery=gallery)
+cvid = cvg.Identifier(cvg.Game.MAGIC)
+result = cvid.identify("photo.jpg")
 
 print(result.card_name, result.set_code)
-print(result.ids)  # {"scryfall_id": "...", "cardmarket_id": "...", ...}
+print(result.ids)  # {"scryfall_id": "...", "tcgplayer_id": "...", ...}
 ```
 
-The gallery downloads on first use and is cached in `~/.cache/collectorvision/`. Subsequent calls load from disk.
+The gallery downloads on first use and is cached in `~/.cache/collectorvision/`. Subsequent calls load from disk. Create one `Identifier` per process — it holds the gallery in memory and reuses it across calls.
 
 ---
 
 ## Multiple games
 
 ```python
-gallery = cvg.Gallery.for_games("magic", "pokemon")
-result = cvg.identify("photo.jpg", gallery=gallery)
+cvid = cvg.Identifier(cvg.Game.MAGIC, cvg.Game.POKEMON)
+result = cvid.identify("photo.jpg")
+```
+
+---
+
+## Embedding algorithms
+
+The default embedding uses the bundled neural model (codename "Milo"), which gives the best accuracy and benefits from a GPU or Apple Silicon:
+
+```python
+# default — Milo neural embedding
+cvid = cvg.Identifier(cvg.Game.MAGIC)
+```
+
+A perceptual hash variant runs on any hardware with no GPU required, at the cost of some accuracy on exact-printing identification:
+
+```python
+# PHASH — no GPU required, excellent for artwork identification
+cvid = cvg.Identifier(cvg.Game.MAGIC, embedding=cvg.Embedding.PHASH)
 ```
 
 ---
 
 ## Corner detection
 
-By default CollectorVision locates the card using the bundled neural detector:
+By default CollectorVision locates the card in the image using the bundled neural detector:
 
 ```python
-# default — neural detector, no configuration needed
-result = cvg.identify("photo.jpg", gallery=gallery)
+# default — neural detector
+cvid = cvg.Identifier(cvg.Game.MAGIC)
+result = cvid.identify("photo.jpg")
 ```
-
-Two alternatives are available when the neural detector isn't the right fit:
 
 **Canny** — no GPU required, works well on clean or high-contrast backgrounds:
 
 ```python
 from collector_vision.detectors import CannyCornerDetector
 
-result = cvg.identify("scan.jpg", gallery=gallery, detector=CannyCornerDetector())
+cvid = cvg.Identifier(cvg.Game.MAGIC, detector=CannyCornerDetector())
+result = cvid.identify("scan.jpg")
 ```
 
-**Fixed corners** — for robots, jigs, or scanners where the card is always in the same position:
+**No detection** — if the image is already a clean crop of just the card, pass `detector=None` to skip detection entirely:
 
 ```python
-import numpy as np
-from collector_vision.detectors import FixedCornerDetector
-
-detector = FixedCornerDetector(corners=np.array([
-    [0.05, 0.04],  # top-left
-    [0.95, 0.04],  # top-right
-    [0.95, 0.96],  # bottom-right
-    [0.05, 0.96],  # bottom-left
-]))
-result = cvg.identify("frame.jpg", gallery=gallery, detector=detector)
-```
-
-**Manual corners** — if you have corners from an external source, pass them directly and skip detection entirely:
-
-```python
-result = cvg.identify("frame.jpg", gallery=gallery, corners=my_corners)
-```
-
-**No detection** — if the image is already a clean crop of just the card, skip detection and use the full image:
-
-```python
-result = cvg.identify("crop.jpg", gallery=gallery, corners=cvg.FULL_IMAGE_CORNERS)
-```
-
----
-
-## Gallery variants
-
-The default gallery uses the neural embedder (codename "Milo"), which gives the best accuracy and requires a GPU or Apple Silicon for reasonable speed:
-
-```python
-# default — Milo neural embedder
-gallery = cvg.Gallery.for_game("magic")
-result = cvg.identify("photo.jpg", gallery=gallery)
-```
-
-A perceptual hash variant runs on any hardware with no GPU required, at the cost of some accuracy:
-
-```python
-# phash16 — no GPU required
-gallery = cvg.Gallery.for_game("magic", variant="phash16")
-result = cvg.identify("photo.jpg", gallery=gallery)
+cvid = cvg.Identifier(cvg.Game.MAGIC, detector=None)
+result = cvid.identify("crop.jpg")
 ```
 
 ---
@@ -112,7 +90,7 @@ result = cvg.identify("photo.jpg", gallery=gallery)
 ## Batch identification
 
 ```python
-results = cvg.identify_batch(["a.jpg", "b.jpg", "c.jpg"], gallery=gallery)
+results = cvid.identify_batch(["a.jpg", "b.jpg", "c.jpg"])
 ```
 
 ---
@@ -122,7 +100,17 @@ results = cvg.identify_batch(["a.jpg", "b.jpg", "c.jpg"], gallery=gallery)
 Once galleries are cached locally, pass `offline=True` to prevent any network calls:
 
 ```python
-gallery = cvg.Gallery.for_game("magic", offline=True)
+cvid = cvg.Identifier(cvg.Game.MAGIC, offline=True)
+```
+
+---
+
+## Power user: local gallery file
+
+If you have a gallery NPZ file on disk (e.g. built by CollectorVision-Pipeline):
+
+```python
+cvid = cvg.Identifier(gallery=cvg.Gallery.load("my_gallery.npz"))
 ```
 
 ---

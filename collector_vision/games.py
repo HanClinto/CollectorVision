@@ -1,18 +1,35 @@
-"""Supported collectible card games and their gallery registry.
+"""Supported collectible card games, embedding algorithms, and their registry.
 
-``Game`` is the primary user-facing identifier.  Users refer to games by
-these canonical short names; the manifest maps them to published gallery
-filenames.
+``Game`` and ``Embedding`` are the primary user-facing enums.
 
 Adding a new game requires:
   1. A new ``Game`` entry here
   2. A gallery built and published under the naming convention
-     ``{game}-{source}-{YYYY-MM}-{variant}.npz``
+     ``{game}-{source}-{algo}-{YYYY-MM}.npz``
   3. The manifest on HF Datasets updated to point at the new file
 """
 from __future__ import annotations
 
 from enum import Enum
+
+
+class Embedding(str, Enum):
+    """Embedding algorithm used to represent and compare cards.
+
+    MILO   — ArcFace neural embedding (MobileViT-XXS backbone).  Best
+              accuracy for edition (exact printing) identification.  Requires
+              a GPU or Apple Silicon for reasonable speed.
+
+    PHASH  — Perceptual hash (16×16 DCT).  Runs on any CPU, no GPU needed.
+              Excellent for artwork identification; weaker on edition.
+              Gallery is ~30× smaller than MILO (32 B vs 512 B per card).
+    """
+
+    MILO  = "milo1"    # neural ArcFace, default
+    PHASH = "phash16"  # perceptual hash 16×16
+
+    def __str__(self) -> str:
+        return self.value
 
 
 class Game(str, Enum):
@@ -69,6 +86,17 @@ GAME_PRIMARY_SOURCE: dict[Game, str] = {
     Game.SWU:      "tcgplayer",
     Game.DBS:      "tcgplayer",
 }
+
+
+def parse_embedding(value: str) -> Embedding:
+    """Case-insensitive parse of an embedding identifier string."""
+    try:
+        return Embedding(value.lower().strip())
+    except ValueError:
+        known = ", ".join(e.value for e in Embedding)
+        raise ValueError(
+            f"Unknown embedding {value!r}. Supported embeddings: {known}"
+        ) from None
 
 
 def parse_game(value: str) -> Game:

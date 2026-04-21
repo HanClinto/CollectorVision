@@ -118,8 +118,8 @@ class Gallery:
     @classmethod
     def for_game(
         cls,
-        game: "str | Game",
-        variant: str | None = None,
+        game: "Game",
+        embedding: "Embedding | None" = None,
         cache_dir: "Path | None" = None,
         offline: bool = False,
     ) -> "Gallery":
@@ -128,11 +128,10 @@ class Gallery:
         Parameters
         ----------
         game:
-            Game identifier, e.g. ``"magic"``, ``"pokemon"``, or a
-            ``Game`` enum value.
-        variant:
-            Model variant override, e.g. ``"phash16"``.  Defaults to the
-            manifest's ``default_variant`` (currently ``"milo1"``).
+            A :class:`~collector_vision.games.Game` enum value.
+        embedding:
+            Which embedding algorithm to use.  Defaults to
+            :attr:`~collector_vision.games.Embedding.MILO`.
         cache_dir:
             Local directory for downloaded galleries.  Defaults to
             ``~/.cache/collectorvision/``.
@@ -140,14 +139,14 @@ class Gallery:
             If True, never make network calls — use only locally cached
             files.  Raises if the gallery is not cached.
         """
-        from collector_vision.games import parse_game
+        from collector_vision.games import Embedding as _Embedding
         from collector_vision.manifest import Manifest, _default_cache_dir
 
-        game = parse_game(str(game)) if not isinstance(game, Game) else game
+        embedding = embedding or _Embedding.MILO
         cache_dir = cache_dir or _default_cache_dir()
         manifest = Manifest.bundled() if offline else Manifest.fetch(cache_dir)
 
-        filename = manifest.resolve(game, variant)
+        filename = manifest.resolve(game, embedding.value)
         local_path = cache_dir / filename
 
         if not local_path.exists():
@@ -156,31 +155,30 @@ class Gallery:
                     f"Gallery not cached locally: {local_path}\n"
                     "Run without offline=True to download it."
                 )
-            _download(manifest.url_for(game, variant), local_path)
+            _download(manifest.url_for(game, embedding.value), local_path)
 
         return cls.load(local_path)
 
     @classmethod
     def for_games(
         cls,
-        *games: "str | Game",
-        variant: str | None = None,
+        *games: "Game",
+        embedding: "Embedding | None" = None,
         cache_dir: "Path | None" = None,
         offline: bool = False,
     ) -> "Gallery":
         """Load and merge galleries for multiple games.
 
-        All games must use the same variant (and therefore the same embedder)
-        so that query embeddings are compatible with the merged gallery.
-        Raises ``ValueError`` if the loaded galleries have incompatible
-        embedder specs.
+        All games must use the same embedding algorithm so that query vectors
+        are compatible with the merged gallery.  Raises ``ValueError`` if the
+        loaded galleries have incompatible embedder specs.
 
         Example::
 
-            gallery = Gallery.for_games("magic", "pokemon", "yugioh")
+            gallery = Gallery.for_games(Game.MAGIC, Game.POKEMON)
         """
         loaded = [
-            cls.for_game(g, variant=variant, cache_dir=cache_dir, offline=offline)
+            cls.for_game(g, embedding=embedding, cache_dir=cache_dir, offline=offline)
             for g in games
         ]
         if len(loaded) == 1:

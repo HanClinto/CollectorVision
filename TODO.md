@@ -9,7 +9,7 @@ Checklist for turning the scaffold into a shippable library.
 ### 1a. identify()
 - [ ] Implement `identify()` in `collector_vision/identify.py`
   - Load image (path or ndarray)
-  - Run detector (or accept pre-supplied corners / FULL_IMAGE_CORNERS)
+  - Run detector (or skip if detector=None, treating full image as card)
   - Dewarp card to fixed resolution
   - Call `gallery.embedder.embed()` on the dewarped card
   - Nearest-neighbour lookup in the gallery (cosine for floats, Hamming for hashes)
@@ -88,7 +88,7 @@ CollectorVision itself needs to know about the format.
   - Verify missing optional keys are handled gracefully (backward compatibility)
 - [ ] **Update bundled manifest** in `collector_vision/manifest.py` (`_BUNDLED_MANIFEST`)
   once Pipeline has published the first real gallery files to HF Datasets
-- [ ] Confirm `Manifest.fetch()` → `Gallery.for_game()` → `identify()` works end-to-end
+- [ ] Confirm `Manifest.fetch()` → `Identifier(Game.MAGIC)` → `identify()` works end-to-end
   against live HF Datasets files
 
 ---
@@ -179,14 +179,14 @@ CollectorVision itself needs to know about the format.
 ### 7b. Integration tests
 - [ ] `tests/integration/test_identify.py`
   - Requires a small bundled test card image + synthetic gallery NPZ
-  - End-to-end: `identify(img, gallery=test_gallery)` returns the correct card
+  - End-to-end: `Identifier(Game.MAGIC).identify(img)` returns the correct card
   - Run only when weights are present (`pytest -m integration`)
 
 ### 7c. Smoke test (post-install)
 - [ ] `tests/smoke/test_install.py`
   - `import collector_vision as cvg` — imports without error
   - `cvg.__version__` is a string
-  - `cvg.FULL_IMAGE_CORNERS` has correct shape
+  - `cvg.Embedding` and `cvg.Game` enums are importable
   - No-GPU, no-network, no weights required
 
 ---
@@ -255,7 +255,7 @@ and compare variants against each other and against alternatives.
 - [ ] **`eval/benchmark.py`** — standalone CLI evaluation script
   - Downloads benchmark dataset from HF if not cached
   - Accepts `--gallery magic` or `--gallery-file path.npz`
-  - Accepts `--variant phash16 milo1` (sweep)
+  - Accepts `--embedding phash milo` (sweep)
   - Runs `identify()` on each benchmark image
   - Reports per-condition and overall accuracy + latency table
   - Writes `results.csv` and `results.md`
@@ -269,67 +269,68 @@ and compare variants against each other and against alternatives.
     (require user to supply their own API key)
 
 ### 11c. Published results
-- [ ] **Results table in README** — top-1 edition accuracy by variant × condition
+- [ ] **Results table in README** — top-1 edition accuracy by Embedding × condition
   - Keep updated with each gallery release
-  - Mark GPU/CPU requirement per variant
+  - Mark GPU/CPU requirement per Embedding
 - [ ] **HuggingFace Model Card** (`CollectorVision/milo`) — embed results table
 - [ ] **HuggingFace Space — live demo**
   - Gradio app: upload an image → shows detected corners → identified card + confidence
-  - Dropdown to select game and variant
+  - Dropdown to select Game and Embedding
   - Hosted on HF Spaces (free tier for initial launch)
   - Link from README and PyPI page
 - [ ] **Versioned results archive** in `CollectorVision/galleries` dataset repo
-  - `eval_results/benchmark-v1/{variant}-{YYYY-MM}.json` for each gallery release
+  - `eval_results/benchmark-v1/{embedding}-{YYYY-MM}.json` for each gallery release
 
 ---
 
 ## 12. API server
 
-A thin HTTP wrapper so the library is usable from any language, and as the
-backend for mobile apps and the HF Space demo.
+> **Reference implementation:** `ccg_card_id/07_web_scanner` is a working
+> FastAPI server with an Ximilar-compatible API, browser client, SSL support,
+> and ScanBucket deduplication. The CollectorVision server is a port of this,
+> replacing ccg_card_id's data paths with `Identifier` / `Gallery.for_game()`.
+> Do not redesign the API shape — adopt it wholesale.
 
-### 12a. Core server (`collectorvision-server` package or `server/` directory)
-- [ ] **`server/app.py`** — FastAPI application
-  - `GET /health` — liveness check, returns version + loaded gallery info
-  - `GET /games` — list supported games and available variants
-  - `POST /identify` — multipart image upload, returns JSON CardResult
-    - Query params: `game`, `variant`, `top_k`, `detector` (`neural`/`canny`/`fixed`)
-    - Optional JSON body for fixed corners
-  - `POST /identify/batch` — multiple images in one request
-  - `GET /gallery/info` — metadata about the loaded gallery (size, algo, date)
-- [ ] **Gallery pre-loading** — load gallery once at startup, not per request
-- [ ] **Error responses** — structured JSON errors (not HTML 500s)
-  - `{"error": "no_card_detected", "message": "..."}`
-- [ ] **Optional auth** — bearer token via env var `COLLECTORVISION_API_TOKEN`
-  (disabled by default for local use)
-- [ ] **Rate limiting** — optional, via `slowapi` or similar
+### 12a. API format (Ximilar-compatible — keep as-is from web_scanner)
 
-### 12b. Packaging the server
+```
+POST /v1/identify
+  body: {"records": [{"_base64": "...", "detector": "canny", "embedding": "phash"}]}
+  response: {"records": [{...result...}], "_status": {"code": 200, "text": "OK"}}
+
+GET /v1/health
+GET /v1/detectors
+GET /v1/embeddings   (replaces web_scanner's /v1/identifiers)
+GET /v1/defaults
+GET /v1/memory
+```
+
+Benefits of Ximilar compatibility: client code is swappable between
+CollectorVision and Ximilar Visual AI without modification.
+
+### 12b. Port from web_scanner
+- [ ] Copy `07_web_scanner/server/app.py` → `server/app.py`
+- [ ] Copy `07_web_scanner/client/` → `server/client/` (browser UI + ScanBucket)
+- [ ] Replace `GallerySearchManager` (disk-scan of ccg_card_id paths) with
+  `Identifier(game, embedding=embedding)` — gallery downloads from HF automatically
+- [ ] Replace `CardLookup` (SQLite) with metadata already in the gallery NPZ
+  (`card_names`, `set_codes`, `ids_json`)
+  - Price data: omit for now (YAGNI until there's a plan for keeping it fresh)
+- [ ] Remove `sys.path` hacks and `ccg_card_id.config` dependency
+- [ ] Rename `/v1/identifiers` → `/v1/embeddings` to match enum rename
+- [ ] Keep SSL self-signed cert generation (required for LAN camera access)
+
+### 12c. Packaging
 - [ ] **`pyproject.toml` extras** — `pip install collectorvision[server]`
   adds `fastapi`, `uvicorn`, `python-multipart`
-- [ ] **Entry point** — `collectorvision-server` CLI command
-  - `collectorvision-server --game magic --variant phash16 --port 8080`
+- [ ] **Entry point** — `collectorvision-server` CLI
+  - `collectorvision-server --game magic --embedding phash --port 8080`
 - [ ] **Docker image** — `Dockerfile` in `server/`
-  - Base: `python:3.12-slim`
-  - Install collectorvision + server extras
-  - Pre-download gallery at build time (or mount as volume)
-  - Expose port 8080
-  - `ENTRYPOINT ["collectorvision-server"]`
-- [ ] **`docker-compose.yml`** — ready-to-run example with volume for gallery cache
-- [ ] **Publish image to GHCR** — `ghcr.io/hanclinto/collectorvision:latest`
-  - GitHub Actions workflow: build + push on `v*` tags
+- [ ] **Publish to GHCR** on `v*` tags via GitHub Actions
 
-### 12c. API documentation
-- [ ] **OpenAPI / Swagger UI** — served at `/docs` by FastAPI automatically
-  - Verify all endpoints have good descriptions and example responses
-- [ ] **README section** — "Running the API server" with docker and pip examples
-- [ ] **Client examples** — curl, Python requests, JavaScript fetch snippets in docs
-
-### 12d. Hosted demo API
-- [ ] **HuggingFace Space** (`CollectorVision/demo`)
-  - Gradio front-end calling the FastAPI backend (or pure Gradio)
-  - Rate-limited to prevent abuse
-  - Note in UI: "For production use, run your own instance"
+### 12d. Hosted demo
+- [ ] **HuggingFace Space** (`CollectorVision/demo`) — Gradio or the browser
+  client pointing at a hosted instance; rate-limited
 
 ---
 
@@ -456,11 +457,11 @@ The Pipeline project is responsible for the full data → gallery lifecycle:
 
 ### 14b. Gallery builder
 - [ ] **`pipeline/build_gallery.py`** — generic CLI
-  - Args: `--game magic --source scryfall --variant milo1 --date 2026-04`
+  - Args: `--game magic --source scryfall --embedding milo1 --date 2026-04`
   - Reads local image cache built by the sync step
   - Instantiates the appropriate CollectorVision embedder (hash or neural)
   - Embeds all reference images in batches
-  - Writes `{game}-{source}-{variant}-{YYYY-MM}.npz` with full metadata
+  - Writes `{game}-{source}-{algo}-{YYYY-MM}.npz` with full metadata
     including `embedder_spec`, `ids_json`, `card_names`, `set_codes`
 - [ ] **Checkpointing** — resume interrupted builds (gallery for Magic = ~108k images,
   several hours on CPU)
@@ -512,7 +513,7 @@ Things that must stay in CollectorVision (not in Pipeline):
 | **M0 — Code complete** | identify() + batch, Canny detector, retrieval helper |
 | **M1 — Weights finalized** | Corner + embedder checkpoints exported, bundled, mirrored to HF Hub |
 | **M2 — First gallery** | magic-scryfall-phash16 built + uploaded + downloadable |
-| **M3 — End-to-end works** | `pip install`, `Gallery.for_game("magic")`, `identify()` returns a card |
+| **M3 — End-to-end works** | `pip install`, `Identifier(Game.MAGIC).identify()` returns a card |
 | **M4 — Full gallery set** | magic milo1, pokemon phash16 + milo1 all live |
 | **M5 — PyPI v0.1.0** | CI green, tests pass, published to PyPI |
 | **M6 — Automated** | Monthly gallery refresh CI, dependabot, docs site |
