@@ -24,7 +24,7 @@ Download a gallery file for your game from [HuggingFace](https://huggingface.co/
 ```python
 import collector_vision as cvg
 
-cvid = cvg.Identifier("./magic-scryfall-phash16-2026-04.npz")
+cvid = cvg.Identifier("./magic-scryfall-milo1-2026-04.npz")
 result = cvid.identify("photo.jpg")
 
 print(result.card_name, result.set_code)
@@ -41,7 +41,7 @@ Create one `Identifier` per process — it holds the gallery in memory and reuse
 
 ```python
 cvid = cvg.Identifier(
-    cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16")
+    cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1")
 )
 ```
 
@@ -51,66 +51,24 @@ The gallery is saved to `~/.cache/collectorvision/`. When a newer version is pub
 from datetime import timedelta
 
 # Never re-check (pin forever)
-cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16", cache_refresh=timedelta(days=365))
+cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1", cache_refresh=timedelta(days=365))
 
 # Always check (useful in CI)
-cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16", cache_refresh=timedelta(0))
+cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1", cache_refresh=timedelta(0))
 ```
 
 ---
 
 ## Multiple games
 
-Galleries must share the same embedding algorithm. Mix and match freely within that constraint:
+Galleries must use the same embedding algorithm. Mix and match freely within that constraint:
 
 ```python
 cvid = cvg.Identifier(
-    cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"),
-    cvg.HFD("CollectorVision/galleries", "pokemon-tcgplayer-phash16"),
+    cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1"),
+    cvg.HFD("CollectorVision/galleries", "pokemon-tcgplayer-milo1"),
 )
 result = cvid.identify("photo.jpg")
-```
-
----
-
-## Embedding algorithms
-
-Two algorithms are available. The gallery file you download determines which one is used — the `Identifier` reads this from the file automatically.
-
-| Gallery name suffix | Algorithm | GPU needed | Accuracy |
-|---|---|---|---|
-| `phash16` | Perceptual hash 16×16 | No | Good for artwork ID |
-| `milo1` | ArcFace neural (Milo) | Recommended | Best for exact printing ID |
-
-```python
-# Hash — any CPU, ~32 bytes/card
-cvid = cvg.Identifier(cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"))
-
-# Neural — GPU recommended, ~512 bytes/card
-cvid = cvg.Identifier(cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1"))
-```
-
----
-
-## Corner detection
-
-By default CollectorVision uses the bundled neural detector. Two alternatives:
-
-**Canny** — no GPU required, works well on clean or high-contrast backgrounds:
-
-```python
-from collector_vision.detectors import CannyCornerDetector
-
-cvid = cvg.Identifier(
-    cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"),
-    detector=CannyCornerDetector(),
-)
-```
-
-**No detection** — if the image is already a clean card crop:
-
-```python
-cvid = cvg.Identifier("./magic-scryfall-phash16-2026-04.npz", detector=None)
 ```
 
 ---
@@ -123,15 +81,26 @@ results = cvid.identify_batch(["a.jpg", "b.jpg", "c.jpg"])
 
 ---
 
-## Offline use
+## Pre-cropped images
 
-Pass a local path and HFD will never touch the network:
+If your image is already a clean crop of just the card — no background, no perspective — pass `detector=None` to skip corner detection:
 
 ```python
-cvid = cvg.Identifier("./magic-scryfall-phash16-2026-04.npz")
+cvid = cvg.Identifier("./magic-scryfall-milo1-2026-04.npz", detector=None)
+result = cvid.identify("crop.jpg")
 ```
 
-HFD also falls back to its local cache automatically if the network is unavailable.
+---
+
+## Offline use
+
+Pass a local path and nothing will touch the network:
+
+```python
+cvid = cvg.Identifier("./magic-scryfall-milo1-2026-04.npz")
+```
+
+`HFD` also falls back to its local cache automatically if the network is unavailable.
 
 ---
 
