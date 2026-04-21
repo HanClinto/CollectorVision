@@ -5,7 +5,10 @@ __pycache__/
 dist/
 build/
 .venv*/
-*.pt
+# Model weights and gallery databases are NOT stored in regular git.
+# Weights: tracked via git LFS (collector_vision/weights/*.pt).
+# Galleries: distributed via GitHub Releases and HF Datasets.
+# The built wheel DOES include the weights via package_data.
 *.npz
 *.db
 .env

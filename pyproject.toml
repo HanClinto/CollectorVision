@@ -25,3 +25,8 @@ dev = ["pytest", "ruff"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["collector_vision*"]
+
+[tool.setuptools.package-data]
+# Weights are binary files tracked via git LFS; included in the wheel but
+# excluded from source control via .gitignore (see note there).
+collector_vision = ["weights/*.pt"]
