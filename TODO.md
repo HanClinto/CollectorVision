@@ -6,11 +6,13 @@ Checklist for turning the scaffold into a shippable library.
 
 ## 1. Core library
 
-### 1a. identify() ✅
-- [x] `Identifier.identify(*images)` with single-image and multi-frame voting
-- [x] Load/detect/dewarp/embed pipeline
-- [x] Per-frame `frame_results` returned when multiple images are passed
+### 1a. Pipeline API ✅
+- [x] Explicit detect → dewarp → embed → search pipeline (no magic wrapper class)
+- [x] `DetectionResult.dewarp(bgr)` → PIL Image
+- [x] `Catalog.search(emb, top_k)` → `[(score, card_id), ...]`
+- [x] `min_sharpness` gate on `detect()` — blurry/blank frames return `card_present=False`
 - [x] Cosine and Hamming retrieval in `collector_vision/retrieval.py`
+- [x] `examples/identify_image.py` walks through all five steps including Scryfall lookup
 
 ### 1b. NeuralCornerDetector (Cornelius) ✅
 - [x] ONNX-based inference via `onnxruntime` — no PyTorch at runtime
@@ -25,21 +27,13 @@ Checklist for turning the scaffold into a shippable library.
 
 ### 1d. CannyCornerDetector ✅
 - [x] Contour-based detection in `collector_vision/detectors/canny.py`
-- [x] Returns `DetectionResult(found=False)` when no valid quadrilateral found
+- [x] Returns `DetectionResult(card_present=False)` when no valid quadrilateral found
 
 ### 1e. Retrieval helpers ✅
 - [x] `collector_vision/retrieval.py` — `cosine_search()` and `hamming_search()`
 
-### 1f. CardResult — crop image (optional, per-call)
-- [ ] Add `include_crop: bool = False` parameter to `Identifier.identify()`
-  - When True, attach the dewarped card BGR image (or a JPEG bytes) to `CardResult`
-  - Useful for server responses, debugging, and the ScanBucket UI preview
-  - Return the intermediate `DetectionResult` as well (similar to how multi-image
-    calls return per-frame `frame_results`)
-  - Keep it optional and off by default — most library users don't need it
-
-### 1g. Metadata lookup (future module)
-`identify()` returns IDs only. A thin lookup helper is planned but not blocking v0.1.0:
+### 1f. Metadata lookup (future module)
+The pipeline returns IDs only. A thin lookup helper is planned but not blocking v0.1.0:
 
 - [ ] `sources/scryfall.py` — `get(scryfall_id) -> dict` via Scryfall REST API,
   with local SQLite cache
@@ -49,13 +43,11 @@ Checklist for turning the scaffold into a shippable library.
 
 ## 2. Model weights ✅
 
-- [x] Corner detector (Cornelius) — `cornelius.onnx` (8.2 MB, merged from export)
-- [x] Embedder (Milo) — `milo.onnx` (5.0 MB, merged from export)
-- [x] Both are single-file ONNX, no paired `.data` file
-- [x] Bundled in `collector_vision/weights/`; `package_data` configured in `pyproject.toml`
-- [ ] Mirror both to HuggingFace Hub (`CollectorVision/models` or similar)
-  - Write model card: architecture, training data, input spec, license, accuracy table
-- [ ] Verify weights survive `python -m build` → wheel → fresh venv install
+- [x] Corner detector (Cornelius) — `cornelius.onnx` (8.2 MB, single file)
+- [x] Embedder (Milo) — `milo.onnx` (5.0 MB, single file)
+- [x] Both bundled in `collector_vision/weights/`; `package_data` configured in `pyproject.toml`
+- [x] Both uploaded to HF Hub (`HanClinto/cornelius`, `HanClinto/milo`) with model cards
+- [x] Verify weights survive `python -m build` → wheel → fresh venv install
 
 ---
 
@@ -75,21 +67,21 @@ Catalog construction lives in **CollectorVision-Pipeline** (section 14).
 | `embedder_spec` | scalar str | JSON spec for reconstructing the embedder |
 
 Card names and metadata are not stored in the catalog — callers use the returned
-ID to look up metadata (e.g. via Scryfall API or a local catalog).
+ID to look up metadata via Scryfall API or a game-specific data source.
 
 - [ ] Document the NPZ format fully in `collector_vision/catalog.py` module docstring
 - [ ] `tests/test_catalog.py` — `Catalog.load()` round-trips a synthetic NPZ; missing
       optional keys handled gracefully; `_merge()` rejects incompatible specs
-- [x] Confirm `HFD` → `Catalog.load()` → `identify()` works end-to-end against live HF
+- [x] `Catalog.load("hf://HanClinto/milo/scryfall-mtg")` → `search()` confirmed end-to-end ✅
 
 ---
 
-## 4. HuggingFace setup
+## 4. HuggingFace setup ✅
 
 - [x] `HanClinto/milo` — model repo hosting Milo weights + catalogs (`catalogs/*.npz`)
-- [ ] Upload `cornelius.onnx` and `milo.onnx` to HF Hub with model cards
-- [ ] Write model cards: architecture, training data, input spec, license, accuracy table
-- [x] `HFD("HanClinto/milo", "scryfall-mtg").resolve()` confirmed end-to-end ✅
+- [x] `HanClinto/cornelius` — model repo hosting Cornelius weights
+- [x] Model cards written for both (architecture, input spec, usage examples, AGPL-3.0)
+- [x] `Catalog.load("hf://HanClinto/milo/scryfall-mtg")` confirmed end-to-end ✅
 
 ---
 
@@ -139,20 +131,19 @@ ID to look up metadata (e.g. via Scryfall API or a local catalog).
 - [ ] `test_canny_detector.py` — CannyCornerDetector on a synthetic card image
 
 ### 7b. Integration tests
-- [ ] `tests/integration/test_identify.py`
-  - Synthetic catalog NPZ + test card image (small, checked in)
-  - `Catalog.load("test_catalog.npz")` returns correct ID
-  - Multi-image voting with `frame_results`
-  - `include_crop=True` returns a crop image
+- [x] `examples/identify_image.py --smoke-test` — headless pipeline check (no real card needed)
+- [ ] `tests/integration/test_pipeline.py`
+  - Synthetic catalog NPZ + small test card image (checked in)
+  - Full detect → dewarp → embed → search returns the correct card ID
+  - Multi-frame score aggregation produces a better result than single-frame
   - Gated by `pytest -m integration` (requires bundled weights)
 
 ### 7c. Smoke test (post-install)
 - [ ] `tests/smoke/test_install.py`
   - `import collector_vision as cvg` — no error
   - `cvg.__version__` is a string
-  - `cvg.Game.MTG` accessible
+  - `cvg.Game.MTG`, `cvg.Catalog`, `cvg.NeuralCornerDetector` accessible
   - `cvg.HFD` callable
-  - `cvg.weights.check()` returns expected keys
 
 ---
 
@@ -193,8 +184,8 @@ ID to look up metadata (e.g. via Scryfall API or a local catalog).
 - [ ] Ground-truth manifest CSV (`scryfall_id` or `pokemontcg_id` per image)
 
 ### 11b. Eval harness
-- [ ] `eval/benchmark.py` — CLI; runs `Identifier.identify()` on each image;
-  reports top-1/top-3 accuracy + latency; writes `results.csv`
+- [ ] `eval/benchmark.py` — CLI; runs the full detect → dewarp → embed → search pipeline
+  on each image; reports top-1/top-3 accuracy + latency; writes `results.csv`
 
 ### 11c. Published results
 - [ ] Results table in README
@@ -205,25 +196,22 @@ ID to look up metadata (e.g. via Scryfall API or a local catalog).
 
 ## 12. API server
 
-> Reference: `ccg_card_id/07_web_scanner`. A minimal version is already in
-> `examples/server/server.py`. The production port below adds multi-catalog,
-> browser UI, and Docker.
+> A minimal version is already in `examples/server/server.py`.
+> The production port below adds multi-catalog, browser UI, and Docker.
 
-### 12a. API format (Ximilar-compatible)
+### 12a. API format
 ```
-POST /v1/identify
-  body:     {"records": [{"_base64": "...", "catalog": "scryfall-mtg"}]}
-  response: {"records": [{...}], "_status": {"code": 200, "text": "OK"}}
+POST /identify
+  body:     {"records": [{"_base64": "..."}]}
+  response: {"records": [{"card_id": "...", "confidence": 0.94, ...}]}
 
-GET /v1/health
-GET /v1/catalogs    — lists loaded catalog names
-GET /v1/defaults
+GET /health
+GET /catalogs    — lists loaded catalog names
 ```
 
 ### 12b. Full server port
 - [ ] Multi-catalog support — dict of `name → Catalog`
 - [ ] Copy browser UI + ScanBucket client from `07_web_scanner/client/`
-- [ ] SSL self-signed cert generation (LAN camera access)
 - [ ] `collectorvision-server` CLI entry point (`pyproject.toml`)
 
 ### 12c. Packaging
@@ -249,7 +237,7 @@ GET /v1/defaults
 #### B1. ONNX models ✅
 - [x] Cornelius exported to ONNX (`cornelius.onnx`, 8.2 MB) and verified
 - [x] Milo exported to ONNX (`milo.onnx`, 5.0 MB) and verified
-- [ ] Upload to HF Hub alongside future `.pt` reference files
+- [x] Both uploaded to HF Hub
 
 #### B2. Android
 - [ ] ONNX Runtime for Android; Android Archive (AAR) on Maven Central
@@ -279,7 +267,7 @@ GET /v1/defaults
 
 ### 14c. Publishing
 - [ ] `pipeline/upload_catalog.py` — upload NPZ to `HanClinto/milo` under `catalogs/`,
-      update `manifest.json` at repo root
+      update `catalogs/manifest.json`
 
 ### 14d. Automation
 - [ ] GitHub Actions monthly refresh
@@ -291,11 +279,11 @@ GET /v1/defaults
 
 | Milestone | Status | Key items |
 |---|---|---|
-| **M0 — Code complete** | ✅ | `identify(*images)`, Cornelius + Milo wired, retrieval, Canny |
-| **M1 — Weights finalized** | ✅ | `cornelius.onnx` + `milo.onnx` bundled; single-file, clean names |
-| **M1.5 — Examples** | ✅ | `examples/identify_image.py`, `examples/server/` |
-| **M2 — First catalog** | ✅ | `milo1-scryfall-mtg` built, uploaded to `HanClinto/milo`, `HFD` resolves it |
-| **M3 — End-to-end works** | ✅ | `pip install -e .`, smoke test passes, `Catalog.for_game(Game.MTG)` confirmed |
+| **M0 — Code complete** | ✅ | Explicit pipeline API, Cornelius + Milo wired, Catalog.search(), Canny |
+| **M1 — Weights finalized** | ✅ | `cornelius.onnx` + `milo.onnx` bundled and on HF Hub with model cards |
+| **M1.5 — Examples** | ✅ | `examples/identify_image.py` (5-step walkthrough + smoke test), `examples/server/` |
+| **M2 — First catalog** | ✅ | `milo1-scryfall-mtg` built, uploaded to `HanClinto/milo`, `hf://` URI confirmed |
+| **M3 — End-to-end works** | ✅ | `pip install -e .`, smoke test passes, full pipeline verified |
 | **M4 — Full catalog set** | ⬜ | Magic + Pokémon milo1 + phash16 catalogs live |
 | **M5 — PyPI v0.1.0** | ⬜ | CI green, tests pass, published to PyPI |
 | **M6 — Automated** | ⬜ | Dependabot, docs site, CHANGELOG |
