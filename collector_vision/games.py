@@ -17,17 +17,11 @@ from enum import Enum
 class Embedding(str, Enum):
     """Embedding algorithm used to represent and compare cards.
 
-    MILO   — ArcFace neural embedding (MobileViT-XXS backbone).  Best
-              accuracy for edition (exact printing) identification.  Requires
-              a GPU or Apple Silicon for reasonable speed.
-
-    PHASH  — Perceptual hash (16×16 DCT).  Runs on any CPU, no GPU needed.
-              Excellent for artwork identification; weaker on edition.
-              Catalog is ~30× smaller than MILO (32 B vs 512 B per card).
+    MILO — ArcFace neural embedding (MobileViT-XXS backbone).  Best accuracy
+           for edition (exact printing) identification.
     """
 
-    MILO  = "milo1"    # neural ArcFace, default
-    PHASH = "phash16"  # perceptual hash 16×16
+    MILO = "milo1"
 
     def __str__(self) -> str:
         return self.value
@@ -36,8 +30,7 @@ class Embedding(str, Enum):
     def family(self) -> str:
         """Model family name for HF repo naming — strips version suffix.
 
-        ``Embedding.MILO.family`` → ``"milo"``   (milo1, milo2 → same repo)
-        ``Embedding.PHASH.family`` → ``"phash16"`` (variant is stable)
+        ``Embedding.MILO.family`` → ``"milo"``  (milo1, milo2 → same repo)
         """
         return re.sub(r"\d+$", "", self.value) or self.value
 
