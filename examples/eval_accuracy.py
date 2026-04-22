@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""Measure top-1 / top-k identification accuracy on a labelled image directory.
+"""Evaluate edition and card accuracy on UUID-labelled card images.
 
-Filenames must embed the Scryfall UUID:
-    {scryfall_uuid}_{anything}.jpg
+The Scryfall UUID must appear somewhere in each filename:
+    {uuid}_CardName_date.jpg
 
-Runs the full pipeline on every image and reports:
-  - Detection rate
-  - Edition accuracy  — exact Scryfall UUID match (specific printing)
-  - Card accuracy     — oracle_id match (correct card, any printing)
-
-Card accuracy requires oracle_ids in the catalog (available in catalogs
-built with CollectorVision 0.1+).
+Reports:
+  Edition accuracy — top result is the exact printing (Scryfall UUID match)
+  Card accuracy    — top result is the same card, any printing (oracle_id match)
 
 Usage
 -----
-    python examples/eval_accuracy.py <image_dir> --catalog hf://HanClinto/milo/scryfall-mtg
-    python examples/eval_accuracy.py <image_dir> --catalog ./my_catalog.npz --top-k 5
+    python examples/eval_accuracy.py image.jpg --catalog hf://HanClinto/milo/scryfall-mtg
+    python examples/eval_accuracy.py images/   --catalog hf://HanClinto/milo/scryfall-mtg
 """
 import argparse
 import re
@@ -31,65 +27,49 @@ UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("image_dir", type=Path)
-    parser.add_argument("--catalog", required=True)
+    parser.add_argument("input", type=Path, help="Image file or directory")
+    parser.add_argument("--catalog", required=True, help="hf://user/repo/key or .npz path")
     parser.add_argument("--top-k", type=int, default=3)
-    parser.add_argument("--min-sharpness", type=float, default=0.02)
     args = parser.parse_args()
 
-    images = [p for p in sorted(args.image_dir.glob("*.jpg"))
-              if UUID_RE.search(p.name)]
-    if not images:
-        sys.exit(f"No UUID-labelled images found in {args.image_dir}")
+    paths = (sorted(args.input.glob("*.jpg"))
+             if args.input.is_dir() else [args.input])
+    paths = [p for p in paths if UUID_RE.search(p.name)]
+    if not paths:
+        sys.exit("No UUID-labelled images found.")
 
-    catalog = cvg.Catalog.load(args.catalog)
+    catalog  = cvg.Catalog.load(args.catalog)
     detector = cvg.NeuralCornerDetector()
-    catalog_ids = set(catalog.card_ids)
-    has_oracle = bool(catalog.card_to_oracle)
 
     detected = edition1 = editionk = oracle1 = oraclek = total = 0
 
-    for img_path in images:
-        true_id = UUID_RE.search(img_path.name).group(0).lower()
-        if true_id not in catalog_ids:
+    for path in paths:
+        true_id = UUID_RE.search(path.name).group(0).lower()
+        if true_id not in set(catalog.card_ids):
             continue
         total += 1
 
-        bgr = cv2.imread(str(img_path))
-        detection = detector.detect(bgr, min_sharpness=args.min_sharpness)
+        detection = detector.detect(cv2.imread(str(path)))
         if not detection.card_present:
             continue
         detected += 1
 
-        crop = detection.dewarp(bgr)
-        emb = catalog.embedder.embed([crop])[0]
+        emb  = catalog.embedder.embed([detection.dewarp(cv2.imread(str(path)))])[0]
         hits = [cid for _, cid in catalog.search(emb, top_k=args.top_k)]
 
-        if hits[0] == true_id:
-            edition1 += 1
-        if true_id in hits:
-            editionk += 1
+        edition1  += hits[0] == true_id
+        editionk  += true_id in hits
 
-        if has_oracle:
-            true_oracle = catalog.card_to_oracle.get(true_id)
-            if true_oracle:
-                hit_oracles = [catalog.card_to_oracle.get(cid) for cid in hits]
-                if hit_oracles[0] == true_oracle:
-                    oracle1 += 1
-                if true_oracle in hit_oracles:
-                    oraclek += 1
+        true_oracle  = catalog.card_to_oracle.get(true_id)
+        hit_oracles  = [catalog.card_to_oracle.get(c) for c in hits]
+        oracle1  += bool(true_oracle) and hit_oracles[0] == true_oracle
+        oraclek  += bool(true_oracle) and true_oracle in hit_oracles
 
-    def pct(n, d): return f"{100*n/d:.1f}%" if d else "n/a"
+    def pct(n, d): return f"{100 * n / d:.1f}%" if d else "—"
 
-    print(f"Dataset:        {args.image_dir.name}  ({total} images in catalog)")
-    print(f"Detected:       {detected}/{total}  ({pct(detected, total)})")
-    print(f"Edition top-1:  {edition1}/{detected}  ({pct(edition1, detected)})")
-    print(f"Edition top-{args.top_k}:  {editionk}/{detected}  ({pct(editionk, detected)})")
-    if has_oracle:
-        print(f"Card top-1:     {oracle1}/{detected}  ({pct(oracle1, detected)})")
-        print(f"Card top-{args.top_k}:     {oraclek}/{detected}  ({pct(oraclek, detected)})")
-    else:
-        print("(Card accuracy unavailable — catalog has no oracle_ids)")
+    print(f"Images:          {total}  ({detected} detected)")
+    print(f"Edition  top-1:  {pct(edition1,  detected)}   top-{args.top_k}: {pct(editionk,  detected)}")
+    print(f"Card     top-1:  {pct(oracle1,   detected)}   top-{args.top_k}: {pct(oraclek,   detected)}")
 
 
 if __name__ == "__main__":
