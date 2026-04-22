@@ -25,6 +25,32 @@ Checklist for turning the scaffold into a shippable library.
 - [x] ONNX-based inference via `onnxruntime`
 - [x] 128-d L2-normalised embeddings from 448×448 input
 - [x] Bundled as `collector_vision/weights/milo.onnx` (5.0 MB, single file)
+- [ ] **Re-export with dynamic batch dimension** for throughput-oriented use cases
+      (bulk eval, catalog building).  Currently exported at batch_size=1 so every
+      image requires a separate `sess.run()` call — the Python loop overhead adds up.
+
+      **How to re-export:**
+      The source checkpoint is a PyTorch `EmbeddingNet` / `MultiTaskEmbeddingNet`
+      in `ccg_card_id/04_build/mobilevit_xxs/models.py`.  Export with:
+      ```python
+      torch.onnx.export(
+          model,
+          dummy_input,                        # shape (1, 3, 448, 448)
+          "milo.onnx",
+          input_names=["input"],
+          output_names=["embedding"],
+          dynamic_axes={"input": {0: "batch_size"}, "embedding": {0: "batch_size"}},
+          opset_version=17,
+      )
+      ```
+      After export, verify that passing a (N, 3, 448, 448) batch produces (N, 128)
+      output, then update `NeuralEmbedder.embed()` to stack the batch into a single
+      `sess.run()` call instead of looping.  The `.onnx.data` sidecar file is normal
+      for large models (weights stored externally) — both files must be kept together.
+
+      **Same applies to Cornelius** (`collector_vision/weights/cornelius.onnx`),
+      though batching the detector is less valuable since detection misses are
+      decided per-frame and batching would complicate the sharpness gate logic.
 
 ### 1d. Retrieval helpers ✅
 - [x] `collector_vision/retrieval.py` — `cosine_search()` (cosine similarity over L2-normalised vectors)
