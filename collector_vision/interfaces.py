@@ -1,6 +1,6 @@
 """Protocols defining the pluggable detector and embedder interfaces.
 
-Any object satisfying these protocols can be passed to identify() — no
+Any object satisfying these protocols can be used in the pipeline — no
 subclassing required.  The bundled implementations (NeuralCornerDetector,
 CannyCornerDetector, NeuralEmbedder, HashEmbedder) all satisfy them, and
 users can supply their own without touching CollectorVision internals.
@@ -10,6 +10,10 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 import numpy as np
+
+# Dewarped card output size — card aspect ratio ~63.5 × 88.9 mm
+_DEWARP_W = 252  # 4 × 63
+_DEWARP_H = 352  # 4 × 88
 
 
 @runtime_checkable
@@ -40,6 +44,37 @@ class DetectionResult:
         self.card_present = card_present
         self.confidence = confidence
         self.extra = extra or {}
+
+    def dewarp(self, bgr: np.ndarray) -> "Image":
+        """Perspective-warp the card region to a flat rectangle.
+
+        Parameters
+        ----------
+        bgr:
+            Full-frame BGR image (as returned by ``cv2.imread``).
+
+        Returns
+        -------
+        PIL Image (RGB) of the dewarped card, sized ``252 × 352`` px.
+        Raises ``ValueError`` if no card was detected (``card_present`` is False
+        or ``corners`` is None).
+        """
+        if not self.card_present or self.corners is None:
+            raise ValueError(
+                "Cannot dewarp: no card detected. Check card_present before calling dewarp()."
+            )
+        import cv2
+        from PIL import Image
+
+        h, w = bgr.shape[:2]
+        src = self.corners * np.array([w, h], dtype=np.float32)
+        dst = np.array(
+            [[0, 0], [_DEWARP_W - 1, 0], [_DEWARP_W - 1, _DEWARP_H - 1], [0, _DEWARP_H - 1]],
+            dtype=np.float32,
+        )
+        M = cv2.getPerspectiveTransform(src, dst)
+        warped = cv2.warpPerspective(bgr, M, (_DEWARP_W, _DEWARP_H))
+        return Image.fromarray(cv2.cvtColor(warped, cv2.COLOR_BGR2RGB))
 
 
 @runtime_checkable

@@ -1,27 +1,44 @@
 #!/usr/bin/env python3
-"""Identify a card from one or more images.
+"""Identify a card from a photo — explicit pipeline walkthrough.
+
+Shows every step:
+  1. Load image
+  2. Detect card corners (NeuralCornerDetector / Cornelius)
+  3. Dewarp to aligned crop
+  4. Embed (NeuralEmbedder / Milo)
+  5. Nearest-neighbour search against the gallery
+  6. Metadata lookup via Scryfall API
 
 Usage
 -----
-    # Local gallery file
-    python examples/identify_image.py <gallery.npz> <image.jpg> [image2.jpg ...]
+    python examples/identify_image.py <image.jpg> [image2.jpg ...]
 
-    # Auto-download from HuggingFace
-    python examples/identify_image.py --hf scryfall-mtg <image.jpg>
+    # Use a local gallery file instead of downloading
+    python examples/identify_image.py --gallery ./milo1-scryfall-mtg-2026-04.npz <image.jpg>
 
 Multiple images of the same physical card are treated as frames — scores are
-summed across frames before ranking, giving a more confident result.
+summed across frames before ranking.
 
-Smoke-test mode (no card images required)
-------------------------------------------
-    python examples/identify_image.py --smoke-test <gallery.npz>
-
-Runs the full pipeline on a blank image and checks the result structure.
-Useful for verifying the install and that the gallery loads correctly.
+Smoke-test (no card image required)
+------------------------------------
+    python examples/identify_image.py --smoke-test
+    python examples/identify_image.py --smoke-test --gallery ./milo1-scryfall-mtg-2026-04.npz
 """
+import argparse
 import json
 import sys
 import urllib.request
+
+import cv2
+import numpy as np
+
+import collector_vision as cvg
+
+
+def load_gallery(args) -> cvg.Gallery:
+    if args.gallery:
+        return cvg.Gallery.load(args.gallery)
+    return cvg.Gallery.load(cvg.HFD("HanClinto/milo", "scryfall-mtg").resolve())
 
 
 def lookup_scryfall(scryfall_id: str) -> dict:
@@ -30,89 +47,121 @@ def lookup_scryfall(scryfall_id: str) -> dict:
         return json.loads(resp.read())
 
 
-def smoke_test(gallery_path: str) -> None:
-    import numpy as np
-    import collector_vision as cvg
+MIN_SHARPNESS = 0.02  # SimCC mean-peak gate: blank≈0.008, valid card≈0.03–0.07
 
-    print(f"Loading gallery: {gallery_path}")
-    gallery = cvg.Gallery.load(gallery_path)
-    print(f"  {gallery}")
+
+def identify_images(image_paths: list[str], gallery: cvg.Gallery) -> None:
+    detector = cvg.NeuralCornerDetector()
+
+    # ── Steps 1–3: load, detect, dewarp ──────────────────────────────────────
+    crops = []
+    for path in image_paths:
+        image = cv2.imread(path)
+        if image is None:
+            print(f"Could not read image: {path}", file=sys.stderr)
+            sys.exit(1)
+
+        detection = detector.detect(image)
+        sharpness = detection.extra.get("sharpness", 0.0)
+        print(f"  {path}: sharpness={sharpness:.3f}  card_present={detection.card_present}")
+
+        if sharpness < MIN_SHARPNESS:
+            print(f"  (sharpness {sharpness:.3f} < {MIN_SHARPNESS} — skipping frame)")
+            continue
+
+        if detection.card_present:
+            crop = detection.dewarp(image)   # PIL Image, 252×352 px
+        else:
+            print("  (corners not found — using full frame)")
+            from PIL import Image
+            rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            crop = Image.fromarray(rgb)
+        crops.append(crop)
+
+    if not crops:
+        print("No usable frames (all below sharpness threshold).")
+        sys.exit(1)
+
+    # ── Step 4: embed ─────────────────────────────────────────────────────────
+    embedder = gallery.embedder
+    embeddings = embedder.embed(crops)        # (n_frames, 128) float32
+
+    # ── Step 5: nearest-neighbour search, aggregate across frames ────────────
+    if len(crops) == 1:
+        hits = gallery.search(embeddings[0], top_k=5)
+    else:
+        from collections import defaultdict
+        score_map: dict[str, float] = defaultdict(float)
+        for emb in embeddings:
+            for score, card_id in gallery.search(emb, top_k=5):
+                score_map[card_id] += score
+        hits = sorted(score_map.items(), key=lambda x: x[1], reverse=True)[:5]
+        hits = [(score, card_id) for card_id, score in hits]
+
+    best_score, best_id = hits[0]
+    print(f"\nTop match   {best_id}  confidence={best_score:.4f}")
+
+    if len(hits) > 1:
+        print("Alternatives:")
+        for score, card_id in hits[1:4]:
+            print(f"  {card_id}  confidence={score:.4f}")
+
+    # ── Step 6: metadata lookup ───────────────────────────────────────────────
+    try:
+        card = lookup_scryfall(best_id)
+        print(f"Name        {card['name']}")
+        print(f"Set         {card['set_name']} ({card['set'].upper()})")
+        usd = card.get("prices", {}).get("usd")
+        print(f"Price (USD) {'$' + usd if usd else 'n/a'}")
+    except Exception as exc:
+        print(f"Scryfall lookup failed: {exc}")
+
+
+def smoke_test(gallery: cvg.Gallery) -> None:
+    print(f"Gallery: {gallery}")
     assert len(gallery) > 0, "Gallery is empty"
     assert gallery.card_ids[0], "First card_id is blank"
 
-    print("Running full pipeline on a blank image ...")
-    cvid = cvg.Identifier(gallery)
-
+    detector = cvg.NeuralCornerDetector()
     blank = np.zeros((800, 600, 3), dtype=np.uint8)
-    result = cvid.identify(blank)
 
-    assert result is not None, "identify() returned None"
-    assert isinstance(result.confidence, float), "confidence is not a float"
-    assert isinstance(result.alternatives, list), "alternatives is not a list"
-    assert isinstance(result.ids, dict), "ids is not a dict"
+    detection = detector.detect(blank)
+    assert isinstance(detection.card_present, bool)
+    assert isinstance(detection.extra.get("sharpness", 0.0), float)
 
-    print(f"  Result: {result.ids}  confidence={result.confidence:.4f}")
+    from PIL import Image
+    crop = Image.fromarray(blank[..., ::-1])  # skip dewarp on blank — no corners
+
+    emb = gallery.embedder.embed(crop)
+    assert emb.shape == (128,), f"Expected (128,), got {emb.shape}"
+
+    hits = gallery.search(emb, top_k=3)
+    assert len(hits) == 3
+    assert all(isinstance(score, float) and isinstance(cid, str) for score, cid in hits)
+
+    print(f"Top hit: {hits[0][1]}  score={hits[0][0]:.4f}")
     print("Smoke test passed.")
 
 
 def main() -> None:
-    args = sys.argv[1:]
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("images", nargs="*", metavar="IMAGE")
+    parser.add_argument("--gallery", metavar="PATH",
+                        help="Local .npz gallery file (default: auto-download from HuggingFace)")
+    parser.add_argument("--smoke-test", action="store_true",
+                        help="Run a headless pipeline check instead of identifying a card")
+    args = parser.parse_args()
 
-    if not args:
-        print(__doc__)
-        sys.exit(1)
+    gallery = load_gallery(args)
 
-    if args[0] == "--smoke-test":
-        if len(args) < 2:
-            print("Usage: identify_image.py --smoke-test <gallery.npz>")
-            sys.exit(1)
-        smoke_test(args[1])
-        return
-
-    if args[0] == "--hf":
-        if len(args) < 3:
-            print("Usage: identify_image.py --hf <gallery-key> <image.jpg> [...]")
-            print("  gallery-key examples: scryfall-mtg, tcgplayer-pokemon")
-            sys.exit(1)
-        import collector_vision as cvg
-        gallery_key = args[1]
-        image_paths = args[2:]
-        cvid = cvg.Identifier(cvg.HFD("HanClinto/milo", gallery_key))
+    if args.smoke_test:
+        smoke_test(gallery)
+    elif args.images:
+        identify_images(args.images, gallery)
     else:
-        import collector_vision as cvg
-        gallery_path = args[0]
-        image_paths  = args[1:]
-        if not image_paths:
-            print("No images provided. Use --smoke-test to verify without images.")
-            sys.exit(1)
-        cvid = cvg.Identifier(gallery_path)
-
-    result = cvid.identify(*image_paths)
-
-    print(f"Top match   confidence={result.confidence:.4f}")
-    print(f"IDs         {result.ids}")
-
-    sfid = result.ids.get("scryfall_id")
-    if sfid:
-        try:
-            card = lookup_scryfall(sfid)
-            print(f"Name        {card['name']}")
-            print(f"Set         {card['set_name']} ({card['set'].upper()})")
-            usd = card.get("prices", {}).get("usd")
-            print(f"Price (USD) {'$' + usd if usd else 'n/a'}")
-        except Exception as exc:
-            print(f"Scryfall lookup failed: {exc}")
-
-    if result.alternatives:
-        print("\nAlternatives:")
-        for alt in result.alternatives[:3]:
-            print(f"  {alt.ids}  confidence={alt.confidence:.4f}")
-
-    if result.frame_results:
-        print(f"\nPer-frame results ({len(result.frame_results)} frames):")
-        for i, fr in enumerate(result.frame_results):
-            sfid = fr.ids.get("scryfall_id", "?")
-            print(f"  frame {i}: {sfid[:8]}...  confidence={fr.confidence:.4f}")
+        parser.print_help()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
