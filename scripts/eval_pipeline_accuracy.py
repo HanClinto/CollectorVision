@@ -22,9 +22,12 @@ Usage
 import argparse
 import re
 import sys
+import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 UUID_RE = re.compile(
@@ -37,8 +40,13 @@ def extract_uuid(filename: str) -> str | None:
     return m.group(0).lower() if m else None
 
 
-def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int) -> None:
-    import cv2
+def _load_image(img_path: Path) -> tuple[Path, np.ndarray | None]:
+    bgr = cv2.imread(str(img_path))
+    return img_path, bgr
+
+
+def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int,
+        load_workers: int) -> None:
     import collector_vision as cvg
 
     images = sorted(image_dir.glob("*.jpg")) + sorted(image_dir.glob("*.png"))
@@ -51,6 +59,7 @@ def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int) 
     catalog = cvg.Catalog.load(catalog_source)
     catalog_ids = set(catalog.card_ids)
     print(f"Catalog: {len(catalog)} cards  ({catalog.source})")
+    print(f"Images:  {len(images)}  (load_workers={load_workers})")
 
     detector = cvg.NeuralCornerDetector()
 
@@ -58,14 +67,28 @@ def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int) 
     n_detected = 0
     n_in_catalog = 0
     top1_exact = 0
-    top3_exact = 0
+    topk_exact = 0
 
     misses_by_card: dict[str, int] = defaultdict(int)
     errors_by_card: dict[str, int] = defaultdict(int)
 
+    # Pre-load images concurrently while inference runs on already-loaded ones.
+    # We submit all loads up front; as_completed() yields them as they arrive.
+    t0 = time.perf_counter()
+    loaded: dict[Path, np.ndarray | None] = {}
+    with ThreadPoolExecutor(max_workers=load_workers) as pool:
+        futures = {pool.submit(_load_image, p): p for p in images}
+        for future in as_completed(futures):
+            img_path, bgr = future.result()
+            loaded[img_path] = bgr
+
+    t_load = time.perf_counter() - t0
+    print(f"Loaded {len(loaded)} images in {t_load:.1f}s")
+
+    t1 = time.perf_counter()
     for img_path in images:
         true_id = extract_uuid(img_path.name)
-        bgr = cv2.imread(str(img_path))
+        bgr = loaded.get(img_path)
         if bgr is None:
             continue
 
@@ -88,9 +111,14 @@ def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int) 
         if result_ids[0] == true_id:
             top1_exact += 1
         if true_id in result_ids:
-            top3_exact += 1
+            topk_exact += 1
         else:
             errors_by_card[true_id] += 1
+
+    t_infer = time.perf_counter() - t1
+
+    total_time = t_load + t_infer
+    ms_per_img = 1000 * t_infer / max(n_in_catalog, 1)
 
     # Summary
     print(f"\n{'─'*50}")
@@ -99,7 +127,9 @@ def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int) 
     print(f"Detected:         {n_detected}/{n_total}  ({pct(n_detected, n_total)})")
     print(f"In catalog:       {n_in_catalog}/{n_detected}  ({pct(n_in_catalog, n_detected)})")
     print(f"Top-1 exact:      {top1_exact}/{n_in_catalog}  ({pct(top1_exact, n_in_catalog)})")
-    print(f"Top-{top_k} exact:      {top3_exact}/{n_in_catalog}  ({pct(top3_exact, n_in_catalog)})")
+    print(f"Top-{top_k} exact:      {topk_exact}/{n_in_catalog}  ({pct(topk_exact, n_in_catalog)})")
+    print(f"Timing:           {total_time:.1f}s total  "
+          f"(load {t_load:.1f}s + infer {t_infer:.1f}s,  {ms_per_img:.0f}ms/img)")
 
     if misses_by_card:
         total_missed = sum(misses_by_card.values())
@@ -123,9 +153,11 @@ def main() -> None:
                         help="hf://user/repo/key or path to .npz")
     parser.add_argument("--min-sharpness", type=float, default=0.02)
     parser.add_argument("--top-k", type=int, default=3)
+    parser.add_argument("--load-workers", type=int, default=8,
+                        help="Threads for parallel image loading (default: 8)")
     args = parser.parse_args()
 
-    run(args.image_dir, args.catalog, args.min_sharpness, args.top_k)
+    run(args.image_dir, args.catalog, args.min_sharpness, args.top_k, args.load_workers)
 
 
 if __name__ == "__main__":
