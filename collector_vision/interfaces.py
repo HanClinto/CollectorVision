@@ -4,8 +4,8 @@ Any object satisfying these protocols can be used in the pipeline — no
 subclassing required.  The bundled NeuralCornerDetector and NeuralEmbedder
 satisfy them, and users can supply their own.
 
-To bypass detection entirely, construct a DetectionResult directly with
-known corners and call dewarp() on it.
+To bypass detection entirely, either crop the image yourself or construct
+a DetectionResult with your own corners and call dewarp() on it.
 """
 from __future__ import annotations
 
