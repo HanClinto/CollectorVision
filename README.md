@@ -1,6 +1,6 @@
 # CollectorVision
 
-Card identification library for collectible card games. Feed it an image, get back a card identity.
+Card identification library for collectible card games. Feed it a photo, get back a card identity.
 
 Supports Magic: The Gathering today, with Pokémon and others on the way.
 
@@ -8,72 +8,40 @@ Supports Magic: The Gathering today, with Pokémon and others on the way.
 
 ## Install
 
+> **Not yet on PyPI.** Install directly from GitHub:
+
 ```bash
-pip install collectorvision
+pip install git+https://github.com/HanClinto/CollectorVision.git
 ```
 
-Requires Python 3.10+. Model weights are bundled — no separate download needed.
-PyTorch is a dependency; install the GPU-accelerated variant for your platform first if you want faster inference.
+Requires Python 3.10+. No GPU required — inference runs on CPU via ONNX Runtime.
 
 ---
 
 ## Quickstart
 
-Download a gallery file for your game from [HuggingFace](https://huggingface.co/datasets/CollectorVision/galleries), then:
-
 ```python
-import urllib.request, json
 import collector_vision as cvg
 
-cvid = cvg.Identifier("./magic-scryfall-milo1-2026-04.npz")
+# Downloads the gallery on first run (~54 MB), cached locally after that
+cvid = cvg.Identifier(cvg.HFD("HanClinto/milo", "scryfall-mtg"))
 result = cvid.identify("photo.jpg")
 
-print(result.ids)        # {"scryfall_id": "...", "tcgplayer_id": "...", ...}
-print(result.confidence) # 0.94
-
-# Look up card metadata from Scryfall
-sfid = result.ids["scryfall_id"]
-card = json.loads(urllib.request.urlopen(f"https://api.scryfall.com/cards/{sfid}").read())
-print(card["name"], card["set_name"], card["prices"]["usd"])
+print(result.ids)         # {"scryfall_id": "abc123..."}
+print(result.confidence)  # 0.94
 ```
 
-Create one `Identifier` per process — it holds the gallery in memory and reuses it across calls.
+`Identifier` loads the gallery once and reuses it across calls. Create one per process.
 
 ---
 
-## Auto-download with HFD
+## Local gallery file
 
-`HFD` resolves the latest gallery for a given name and caches it locally. It checks for updates at most once every 7 days, so repeated calls cost nothing after the first.
-
-```python
-cvid = cvg.Identifier(
-    cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1")
-)
-```
-
-The gallery is saved to `~/.cache/collectorvision/`. When a newer version is published, `HFD` downloads it and removes the old file automatically. You can also pin the refresh window:
+Download a gallery from [HuggingFace](https://huggingface.co/HanClinto/milo/tree/main/galleries)
+and pass the path directly — nothing touches the network at runtime:
 
 ```python
-from datetime import timedelta
-
-# Never recheck — use whatever is cached (pin indefinitely)
-cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1", cache_refresh=None)
-
-# Always check (useful in CI)
-cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1", cache_refresh=timedelta(0))
-```
-
----
-
-## Multiple games
-
-Can detect against multiple games at once. Just load the galleries for multiple games at the same time.
-
-```python
-cvid = cvg.Identifier(
-    cvg.HFD("CollectorVision/galleries", "magic-scryfall-milo1"),
-    cvg.HFD("CollectorVision/galleries", "pokemon-tcgplayer-milo1"),
-)
+cvid = cvg.Identifier("./milo1-scryfall-mtg-2026-04.npz")
 result = cvid.identify("photo.jpg")
 ```
 
@@ -81,51 +49,37 @@ result = cvid.identify("photo.jpg")
 
 ## Multiple frames, one card
 
-Pass several images of the same physical card and `identify()` votes across
-them — similarity scores are summed before ranking, giving a more confident
-result than any single frame:
+Pass several images of the same physical card to vote across frames — similarity scores
+are summed before ranking, giving a more confident result than any single frame:
 
 ```python
 result = cvid.identify("frame1.jpg", "frame2.jpg", "frame3.jpg")
-print(result.card_name)      # aggregate winner
 print(result.confidence)     # combined confidence
-
-# Individual per-frame results are also available
-for frame in result.frame_results:
-    print(frame.card_name, frame.confidence)
+print(result.frame_results)  # per-frame breakdown
 ```
 
 ---
 
 ## Pre-cropped images
 
-If your image is already a clean crop of just the card — no background, no perspective — pass `detector=None` to skip corner detection:
+If your input is already a clean card crop with no background or perspective distortion,
+skip corner detection:
 
 ```python
-cvid = cvg.Identifier("./magic-scryfall-milo1-2026-04.npz", detector=None)
-result = cvid.identify("crop.jpg")
+cvid = cvg.Identifier("./milo1-scryfall-mtg-2026-04.npz", detector=None)
 ```
-
----
-
-## Offline use
-
-Pass a local path and nothing will touch the network:
-
-```python
-cvid = cvg.Identifier("./magic-scryfall-milo1-2026-04.npz")
-```
-
-`HFD` also falls back to its local cache automatically if the network is unavailable.
 
 ---
 
 ## Available galleries
 
-Browse and download gallery files at:
-**https://huggingface.co/datasets/CollectorVision/galleries**
+| Game | Source | Gallery key | Size |
+|---|---|---|---|
+| Magic: The Gathering | Scryfall | `scryfall-mtg` | ~54 MB |
 
-Galleries are updated monthly. Filename format: `{game}-{source}-{algorithm}-{YYYY-MM}.npz`
+Browse at **https://huggingface.co/HanClinto/milo/tree/main/galleries**
+
+Galleries are updated monthly. Filename format: `{algo}-{source}-{game}-{YYYY-MM}.npz`
 
 ---
 
