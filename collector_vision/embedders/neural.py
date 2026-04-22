@@ -81,18 +81,24 @@ class NeuralEmbedder:
         input_size = int(shape[2]) if isinstance(shape[2], int) else 448
         return sess, input_name, input_size
 
-    def embed(self, images: list[Image.Image]) -> np.ndarray:
-        """Embed a list of PIL Images.
+    def embed(self, images: "Image.Image | list[Image.Image]") -> np.ndarray:
+        """Embed one or more PIL Images.
 
         Parameters
         ----------
         images:
-            List of PIL Images (any mode; converted to RGB internally).
+            A single PIL Image or a list of PIL Images (any mode; converted
+            to RGB internally).
 
         Returns
         -------
-        (n, 128) float32 array of L2-normalised embeddings.
+        Single image: (128,) float32 vector.
+        List:         (n, 128) float32 array of L2-normalised embeddings.
         """
+        single = isinstance(images, Image.Image)
+        if single:
+            images = [images]
+
         if not images:
             return np.zeros((0, 128), dtype=np.float32)
 
@@ -111,7 +117,8 @@ class NeuralEmbedder:
                     emb = emb / norm
                 all_embs.append(emb)
 
-        return np.stack(all_embs, axis=0)  # (n, 128)
+        result = np.stack(all_embs, axis=0)  # (n, 128)
+        return result[0] if single else result
 
     def __repr__(self) -> str:
         return f"NeuralEmbedder(input_size={self._input_size})"

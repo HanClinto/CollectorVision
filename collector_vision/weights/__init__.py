@@ -2,7 +2,7 @@
 
 Both models are single-file ONNX (no paired .data file).
 
-reggie.onnx  (8.2 MB) — Reggie, card corner detector
+cornelius.onnx  (8.2 MB) — Cornelius, card corner detector
     MobileViT-XXS + SimCC.
     Input:   (1, 3, 384, 384) float32, ImageNet-normalised
     Outputs: corners (1, 8) normalised [0,1] TL/TR/BR/BL x0,y0…
@@ -24,19 +24,19 @@ _WEIGHTS_DIR = Path(__file__).parent
 
 # --- Paths ------------------------------------------------------------------
 
-CORNER_DETECTOR = _WEIGHTS_DIR / "reggie.onnx"   # Reggie
+CORNER_DETECTOR = _WEIGHTS_DIR / "cornelius.onnx"   # Cornelius
 EMBEDDER        = _WEIGHTS_DIR / "milo.onnx"     # Milo
 
 # --- Versions ---------------------------------------------------------------
 # These mirror the 'version' key in each model's ONNX metadata_props.
 # Bump here (and rebuild the wheel) whenever the .onnx file is replaced.
 
-REGGIE_VERSION = "1.0.0"
+CORNELIUS_VERSION = "1.0.0"
 MILO_VERSION   = "1.0.0"
 
 BUNDLED_VERSIONS: dict[str, str] = {
-    "reggie": REGGIE_VERSION,
-    "milo":   MILO_VERSION,
+    "cornelius": CORNELIUS_VERSION,
+    "milo":      MILO_VERSION,
 }
 
 
@@ -48,7 +48,7 @@ def check() -> dict[str, dict]:
     Example output::
 
         {
-            'reggie': {
+            'cornelius': {
                 'present': True,
                 'version': '1.0.0',
                 'task': 'card-corner-detection',
@@ -65,7 +65,7 @@ def check() -> dict[str, dict]:
     Reads ONNX metadata via ``onnxruntime`` on first call (takes ~0.5 s).
     """
     result: dict[str, dict] = {}
-    for name, path in [("reggie", CORNER_DETECTOR), ("milo", EMBEDDER)]:
+    for name, path in [("cornelius", CORNER_DETECTOR), ("milo", EMBEDDER)]:
         if not path.exists():
             result[name] = {"present": False}
             continue

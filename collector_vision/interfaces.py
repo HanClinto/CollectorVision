@@ -46,9 +46,13 @@ class DetectionResult:
 class Embedder(Protocol):
     """Produces a fixed-length vector representation of a dewarped card image.
 
-    Input is a list of PIL Images (already dewarped).  Output is a float32
-    numpy array of shape (n, dim).  Rows should be L2-normalised for cosine
-    similarity retrieval, or packed uint8 bits for Hamming distance retrieval.
+    Input is a single PIL Image or a list of PIL Images (already dewarped).
+
+    - Single image → (D,) float32 vector.
+    - List of images → (N, D) float32 array, one row per image.
+
+    Vectors should be L2-normalised for cosine similarity retrieval, or
+    packed uint8 bits for Hamming distance retrieval.
     """
 
-    def embed(self, images: list) -> np.ndarray: ...
+    def embed(self, images: "Image | list[Image]") -> np.ndarray: ...

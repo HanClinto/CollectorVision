@@ -1,13 +1,11 @@
-"""Gallery: pre-built card index used for nearest-neighbour retrieval.
+"""Gallery: pre-built card embedding index used for nearest-neighbour retrieval.
 
 A Gallery is the primary user-facing artifact of CollectorVision.  It bundles:
-  - the card embedding/hash matrix
-  - card identity metadata (ids, names, set codes)
+  - the card embedding matrix
+  - card IDs (one per row — callers look up names/metadata from the source catalog)
   - the embedder specification needed to embed query images consistently
 
 Users select a gallery file; the library derives everything else from it.
-Embedder parameters (algorithm, hash size, sigma, model checkpoint, …) are
-properties of the gallery, not user-controlled knobs.
 """
 from __future__ import annotations
 
@@ -19,49 +17,43 @@ import numpy as np
 
 if TYPE_CHECKING:
     from collector_vision.interfaces import Embedder
-    from collector_vision.games import Game
+    from collector_vision.games import Game, Embedding
 
 
-# Gallery NPZ keys written by the gallery builder
+# NPZ keys
 _KEY_EMBEDDINGS  = "embeddings"    # (N, D) float32  or  (N, B) uint8
 _KEY_CARD_IDS    = "card_ids"      # (N,) str — primary key (e.g. Scryfall UUID)
-_KEY_IDS_JSON    = "ids_json"      # (N,) str — JSON-encoded per-card ids dicts
 _KEY_SOURCE      = "source"        # scalar str — "scryfall", "tcgplayer", …
 _KEY_MODE        = "mode"          # scalar str — "embedding" | "hash"
 _KEY_EMBEDDER    = "embedder_spec" # scalar str — JSON embedder specification
-
-# Keys present in older gallery files — loaded for compatibility but not stored
-_KEY_CARD_NAMES  = "card_names"    # legacy: dropped, look up from source API
-_KEY_SET_CODES   = "set_codes"     # legacy: redundant with scryfall_id
 
 
 class Gallery:
     """Loaded card gallery ready for retrieval.
 
-    Obtain via Gallery.load() — do not construct directly.
+    Obtain via :meth:`Gallery.load` or :meth:`Gallery.for_game` — do not
+    construct directly.
 
     The embedder required to query this gallery is available via
-    Gallery.embedder.  identify() uses this automatically; most users
-    never need to access it directly.
+    :attr:`Gallery.embedder`.  :meth:`~collector_vision.Identifier.identify`
+    uses this automatically; most users never need to access it directly.
     """
 
     def __init__(
         self,
         embeddings: np.ndarray,
         card_ids: list[str],
-        ids: list[dict],
         source: str,
         mode: str,
         embedder_spec: dict,
     ) -> None:
         self.embeddings = embeddings
         self.card_ids = card_ids
-        self.ids = ids          # parallel list of per-card id dicts
         self.source = source
         self.mode = mode        # "embedding" | "hash"
         self.embedder_spec = embedder_spec
 
-        self._embedder: "Embedder | None" = None  # lazy, created on first access
+        self._embedder: "Embedder | None" = None
 
     @classmethod
     def load(cls, path: str | Path) -> "Gallery":
@@ -72,17 +64,6 @@ class Gallery:
 
         data = np.load(path, allow_pickle=False)
 
-        n = len(data[_KEY_CARD_IDS])
-
-        if _KEY_IDS_JSON in data.files:
-            ids = [json.loads(s) for s in data[_KEY_IDS_JSON].tolist()]
-        else:
-            # Legacy: reconstruct a minimal ids dict from card_ids alone
-            raw = data[_KEY_CARD_IDS].tolist()
-            src = str(data[_KEY_SOURCE]) if _KEY_SOURCE in data.files else "unknown"
-            pk = _source_primary_key(src)
-            ids = [{pk: cid} for cid in raw]
-
         embedder_spec: dict = {}
         if _KEY_EMBEDDER in data.files:
             embedder_spec = json.loads(str(data[_KEY_EMBEDDER]))
@@ -90,7 +71,6 @@ class Gallery:
         return cls(
             embeddings=data[_KEY_EMBEDDINGS],
             card_ids=data[_KEY_CARD_IDS].tolist(),
-            ids=ids,
             source=str(data[_KEY_SOURCE]) if _KEY_SOURCE in data.files else "unknown",
             mode=str(data[_KEY_MODE]) if _KEY_MODE in data.files else "embedding",
             embedder_spec=embedder_spec,
@@ -100,7 +80,7 @@ class Gallery:
     def embedder(self) -> "Embedder":
         """The embedder that must be used to query this gallery.
 
-        Constructed lazily from embedder_spec on first access.
+        Constructed lazily from :attr:`embedder_spec` on first access.
         """
         if self._embedder is None:
             self._embedder = _embedder_from_spec(self.embedder_spec)
@@ -108,7 +88,7 @@ class Gallery:
 
     @property
     def algo_key(self) -> str | None:
-        """Stable algorithm identifier, e.g. 'phash_16' or 'neural_e15'."""
+        """Stable algorithm identifier stored in the gallery, e.g. ``'milo1'``."""
         return self.embedder_spec.get("algo_key")
 
     @classmethod
@@ -116,10 +96,10 @@ class Gallery:
         cls,
         game: "Game",
         embedding: "Embedding | None" = None,
-        cache_dir: "Path | None" = None,
+        cache_dir: Path | None = None,
         offline: bool = False,
     ) -> "Gallery":
-        """Load the latest published gallery for a single game.
+        """Download (or load from cache) the latest gallery for a single game.
 
         Parameters
         ----------
@@ -129,62 +109,50 @@ class Gallery:
             Which embedding algorithm to use.  Defaults to
             :attr:`~collector_vision.games.Embedding.MILO`.
         cache_dir:
-            Local directory for downloaded galleries.  Defaults to
-            ``~/.cache/collectorvision/``.
+            Override the default cache root (``~/.cache/collectorvision/``).
         offline:
-            If True, never make network calls — use only locally cached
-            files.  Raises if the gallery is not cached.
+            If ``True``, never make network calls.  Raises if not cached.
+
+        Example::
+
+            from collector_vision.games import Game
+            gallery = Gallery.for_game(Game.MTG)
         """
-        from collector_vision.games import Embedding as _Embedding
-        from collector_vision.manifest import Manifest, _default_cache_dir
+        from collector_vision.games import Embedding as _Embedding, GAME_PRIMARY_SOURCE
+        from collector_vision.hfd import HFD
 
         embedding = embedding or _Embedding.MILO
-        cache_dir = cache_dir or _default_cache_dir()
-        manifest = Manifest.bundled() if offline else Manifest.fetch(cache_dir)
-
-        filename = manifest.resolve(game, embedding.value)
-        local_path = cache_dir / filename
-
-        if not local_path.exists():
-            if offline:
-                raise FileNotFoundError(
-                    f"Gallery not cached locally: {local_path}\n"
-                    "Run without offline=True to download it."
-                )
-            _download(manifest.url_for(game, embedding.value), local_path)
-
-        return cls.load(local_path)
+        source = GAME_PRIMARY_SOURCE.get(game, "unknown")
+        repo = f"HanClinto/{embedding.family}"
+        gallery_key = f"{source}-{game.value}"
+        return cls.load(HFD(repo, gallery_key, cache_dir=cache_dir, offline=offline).resolve())
 
     @classmethod
     def for_games(
         cls,
         *games: "Game",
         embedding: "Embedding | None" = None,
-        cache_dir: "Path | None" = None,
+        cache_dir: Path | None = None,
         offline: bool = False,
     ) -> "Gallery":
-        """Load and merge galleries for multiple games.
+        """Download and merge galleries for multiple games.
 
-        All games must use the same embedding algorithm so that query vectors
-        are compatible with the merged gallery.  Raises ``ValueError`` if the
-        loaded galleries have incompatible embedder specs.
+        All games must use the same embedding so query vectors are compatible.
 
         Example::
 
-            gallery = Gallery.for_games(Game.MAGIC, Game.POKEMON)
+            from collector_vision.games import Game
+            gallery = Gallery.for_games(Game.MTG, Game.POKEMON)
         """
         loaded = [
             cls.for_game(g, embedding=embedding, cache_dir=cache_dir, offline=offline)
             for g in games
         ]
-        if len(loaded) == 1:
-            return loaded[0]
-        return cls._merge(loaded)
+        return loaded[0] if len(loaded) == 1 else cls._merge(loaded)
 
     @classmethod
     def _merge(cls, galleries: "list[Gallery]") -> "Gallery":
         """Concatenate multiple compatible galleries into one."""
-        # Validate embedder compatibility
         ref_spec = galleries[0].embedder_spec
         for g in galleries[1:]:
             if g.embedder_spec != ref_spec:
@@ -196,7 +164,6 @@ class Gallery:
         return cls(
             embeddings=np.concatenate([g.embeddings for g in galleries], axis=0),
             card_ids=sum((g.card_ids for g in galleries), []),
-            ids=sum((g.ids for g in galleries), []),
             source="+".join(g.source for g in galleries),
             mode=galleries[0].mode,
             embedder_spec=ref_spec,
@@ -212,31 +179,15 @@ class Gallery:
         )
 
 
-def _download(url: str, dest: Path) -> None:
-    """Download a file from *url* to *dest* with a progress indicator."""
-    import urllib.request
-
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".tmp")
-    try:
-        print(f"Downloading {dest.name} ...")
-        urllib.request.urlretrieve(url, tmp)
-        tmp.rename(dest)
-        print(f"  saved to {dest}")
-    except Exception:
-        tmp.unlink(missing_ok=True)
-        raise
-
-
 # ---------------------------------------------------------------------------
-# Embedder spec helpers
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 def _source_primary_key(source: str) -> str:
-    """Best-guess primary key field name for a given source."""
+    """Return the canonical ID field name for a gallery source."""
     return {
-        "scryfall": "scryfall_id",
-        "tcgplayer": "tcgplayer_id",
+        "scryfall":   "scryfall_id",
+        "tcgplayer":  "tcgplayer_id",
         "pokemontcg": "pokemontcg_id",
     }.get(source, "card_id")
 
@@ -270,16 +221,3 @@ def _embedder_from_spec(spec: dict) -> "Embedder":
         f"Full spec: {spec}\n"
         "This gallery may have been built with a newer version of CollectorVision."
     )
-
-
-def make_embedder_spec_hash(algo_key: str, hash_size: int, **kwargs) -> dict:
-    """Build the embedder_spec dict to store in a hash gallery NPZ."""
-    return {"kind": "hash", "algo_key": algo_key, "hash_size": hash_size, **kwargs}
-
-
-def make_embedder_spec_neural(image_size: int, checkpoint_sha256: str | None = None) -> dict:
-    """Build the embedder_spec dict to store in a neural gallery NPZ."""
-    spec = {"kind": "neural", "image_size": image_size}
-    if checkpoint_sha256:
-        spec["checkpoint_sha256"] = checkpoint_sha256
-    return spec

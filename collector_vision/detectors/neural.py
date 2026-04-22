@@ -1,4 +1,4 @@
-"""NeuralCornerDetector — ONNX-based learned card corner detector (Reggie).
+"""NeuralCornerDetector — ONNX-based learned card corner detector (Cornelius).
 
 Runs entirely on CPU via onnxruntime — no PyTorch dependency required.
 
@@ -8,7 +8,7 @@ coordinates, a card-presence logit, and a SimCC sharpness scalar.
 
 Card presence heuristic
 -----------------------
-For Reggie (SimCC architecture) the exported ONNX model includes a *sharpness*
+For Cornelius (SimCC architecture) the exported ONNX model includes a *sharpness*
 output — the mean peak of the eight softmax coordinate distributions (4 corners
 × 2 axes).  A high peak means the model has a sharp, confident prediction for
 each axis; a low peak means the distributions are flat (no card in view).
@@ -56,21 +56,21 @@ def _order_corners(pts: np.ndarray) -> np.ndarray:
 
 
 class NeuralCornerDetector:
-    """Reggie — SimCC card corner detector, runs via onnxruntime.
+    """Cornelius — SimCC card corner detector, runs via onnxruntime.
 
     Parameters
     ----------
     checkpoint:
         Path to the ``.onnx`` file.  The ``.onnx.data`` weight file must sit
-        in the same directory.  Defaults to the bundled Reggie weights.
+        in the same directory.  Defaults to the bundled Cornelius weights.
     min_sharpness:
         Minimum SimCC mean-peak sharpness to treat a detection as valid.
         Range [0, 1]; 0.0 (default) disables the gate — all frames are
         treated as card-present regardless of sharpness.  Only used when
-        the model emits a sharpness output (Reggie does).
+        the model emits a sharpness output (Cornelius does).
 
         Tune this for card-in-scene video pipelines where you want to skip
-        frames with no card visible.  For Reggie, blank/no-card frames
+        frames with no card visible.  For Cornelius, blank/no-card frames
         typically score ≤ 0.01; valid card frames typically score 0.03–0.07.
         A value around 0.02 cleanly separates the two populations.
     presence_threshold:

@@ -17,7 +17,7 @@ Usage
     python server.py --gallery ./magic-scryfall-milo1-2026-04.npz
 
     # Or with HuggingFace auto-download (requires network on first run)
-    python server.py --hfd CollectorVision/galleries magic-scryfall-milo1
+    python server.py --hfd HanClinto/milo scryfall-mtg
 
     # HTTPS (required for camera access from other devices on the LAN)
     python server.py --gallery ./gallery.npz --ssl

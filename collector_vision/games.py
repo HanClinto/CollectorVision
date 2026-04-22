@@ -5,11 +5,12 @@
 Adding a new game requires:
   1. A new ``Game`` entry here
   2. A gallery built and published under the naming convention
-     ``{game}-{source}-{algo}-{YYYY-MM}.npz``
+     ``{algo}-{source}-{game}-{YYYY-MM}.npz``
   3. The manifest on HF Datasets updated to point at the new file
 """
 from __future__ import annotations
 
+import re
 from enum import Enum
 
 
@@ -31,18 +32,27 @@ class Embedding(str, Enum):
     def __str__(self) -> str:
         return self.value
 
+    @property
+    def family(self) -> str:
+        """Model family name for HF repo naming — strips version suffix.
+
+        ``Embedding.MILO.family`` → ``"milo"``   (milo1, milo2 → same repo)
+        ``Embedding.PHASH.family`` → ``"phash16"`` (variant is stable)
+        """
+        return re.sub(r"\d+$", "", self.value) or self.value
+
 
 class Game(str, Enum):
     """Canonical game identifiers used throughout CollectorVision.
 
     Values are lowercase strings safe for use in filenames and API calls.
-    ``str(Game.MAGIC)`` → ``"magic"``.
+    ``str(Game.MTG)`` → ``"mtg"``.
     """
 
     # -----------------------------------------------------------------------
     # Currently supported (galleries published)
     # -----------------------------------------------------------------------
-    MAGIC   = "magic"     # Magic: The Gathering  (source: Scryfall)
+    MTG     = "mtg"       # Magic: The Gathering  (source: Scryfall)
     POKEMON = "pokemon"   # Pokémon TCG           (source: TCGplayer / PokémonTCG.io)
 
     # -----------------------------------------------------------------------
@@ -62,7 +72,7 @@ class Game(str, Enum):
 
 # Human-readable display names for UI / error messages
 GAME_DISPLAY_NAMES: dict[Game, str] = {
-    Game.MAGIC:    "Magic: The Gathering",
+    Game.MTG:    "Magic: The Gathering",
     Game.POKEMON:  "Pokémon TCG",
     Game.YUGIOH:   "Yu-Gi-Oh!",
     Game.FAB:      "Flesh and Blood",
@@ -76,7 +86,7 @@ GAME_DISPLAY_NAMES: dict[Game, str] = {
 # Primary data source for each game.
 # This is informational — the gallery filename encodes the source explicitly.
 GAME_PRIMARY_SOURCE: dict[Game, str] = {
-    Game.MAGIC:    "scryfall",
+    Game.MTG:    "scryfall",
     Game.POKEMON:  "tcgplayer",
     Game.YUGIOH:   "tcgplayer",
     Game.FAB:      "tcgplayer",
