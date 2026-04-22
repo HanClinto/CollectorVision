@@ -1,7 +1,7 @@
 """HashEmbedder — perceptual-hash based card embedder.
 
 Produces packed uint8 bit vectors for Hamming-distance retrieval.
-The Gallery must have been built with the same algorithm and size.
+The Catalog must have been built with the same algorithm and size.
 
 Convenience constructors::
 
@@ -37,9 +37,9 @@ class HashEmbedder:
         Callable that accepts a PIL.Image and returns a bool numpy array of
         exactly *bits* elements.
     bits:
-        Number of bits produced by hash_fn.  Must match the gallery.
+        Number of bits produced by hash_fn.  Must match the catalog.
     algo_key:
-        Stable string identifier (used in cache filenames and Gallery
+        Stable string identifier (used in cache filenames and Catalog
         metadata).  Change it whenever hash_fn behaviour changes.
     """
 

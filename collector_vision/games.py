@@ -4,7 +4,7 @@
 
 Adding a new game requires:
   1. A new ``Game`` entry here
-  2. A gallery built and published under the naming convention
+  2. A catalog built and published under the naming convention
      ``{algo}-{source}-{game}-{YYYY-MM}.npz``
   3. The manifest on HF Datasets updated to point at the new file
 """
@@ -23,7 +23,7 @@ class Embedding(str, Enum):
 
     PHASH  — Perceptual hash (16×16 DCT).  Runs on any CPU, no GPU needed.
               Excellent for artwork identification; weaker on edition.
-              Gallery is ~30× smaller than MILO (32 B vs 512 B per card).
+              Catalog is ~30× smaller than MILO (32 B vs 512 B per card).
     """
 
     MILO  = "milo1"    # neural ArcFace, default
@@ -50,13 +50,13 @@ class Game(str, Enum):
     """
 
     # -----------------------------------------------------------------------
-    # Currently supported (galleries published)
+    # Currently supported (catalogs published)
     # -----------------------------------------------------------------------
     MTG     = "mtg"       # Magic: The Gathering  (source: Scryfall)
     POKEMON = "pokemon"   # Pokémon TCG           (source: TCGplayer / PokémonTCG.io)
 
     # -----------------------------------------------------------------------
-    # Planned (galleries not yet published)
+    # Planned (catalogs not yet published)
     # -----------------------------------------------------------------------
     YUGIOH  = "yugioh"    # Yu-Gi-Oh!             (source: TCGplayer)
     FAB     = "fab"       # Flesh and Blood        (source: TCGplayer)
@@ -84,7 +84,7 @@ GAME_DISPLAY_NAMES: dict[Game, str] = {
 }
 
 # Primary data source for each game.
-# This is informational — the gallery filename encodes the source explicitly.
+# This is informational — the catalog filename encodes the source explicitly.
 GAME_PRIMARY_SOURCE: dict[Game, str] = {
     Game.MTG:    "scryfall",
     Game.POKEMON:  "tcgplayer",

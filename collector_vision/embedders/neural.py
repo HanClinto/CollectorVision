@@ -37,7 +37,7 @@ class NeuralEmbedder:
     batch_size:
         Images to process per ONNX session call.  The default (1) keeps
         latency low for single-image use; increase for throughput-oriented
-        gallery building (though gallery building typically runs in the
+        catalog building (though catalog building typically runs in the
         CollectorVision-Pipeline project, not here).
     num_threads:
         Number of intra-op threads for onnxruntime.

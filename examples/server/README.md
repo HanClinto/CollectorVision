@@ -12,20 +12,20 @@ pip install collectorvision fastapi "uvicorn[standard]"
 ## Run
 
 ```bash
-# Local gallery file
-python server.py --gallery ./magic-scryfall-milo1-2026-04.npz
+# Local catalog file
+python server.py --catalog ./milo1-scryfall-mtg-2026-04.npz
 
 # Auto-download from HuggingFace (cached in ~/.cache/collectorvision/)
-python server.py --hfd CollectorVision/galleries magic-scryfall-milo1
+python server.py --hfd HanClinto/milo scryfall-mtg
 
 # Pre-cropped images (skip corner detection)
-python server.py --gallery ./gallery.npz --detector-none
+python server.py --catalog ./catalog.npz --detector-none
 
 # Filter blurry / no-card frames in a video pipeline
-python server.py --gallery ./gallery.npz --min-sharpness 0.02
+python server.py --catalog ./catalog.npz --min-sharpness 0.02
 
 # HTTPS (required for camera access from phones / other LAN devices)
-python server.py --gallery ./gallery.npz --ssl
+python server.py --catalog ./catalog.npz --ssl
 ```
 
 Browse to **http://localhost:8000** → Swagger UI.
@@ -50,10 +50,10 @@ Response:
       "_status":    { "code": 200, "text": "OK" },
       "card_present": true,
       "sharpness":  0.042,
-      "ids":        { "scryfall_id": "...", "tcgplayer_id": "..." },
+      "card_id":    "abc123...",
       "confidence": 0.94,
       "alternatives": [
-        { "ids": { "scryfall_id": "..." }, "confidence": 0.61 }
+        { "card_id": "def456...", "confidence": 0.61 }
       ],
       "crop_jpeg":  "<base64 preview of the dewarped card>"
     }
@@ -83,8 +83,8 @@ curl -X POST http://localhost:8000/identify/upload \
 
 ## Notes
 
-- The `Identifier` (gallery + detector) is lazy-loaded on the first request and
-  reused for all subsequent calls — startup is fast, first request takes ~1–2 s.
+- The catalog and detector are lazy-loaded on the first request and reused for
+  all subsequent calls — startup is fast, first request takes ~1–2 s.
 - `sharpness` in the response is the SimCC mean-peak score; low values (< 0.02)
   indicate no card is visible in the frame.  Set `--min-sharpness 0.02` to
   automatically skip these frames.
