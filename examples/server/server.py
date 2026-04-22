@@ -2,21 +2,21 @@
 """CollectorVision — plug-and-play card identification server.
 
 A minimal FastAPI server that exposes card identification as a REST API.
-Gallery and detector are loaded lazily on first request and reused.
+Catalog and detector are loaded lazily on first request and reused.
 
 Usage
 -----
     # Install deps
     pip install "collectorvision[server]"
 
-    # Run with local gallery file
-    python server.py --gallery ./milo1-scryfall-mtg-2026-04.npz
+    # Run with local catalog file
+    python server.py --catalog ./milo1-scryfall-mtg-2026-04.npz
 
     # Run with HuggingFace auto-download (downloads on first request)
     python server.py --hfd HanClinto/milo scryfall-mtg
 
     # HTTPS (required for camera access from other devices on the LAN)
-    python server.py --gallery ./gallery.npz --ssl
+    python server.py --catalog ./catalog.npz --ssl
 
 Endpoints
 ---------
@@ -55,10 +55,10 @@ import collector_vision as cvg
 # ---------------------------------------------------------------------------
 
 _parser = argparse.ArgumentParser(description="CollectorVision identification server")
-_parser.add_argument("--gallery",  type=Path,
-                     help="Path to a local .npz gallery file")
+_parser.add_argument("--catalog",  type=Path,
+                     help="Path to a local .npz catalog file")
 _parser.add_argument("--hfd",      nargs=2, metavar=("REPO", "KEY"),
-                     help="Auto-download gallery from HuggingFace: --hfd REPO KEY")
+                     help="Auto-download catalog from HuggingFace: --hfd REPO KEY")
 _parser.add_argument("--host",     default="127.0.0.1")
 _parser.add_argument("--port",     type=int, default=8000)
 _parser.add_argument("--top-k",    type=int, default=5)
@@ -102,26 +102,26 @@ async def health():
 # Lazy singletons
 # ---------------------------------------------------------------------------
 
-_gallery: cvg.Gallery | None = None
+_catalog: cvg.Catalog | None = None
 _detector: cvg.NeuralCornerDetector | None = None
 _detector_loaded = False
 
 
-def _get_gallery() -> cvg.Gallery:
-    global _gallery
-    if _gallery is not None:
-        return _gallery
-    if _args.gallery:
-        _gallery = cvg.Gallery.load(_args.gallery)
+def _get_catalog() -> cvg.Catalog:
+    global _catalog
+    if _catalog is not None:
+        return _catalog
+    if _args.catalog:
+        _catalog = cvg.Catalog.load(_args.catalog)
     elif _args.hfd:
         repo, key = _args.hfd
-        _gallery = cvg.Gallery.load(f"hf://{repo}/{key}")
+        _catalog = cvg.Catalog.load(f"hf://{repo}/{key}")
     else:
         raise HTTPException(
             status_code=503,
-            detail="No gallery configured. Start the server with --gallery or --hfd.",
+            detail="No catalog configured. Start the server with --catalog or --hfd.",
         )
-    return _gallery
+    return _catalog
 
 
 def _get_detector() -> cvg.NeuralCornerDetector | None:
@@ -167,7 +167,7 @@ def _crop_jpeg(bgr: np.ndarray, max_dim: int = 300) -> str:
 
 def _identify_bgr(bgr: np.ndarray, *, top_k: int) -> dict:
     t0 = time.perf_counter()
-    gallery  = _get_gallery()
+    catalog  = _get_catalog()
     detector = _get_detector()
 
     sharpness  = None
@@ -200,8 +200,8 @@ def _identify_bgr(bgr: np.ndarray, *, top_k: int) -> dict:
 
     # Step 2: embed + search
     try:
-        emb  = gallery.embedder.embed(crop_pil)
-        hits = gallery.search(emb, top_k=top_k)
+        emb  = catalog.embedder.embed(crop_pil)
+        hits = catalog.search(emb, top_k=top_k)
     except Exception as exc:
         return {
             "_status":      {"code": 500, "text": f"Identification error: {exc}"},
@@ -322,7 +322,7 @@ async def identify_upload(
         return JSONResponse(_identify_bgr(bgr, top_k=resolved_top_k))
 
     # Multiple frames — aggregate scores
-    gallery  = _get_gallery()
+    catalog  = _get_catalog()
     detector = _get_detector()
 
     from collections import defaultdict
@@ -346,8 +346,8 @@ async def identify_upload(
         else:
             crop_pil = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
 
-        emb = gallery.embedder.embed(crop_pil)
-        for score, card_id in gallery.search(emb, top_k=resolved_top_k):
+        emb = catalog.embedder.embed(crop_pil)
+        for score, card_id in catalog.search(emb, top_k=resolved_top_k):
             score_map[card_id] += score
 
     hits = sorted(score_map.items(), key=lambda x: x[1], reverse=True)[:resolved_top_k]

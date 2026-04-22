@@ -24,8 +24,8 @@ Requires Python 3.10+. No GPU required — inference runs on CPU via ONNX Runtim
 import cv2
 import collector_vision as cvg
 
-# Load gallery (downloads ~54 MB on first run, cached locally after that)
-gallery = cvg.Gallery.load("hf://HanClinto/milo/scryfall-mtg")
+# Load catalog (downloads ~54 MB on first run, cached locally after that)
+catalog = cvg.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
 
 # 1. Detect card corners
 image = cv2.imread("photo.jpg")
@@ -36,8 +36,8 @@ detection = detector.detect(image)
 crop = detection.dewarp(image)          # PIL Image, 252×352 px
 
 # 3. Embed + search
-emb = gallery.embedder.embed(crop)      # (128,) float32
-hits = gallery.search(emb, top_k=5)    # [(score, card_id), ...]
+emb = catalog.embedder.embed(crop)      # (128,) float32
+hits = catalog.search(emb, top_k=5)    # [(score, card_id), ...]
 
 score, card_id = hits[0]
 print(card_id, score)   # "abc123-...", 0.94
@@ -45,15 +45,15 @@ print(card_id, score)   # "abc123-...", 0.94
 
 ---
 
-## Local gallery file
+## Local catalog file
 
 Pass a local path and nothing touches the network:
 
 ```python
-gallery = cvg.Gallery.load("./milo1-scryfall-mtg-2026-04.npz")
+catalog = cvg.Catalog.load("./milo1-scryfall-mtg-2026-04.npz")
 ```
 
-Gallery files are available at [HuggingFace](https://huggingface.co/HanClinto/milo/tree/main/galleries).
+Catalog files are available at [HuggingFace](https://huggingface.co/HanClinto/milo/tree/main/catalogs).
 
 ---
 
@@ -62,12 +62,12 @@ Gallery files are available at [HuggingFace](https://huggingface.co/HanClinto/mi
 Embed each frame separately, then sum scores before ranking:
 
 ```python
-embeddings = gallery.embedder.embed([crop1, crop2, crop3])  # (3, 128)
+embeddings = catalog.embedder.embed([crop1, crop2, crop3])  # (3, 128)
 
 from collections import defaultdict
 score_map = defaultdict(float)
 for emb in embeddings:
-    for score, card_id in gallery.search(emb, top_k=5):
+    for score, card_id in catalog.search(emb, top_k=5):
         score_map[card_id] += score
 
 best_id = max(score_map, key=score_map.get)
@@ -82,21 +82,21 @@ If your input is already a clean card crop, skip detection and embed directly:
 ```python
 from PIL import Image
 crop = Image.open("crop.jpg")
-emb = gallery.embedder.embed(crop)
-hits = gallery.search(emb)
+emb = catalog.embedder.embed(crop)
+hits = catalog.search(emb)
 ```
 
 ---
 
-## Available galleries
+## Available catalogs
 
-| Game | Source | Gallery key | Size |
+| Game | Source | Catalog key | Size |
 |---|---|---|---|
 | Magic: The Gathering | Scryfall | `scryfall-mtg` | ~54 MB |
 
-Browse at **https://huggingface.co/HanClinto/milo/tree/main/galleries**
+Browse at **https://huggingface.co/HanClinto/milo/tree/main/catalogs**
 
-Galleries are updated monthly. Filename format: `{algo}-{source}-{game}-{YYYY-MM}.npz`
+Catalogs are updated monthly. Filename format: `{algo}-{source}-{game}-{YYYY-MM}.npz`
 
 ---
 

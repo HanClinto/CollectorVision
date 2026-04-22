@@ -1,11 +1,11 @@
-"""Gallery: pre-built card embedding index used for nearest-neighbour retrieval.
+"""Catalog: pre-built card embedding index used for nearest-neighbour retrieval.
 
-A Gallery is the primary user-facing artifact of CollectorVision.  It bundles:
+A Catalog bundles:
   - the card embedding matrix
-  - card IDs (one per row — callers look up names/metadata from the source catalog)
+  - card IDs (one per row — callers look up names/metadata from the source)
   - the embedder specification needed to embed query images consistently
 
-Users select a gallery file; the library derives everything else from it.
+Users select a catalog file; the library derives everything else from it.
 """
 from __future__ import annotations
 
@@ -28,15 +28,14 @@ _KEY_MODE        = "mode"          # scalar str — "embedding" | "hash"
 _KEY_EMBEDDER    = "embedder_spec" # scalar str — JSON embedder specification
 
 
-class Gallery:
-    """Loaded card gallery ready for retrieval.
+class Catalog:
+    """Loaded card catalog ready for retrieval.
 
-    Obtain via :meth:`Gallery.load` or :meth:`Gallery.for_game` — do not
+    Obtain via :meth:`Catalog.load` or :meth:`Catalog.for_game` — do not
     construct directly.
 
-    The embedder required to query this gallery is available via
-    :attr:`Gallery.embedder`.  :meth:`~collector_vision.Identifier.identify`
-    uses this automatically; most users never need to access it directly.
+    The embedder required to query this catalog is available via
+    :attr:`Catalog.embedder`.
     """
 
     def __init__(
@@ -56,23 +55,23 @@ class Gallery:
         self._embedder: "Embedder | None" = None
 
     @classmethod
-    def load(cls, source: "str | Path | HFD") -> "Gallery":
-        """Load a gallery from a local NPZ file or a HuggingFace reference.
+    def load(cls, source: "str | Path | HFD") -> "Catalog":
+        """Load a catalog from a local NPZ file or a HuggingFace reference.
 
         Parameters
         ----------
         source:
             - Local path: ``"./milo1-scryfall-mtg-2026-04.npz"`` or a ``Path``
             - HuggingFace URI: ``"hf://HanClinto/milo/scryfall-mtg"``
-              (format: ``hf://{user}/{repo}/{gallery-key}``)
+              (format: ``hf://{user}/{repo}/{catalog-key}``)
             - :class:`~collector_vision.hfd.HFD` instance
 
         Examples
         --------
         ::
 
-            gallery = Gallery.load("hf://HanClinto/milo/scryfall-mtg")
-            gallery = Gallery.load("./milo1-scryfall-mtg-2026-04.npz")
+            catalog = Catalog.load("hf://HanClinto/milo/scryfall-mtg")
+            catalog = Catalog.load("./milo1-scryfall-mtg-2026-04.npz")
         """
         from collector_vision.hfd import HFD as _HFD
 
@@ -84,7 +83,7 @@ class Gallery:
             if len(parts) != 3:
                 raise ValueError(
                     f"Invalid hf:// URI {source!r}. "
-                    "Expected format: hf://user/repo/gallery-key"
+                    "Expected format: hf://user/repo/catalog-key"
                 )
             repo = f"{parts[0]}/{parts[1]}"
             path = _HFD(repo, parts[2]).resolve()
@@ -92,7 +91,7 @@ class Gallery:
             path = Path(source)
 
         if not path.exists():
-            raise FileNotFoundError(f"Gallery file not found: {path}")
+            raise FileNotFoundError(f"Catalog file not found: {path}")
 
         data = np.load(path, allow_pickle=False)
 
@@ -110,7 +109,7 @@ class Gallery:
 
     @property
     def embedder(self) -> "Embedder":
-        """The embedder that must be used to query this gallery.
+        """The embedder that must be used to query this catalog.
 
         Constructed lazily from :attr:`embedder_spec` on first access.
         """
@@ -120,7 +119,7 @@ class Gallery:
 
     @property
     def algo_key(self) -> str | None:
-        """Stable algorithm identifier stored in the gallery, e.g. ``'milo1'``."""
+        """Stable algorithm identifier stored in the catalog, e.g. ``'milo1'``."""
         return self.embedder_spec.get("algo_key")
 
     @classmethod
@@ -130,8 +129,8 @@ class Gallery:
         embedding: "Embedding | None" = None,
         cache_dir: Path | None = None,
         offline: bool = False,
-    ) -> "Gallery":
-        """Download (or load from cache) the latest gallery for a single game.
+    ) -> "Catalog":
+        """Download (or load from cache) the latest catalog for a single game.
 
         Parameters
         ----------
@@ -148,7 +147,7 @@ class Gallery:
         Example::
 
             from collector_vision.games import Game
-            gallery = Gallery.for_game(Game.MTG)
+            catalog = Catalog.for_game(Game.MTG)
         """
         from collector_vision.games import Embedding as _Embedding, GAME_PRIMARY_SOURCE
         from collector_vision.hfd import HFD
@@ -156,8 +155,8 @@ class Gallery:
         embedding = embedding or _Embedding.MILO
         source = GAME_PRIMARY_SOURCE.get(game, "unknown")
         repo = f"HanClinto/{embedding.family}"
-        gallery_key = f"{source}-{game.value}"
-        return cls.load(HFD(repo, gallery_key, cache_dir=cache_dir, offline=offline).resolve())
+        catalog_key = f"{source}-{game.value}"
+        return cls.load(HFD(repo, catalog_key, cache_dir=cache_dir, offline=offline).resolve())
 
     @classmethod
     def for_games(
@@ -166,15 +165,15 @@ class Gallery:
         embedding: "Embedding | None" = None,
         cache_dir: Path | None = None,
         offline: bool = False,
-    ) -> "Gallery":
-        """Download and merge galleries for multiple games.
+    ) -> "Catalog":
+        """Download and merge catalogs for multiple games.
 
         All games must use the same embedding so query vectors are compatible.
 
         Example::
 
             from collector_vision.games import Game
-            gallery = Gallery.for_games(Game.MTG, Game.POKEMON)
+            catalog = Catalog.for_games(Game.MTG, Game.POKEMON)
         """
         loaded = [
             cls.for_game(g, embedding=embedding, cache_dir=cache_dir, offline=offline)
@@ -183,21 +182,21 @@ class Gallery:
         return loaded[0] if len(loaded) == 1 else cls._merge(loaded)
 
     @classmethod
-    def _merge(cls, galleries: "list[Gallery]") -> "Gallery":
-        """Concatenate multiple compatible galleries into one."""
-        ref_spec = galleries[0].embedder_spec
-        for g in galleries[1:]:
-            if g.embedder_spec != ref_spec:
+    def _merge(cls, catalogs: "list[Catalog]") -> "Catalog":
+        """Concatenate multiple compatible catalogs into one."""
+        ref_spec = catalogs[0].embedder_spec
+        for c in catalogs[1:]:
+            if c.embedder_spec != ref_spec:
                 raise ValueError(
-                    f"Cannot merge galleries with different embedder specs:\n"
-                    f"  {galleries[0].source}: {ref_spec}\n"
-                    f"  {g.source}: {g.embedder_spec}"
+                    f"Cannot merge catalogs with different embedder specs:\n"
+                    f"  {catalogs[0].source}: {ref_spec}\n"
+                    f"  {c.source}: {c.embedder_spec}"
                 )
         return cls(
-            embeddings=np.concatenate([g.embeddings for g in galleries], axis=0),
-            card_ids=sum((g.card_ids for g in galleries), []),
-            source="+".join(g.source for g in galleries),
-            mode=galleries[0].mode,
+            embeddings=np.concatenate([c.embeddings for c in catalogs], axis=0),
+            card_ids=sum((c.card_ids for c in catalogs), []),
+            source="+".join(c.source for c in catalogs),
+            mode=catalogs[0].mode,
             embedder_spec=ref_spec,
         )
 
@@ -207,8 +206,8 @@ class Gallery:
         Parameters
         ----------
         embedding:
-            Query vector — ``(D,)`` float32 for neural galleries,
-            ``(B,)`` uint8 for hash galleries.  Must match the gallery's
+            Query vector — ``(D,)`` float32 for neural catalogs,
+            ``(B,)`` uint8 for hash catalogs.  Must match the catalog's
             own embedder output (use :attr:`embedder` to produce it).
         top_k:
             Number of results to return.
@@ -216,15 +215,15 @@ class Gallery:
         Returns
         -------
         List of ``(score, card_id)`` tuples sorted by descending score.
-        Score is cosine similarity for neural galleries, normalised Hamming
-        similarity for hash galleries (both in the range [0, 1]).
+        Score is cosine similarity for neural catalogs, normalised Hamming
+        similarity for hash catalogs (both in the range [0, 1]).
 
         Example::
 
-            gallery = Gallery.load("milo1-scryfall-mtg-2026-04.npz")
+            catalog = Catalog.load("hf://HanClinto/milo/scryfall-mtg")
             crop = detection.dewarp(image)
-            emb = gallery.embedder.embed(crop)
-            hits = gallery.search(emb, top_k=3)
+            emb = catalog.embedder.embed(crop)
+            hits = catalog.search(emb, top_k=3)
             score, card_id = hits[0]
         """
         from collector_vision import retrieval
@@ -240,7 +239,7 @@ class Gallery:
 
     def __repr__(self) -> str:
         return (
-            f"Gallery(source={self.source!r}, mode={self.mode!r}, "
+            f"Catalog(source={self.source!r}, mode={self.mode!r}, "
             f"n={len(self)}, algo={self.algo_key!r})"
         )
 
@@ -250,7 +249,7 @@ class Gallery:
 # ---------------------------------------------------------------------------
 
 def _source_primary_key(source: str) -> str:
-    """Return the canonical ID field name for a gallery source."""
+    """Return the canonical ID field name for a catalog source."""
     return {
         "scryfall":   "scryfall_id",
         "tcgplayer":  "tcgplayer_id",
@@ -259,7 +258,7 @@ def _source_primary_key(source: str) -> str:
 
 
 def _embedder_from_spec(spec: dict) -> "Embedder":
-    """Reconstruct an Embedder from the spec dict stored in the gallery."""
+    """Reconstruct an Embedder from the spec dict stored in the catalog."""
     kind = spec.get("kind")
 
     if kind == "hash":
@@ -276,14 +275,14 @@ def _embedder_from_spec(spec: dict) -> "Embedder":
                 hash_size=int(spec["hash_size"]),
                 sigma=float(spec["sigma"]),
             )
-        raise ValueError(f"Unknown hash algo_key in gallery: {algo!r}")
+        raise ValueError(f"Unknown hash algo_key in catalog: {algo!r}")
 
     if kind == "neural":
         from collector_vision.embedders.neural import NeuralEmbedder
         return NeuralEmbedder()
 
     raise ValueError(
-        f"Unknown embedder kind {kind!r} in gallery spec.\n"
+        f"Unknown embedder kind {kind!r} in catalog spec.\n"
         f"Full spec: {spec}\n"
-        "This gallery may have been built with a newer version of CollectorVision."
+        "This catalog may have been built with a newer version of CollectorVision."
     )
