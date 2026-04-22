@@ -47,9 +47,6 @@ def lookup_scryfall(scryfall_id: str) -> dict:
         return json.loads(resp.read())
 
 
-MIN_SHARPNESS = 0.02  # SimCC mean-peak gate: blank≈0.008, valid card≈0.03–0.07
-
-
 def identify_images(image_paths: list[str], gallery: cvg.Gallery) -> None:
     detector = cvg.NeuralCornerDetector()
 
@@ -61,25 +58,18 @@ def identify_images(image_paths: list[str], gallery: cvg.Gallery) -> None:
             print(f"Could not read image: {path}", file=sys.stderr)
             sys.exit(1)
 
-        detection = detector.detect(image)
+        detection = detector.detect(image)  # default min_sharpness=0.02
         sharpness = detection.extra.get("sharpness", 0.0)
         print(f"  {path}: sharpness={sharpness:.3f}  card_present={detection.card_present}")
 
-        if sharpness < MIN_SHARPNESS:
-            print(f"  (sharpness {sharpness:.3f} < {MIN_SHARPNESS} — skipping frame)")
+        if not detection.card_present:
+            print(f"  (skipping — no card detected)")
             continue
 
-        if detection.card_present:
-            crop = detection.dewarp(image)   # PIL Image, 252×352 px
-        else:
-            print("  (corners not found — using full frame)")
-            from PIL import Image
-            rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            crop = Image.fromarray(rgb)
-        crops.append(crop)
+        crops.append(detection.dewarp(image))   # PIL Image, 252×352 px
 
     if not crops:
-        print("No usable frames (all below sharpness threshold).")
+        print("No card detected in any frame.")
         sys.exit(1)
 
     # ── Step 4: embed ─────────────────────────────────────────────────────────
