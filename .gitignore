@@ -12,3 +12,4 @@ build/
 *.npz
 *.db
 .env
+test_output/
