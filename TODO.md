@@ -26,10 +26,7 @@ Checklist for turning the scaffold into a shippable library.
 - [x] 128-d L2-normalised embeddings from 448×448 input
 - [x] Bundled as `collector_vision/weights/milo.onnx` (5.0 MB, single file)
 
-### 1d. FixedCornerDetector ✅
-- [x] Pass-through detector for known card positions in `collector_vision/detectors/fixed.py`
-
-### 1e. Retrieval helpers ✅
+### 1d. Retrieval helpers ✅
 - [x] `collector_vision/retrieval.py` — `cosine_search()` (cosine similarity over L2-normalised vectors)
 
 ### 1f. Metadata lookup (future module)
