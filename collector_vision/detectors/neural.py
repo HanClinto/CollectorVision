@@ -61,30 +61,17 @@ class NeuralCornerDetector:
     Parameters
     ----------
     checkpoint:
-        Path to the ``.onnx`` file.  The ``.onnx.data`` weight file must sit
-        in the same directory.  Defaults to the bundled Cornelius weights.
-    min_sharpness:
-        Minimum SimCC mean-peak sharpness to treat a detection as valid.
-        Range [0, 1]; 0.0 (default) disables the gate — all frames are
-        treated as card-present regardless of sharpness.  Only used when
-        the model emits a sharpness output (Cornelius does).
-
-        Tune this for card-in-scene video pipelines where you want to skip
-        frames with no card visible.  For Cornelius, blank/no-card frames
-        typically score ≤ 0.01; valid card frames typically score 0.03–0.07.
-        A value around 0.02 cleanly separates the two populations.
+        Path to the ``.onnx`` file.  Defaults to the bundled Cornelius weights.
     presence_threshold:
         Fallback gate used when the model does not emit a sharpness output.
         Minimum ``sigmoid(presence_logit)`` to treat a detection as valid.
     num_threads:
-        Number of intra-op threads for onnxruntime.  Defaults to 4 (good
-        for Pi; reduce to 1 for profiling).
+        Number of intra-op threads for onnxruntime.  Defaults to 4.
     """
 
     def __init__(
         self,
         checkpoint: str | Path | None = None,
-        min_sharpness: float = 0.0,
         presence_threshold: float = 0.5,
         num_threads: int = 4,
     ) -> None:
@@ -99,7 +86,6 @@ class NeuralCornerDetector:
                 "Install the full package or supply a checkpoint path."
             )
 
-        self._min_sharpness = min_sharpness
         self._presence_threshold = presence_threshold
         self._sess, self._input_name, self._input_size, self._has_sharpness = (
             self._load(checkpoint, num_threads)
@@ -125,19 +111,25 @@ class NeuralCornerDetector:
         has_sharpness = "sharpness" in out_names
         return sess, input_name, input_size, has_sharpness
 
-    def detect(self, image: np.ndarray) -> DetectionResult:
+    def detect(self, image: np.ndarray, min_sharpness: float = 0.02) -> DetectionResult:
         """Detect card corners in a BGR uint8 image.
 
         Parameters
         ----------
         image:
             BGR uint8 ndarray as returned by ``cv2.imread``.
+        min_sharpness:
+            Minimum SimCC mean-peak sharpness to treat a detection as valid.
+            When below this value, ``card_present`` is False and the frame
+            should be skipped.  Range [0, 1]; default 0.02 sits comfortably
+            between blank frames (≈0.008) and valid cards (≈0.03–0.07).
+            Pass ``0.0`` to disable the gate entirely.
 
         Returns
         -------
         DetectionResult with normalised (x, y) corners in TL, TR, BR, BL order.
-        ``card_present`` is False when sharpness (or presence) is below threshold.
-        ``extra`` contains ``sharpness`` and ``presence`` for diagnostics.
+        ``card_present`` is False when sharpness is below ``min_sharpness``.
+        ``extra["sharpness"]`` and ``extra["presence"]`` are available for diagnostics.
         """
         x = _preprocess(image, self._input_size)
         outs = self._sess.run(None, {self._input_name: x})
@@ -151,10 +143,9 @@ class NeuralCornerDetector:
         if self._has_sharpness:
             sharpness = float(outs[2].squeeze())
             extra["sharpness"] = sharpness
-            card_present = sharpness >= self._min_sharpness
+            card_present = sharpness >= min_sharpness
             confidence = sharpness
         else:
-            # Fallback for models without a sharpness output
             card_present = presence >= self._presence_threshold
             confidence = presence
 
@@ -168,9 +159,4 @@ class NeuralCornerDetector:
         )
 
     def __repr__(self) -> str:
-        gate = (
-            f"min_sharpness={self._min_sharpness}"
-            if self._has_sharpness
-            else f"presence_threshold={self._presence_threshold}"
-        )
-        return f"NeuralCornerDetector(input_size={self._input_size}, {gate})"
+        return f"NeuralCornerDetector(input_size={self._input_size})"

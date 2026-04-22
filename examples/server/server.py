@@ -128,7 +128,7 @@ def _get_detector() -> cvg.NeuralCornerDetector | None:
     global _detector, _detector_loaded
     if not _detector_loaded:
         if not _args.detector_none:
-            _detector = cvg.NeuralCornerDetector(min_sharpness=_args.min_sharpness)
+            _detector = cvg.NeuralCornerDetector()
         _detector_loaded = True
     return _detector
 
@@ -178,26 +178,20 @@ def _identify_bgr(bgr: np.ndarray, *, top_k: int) -> dict:
 
     # Step 1: detect + dewarp
     if detector is not None:
-        detection = detector.detect(bgr)
+        detection = detector.detect(bgr, min_sharpness=_args.min_sharpness)
         sharpness = detection.extra.get("sharpness", 0.0)
-        card_present = detection.card_present
 
-        if sharpness < _args.min_sharpness:
+        if not detection.card_present:
             return {
                 "_status":      {"code": 200, "text": "OK"},
                 "card_present": False,
-                "sharpness":    round(sharpness, 5),
+                "sharpness":    round(float(sharpness), 5),
                 "_timing":      {"total_ms": round((time.perf_counter() - t0) * 1000, 1)},
             }
 
-        if detection.card_present:
-            crop_pil  = detection.dewarp(bgr)
-            crop_bgr  = cv2.cvtColor(np.array(crop_pil), cv2.COLOR_RGB2BGR)
-            crop_jpeg = _crop_jpeg(crop_bgr)
-        else:
-            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            crop_pil  = Image.fromarray(rgb)
-            crop_jpeg = _crop_jpeg(bgr)
+        crop_pil  = detection.dewarp(bgr)
+        crop_bgr  = cv2.cvtColor(np.array(crop_pil), cv2.COLOR_RGB2BGR)
+        crop_jpeg = _crop_jpeg(crop_bgr)
     else:
         sharpness = None
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
@@ -345,8 +339,10 @@ async def identify_upload(
             raise HTTPException(status_code=400, detail=f"{f.filename}: {exc}")
 
         if detector is not None:
-            detection = detector.detect(bgr)
-            crop_pil  = detection.dewarp(bgr) if detection.card_present else Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+            detection = detector.detect(bgr, min_sharpness=_args.min_sharpness)
+            if not detection.card_present:
+                continue  # skip blurry / no-card frames
+            crop_pil = detection.dewarp(bgr)
         else:
             crop_pil = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
 
