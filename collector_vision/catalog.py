@@ -101,6 +101,18 @@ class Catalog:
 
         self._embedder: "Embedder | None" = None
 
+        # Fast lookup dicts — built once, used for oracle-level accuracy checks.
+        # Both are empty dicts when oracle_ids is absent.
+        if oracle_ids is not None:
+            self.card_to_oracle: dict[str, str] = dict(zip(card_ids, oracle_ids))
+            self.oracle_to_cards: dict[str, list[str]] = {}
+            for cid, oid in zip(card_ids, oracle_ids):
+                if oid:
+                    self.oracle_to_cards.setdefault(oid, []).append(cid)
+        else:
+            self.card_to_oracle = {}
+            self.oracle_to_cards = {}
+
     @classmethod
     def load(cls, source: "str | Path | HFD") -> "Catalog":
         """Load a catalog from a local NPZ file or a HuggingFace reference.

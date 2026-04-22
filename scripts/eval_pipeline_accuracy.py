@@ -63,11 +63,15 @@ def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int,
 
     detector = cvg.NeuralCornerDetector()
 
+    has_oracle = bool(catalog.card_to_oracle)
+
     n_total = len(images)
     n_detected = 0
     n_in_catalog = 0
     top1_exact = 0
     topk_exact = 0
+    oracle1_exact = 0
+    oraclek_exact = 0
 
     misses_by_card: dict[str, int] = defaultdict(int)
     errors_by_card: dict[str, int] = defaultdict(int)
@@ -115,6 +119,15 @@ def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int,
         else:
             errors_by_card[true_id] += 1
 
+        if has_oracle:
+            true_oracle = catalog.card_to_oracle.get(true_id)
+            if true_oracle:
+                hit_oracles = [catalog.card_to_oracle.get(cid) for cid in result_ids]
+                if hit_oracles[0] == true_oracle:
+                    oracle1_exact += 1
+                if true_oracle in hit_oracles:
+                    oraclek_exact += 1
+
     t_infer = time.perf_counter() - t1
 
     total_time = t_load + t_infer
@@ -126,8 +139,11 @@ def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int,
     print(f"Total images:     {n_total}")
     print(f"Detected:         {n_detected}/{n_total}  ({pct(n_detected, n_total)})")
     print(f"In catalog:       {n_in_catalog}/{n_detected}  ({pct(n_in_catalog, n_detected)})")
-    print(f"Top-1 exact:      {top1_exact}/{n_in_catalog}  ({pct(top1_exact, n_in_catalog)})")
-    print(f"Top-{top_k} exact:      {topk_exact}/{n_in_catalog}  ({pct(topk_exact, n_in_catalog)})")
+    print(f"Edition top-1:    {top1_exact}/{n_in_catalog}  ({pct(top1_exact, n_in_catalog)})")
+    print(f"Edition top-{top_k}:    {topk_exact}/{n_in_catalog}  ({pct(topk_exact, n_in_catalog)})")
+    if has_oracle:
+        print(f"Card top-1:       {oracle1_exact}/{n_in_catalog}  ({pct(oracle1_exact, n_in_catalog)})")
+        print(f"Card top-{top_k}:       {oraclek_exact}/{n_in_catalog}  ({pct(oraclek_exact, n_in_catalog)})")
     print(f"Timing:           {total_time:.1f}s total  "
           f"(load {t_load:.1f}s + infer {t_infer:.1f}s,  {ms_per_img:.0f}ms/img)")
 
