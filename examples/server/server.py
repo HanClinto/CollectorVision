@@ -115,7 +115,7 @@ def _get_gallery() -> cvg.Gallery:
         _gallery = cvg.Gallery.load(_args.gallery)
     elif _args.hfd:
         repo, key = _args.hfd
-        _gallery = cvg.Gallery.load(cvg.HFD(repo, key).resolve())
+        _gallery = cvg.Gallery.load(f"hf://{repo}/{key}")
     else:
         raise HTTPException(
             status_code=503,

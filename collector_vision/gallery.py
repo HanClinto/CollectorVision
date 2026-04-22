@@ -56,9 +56,41 @@ class Gallery:
         self._embedder: "Embedder | None" = None
 
     @classmethod
-    def load(cls, path: str | Path) -> "Gallery":
-        """Load a gallery from a CollectorVision NPZ file."""
-        path = Path(path)
+    def load(cls, source: "str | Path | HFD") -> "Gallery":
+        """Load a gallery from a local NPZ file or a HuggingFace reference.
+
+        Parameters
+        ----------
+        source:
+            - Local path: ``"./milo1-scryfall-mtg-2026-04.npz"`` or a ``Path``
+            - HuggingFace URI: ``"hf://HanClinto/milo/scryfall-mtg"``
+              (format: ``hf://{user}/{repo}/{gallery-key}``)
+            - :class:`~collector_vision.hfd.HFD` instance
+
+        Examples
+        --------
+        ::
+
+            gallery = Gallery.load("hf://HanClinto/milo/scryfall-mtg")
+            gallery = Gallery.load("./milo1-scryfall-mtg-2026-04.npz")
+        """
+        from collector_vision.hfd import HFD as _HFD
+
+        if isinstance(source, _HFD):
+            path = source.resolve()
+        elif isinstance(source, str) and source.startswith("hf://"):
+            rest = source[len("hf://"):]
+            parts = rest.split("/", 2)
+            if len(parts) != 3:
+                raise ValueError(
+                    f"Invalid hf:// URI {source!r}. "
+                    "Expected format: hf://user/repo/gallery-key"
+                )
+            repo = f"{parts[0]}/{parts[1]}"
+            path = _HFD(repo, parts[2]).resolve()
+        else:
+            path = Path(source)
+
         if not path.exists():
             raise FileNotFoundError(f"Gallery file not found: {path}")
 

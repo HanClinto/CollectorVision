@@ -38,7 +38,7 @@ import collector_vision as cvg
 def load_gallery(args) -> cvg.Gallery:
     if args.gallery:
         return cvg.Gallery.load(args.gallery)
-    return cvg.Gallery.load(cvg.HFD("HanClinto/milo", "scryfall-mtg").resolve())
+    return cvg.Gallery.load("hf://HanClinto/milo/scryfall-mtg")
 
 
 def lookup_scryfall(scryfall_id: str) -> dict:
