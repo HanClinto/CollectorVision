@@ -21,10 +21,9 @@ if TYPE_CHECKING:
 
 
 # NPZ keys
-_KEY_EMBEDDINGS  = "embeddings"    # (N, D) float32  or  (N, B) uint8
+_KEY_EMBEDDINGS  = "embeddings"    # (N, D) float32
 _KEY_CARD_IDS    = "card_ids"      # (N,) str — primary key (e.g. Scryfall UUID)
 _KEY_SOURCE      = "source"        # scalar str — "scryfall", "tcgplayer", …
-_KEY_MODE        = "mode"          # scalar str — "embedding" | "hash"
 _KEY_EMBEDDER    = "embedder_spec" # scalar str — JSON embedder specification
 
 
@@ -43,13 +42,11 @@ class Catalog:
         embeddings: np.ndarray,
         card_ids: list[str],
         source: str,
-        mode: str,
         embedder_spec: dict,
     ) -> None:
         self.embeddings = embeddings
         self.card_ids = card_ids
         self.source = source
-        self.mode = mode        # "embedding" | "hash"
         self.embedder_spec = embedder_spec
 
         self._embedder: "Embedder | None" = None
@@ -103,7 +100,6 @@ class Catalog:
             embeddings=data[_KEY_EMBEDDINGS],
             card_ids=data[_KEY_CARD_IDS].tolist(),
             source=str(data[_KEY_SOURCE]) if _KEY_SOURCE in data.files else "unknown",
-            mode=str(data[_KEY_MODE]) if _KEY_MODE in data.files else "embedding",
             embedder_spec=embedder_spec,
         )
 
@@ -196,7 +192,6 @@ class Catalog:
             embeddings=np.concatenate([c.embeddings for c in catalogs], axis=0),
             card_ids=sum((c.card_ids for c in catalogs), []),
             source="+".join(c.source for c in catalogs),
-            mode=catalogs[0].mode,
             embedder_spec=ref_spec,
         )
 
@@ -206,32 +201,26 @@ class Catalog:
         Parameters
         ----------
         embedding:
-            Query vector — ``(D,)`` float32 for neural catalogs,
-            ``(B,)`` uint8 for hash catalogs.  Must match the catalog's
-            own embedder output (use :attr:`embedder` to produce it).
+            Query vector — ``(D,)`` float32, L2-normalised.  Produce it with
+            ``catalog.embedder.embed([crop])[0]``.
         top_k:
             Number of results to return.
 
         Returns
         -------
-        List of ``(score, card_id)`` tuples sorted by descending score.
-        Score is cosine similarity for neural catalogs, normalised Hamming
-        similarity for hash catalogs (both in the range [0, 1]).
+        List of ``(score, card_id)`` tuples sorted by descending cosine similarity.
 
         Example::
 
             catalog = Catalog.load("hf://HanClinto/milo/scryfall-mtg")
             crop = detection.dewarp(image)
-            emb = catalog.embedder.embed(crop)
+            emb = catalog.embedder.embed([crop])[0]
             hits = catalog.search(emb, top_k=3)
             score, card_id = hits[0]
         """
         from collector_vision import retrieval
 
-        if self.mode == "hash":
-            raw = retrieval.hamming_search(embedding, self.embeddings, top_k=top_k)
-        else:
-            raw = retrieval.cosine_search(embedding, self.embeddings, top_k=top_k)
+        raw = retrieval.cosine_search(embedding, self.embeddings, top_k=top_k)
         return [(score, self.card_ids[idx]) for score, idx in raw]
 
     def __len__(self) -> int:
@@ -239,8 +228,7 @@ class Catalog:
 
     def __repr__(self) -> str:
         return (
-            f"Catalog(source={self.source!r}, mode={self.mode!r}, "
-            f"n={len(self)}, algo={self.algo_key!r})"
+            f"Catalog(source={self.source!r}, n={len(self)}, algo={self.algo_key!r})"
         )
 
 
@@ -260,22 +248,6 @@ def _source_primary_key(source: str) -> str:
 def _embedder_from_spec(spec: dict) -> "Embedder":
     """Reconstruct an Embedder from the spec dict stored in the catalog."""
     kind = spec.get("kind")
-
-    if kind == "hash":
-        from collector_vision.embedders.hash import HashEmbedder
-        algo = spec.get("algo_key", "")
-        if algo.startswith("phash_"):
-            return HashEmbedder.phash(hash_size=int(spec["hash_size"]))
-        if algo.startswith("dhash_"):
-            return HashEmbedder.dhash(hash_size=int(spec["hash_size"]))
-        if algo.startswith("whash_"):
-            return HashEmbedder.whash(hash_size=int(spec["hash_size"]))
-        if algo.startswith("marr_hildreth_"):
-            return HashEmbedder.marr_hildreth(
-                hash_size=int(spec["hash_size"]),
-                sigma=float(spec["sigma"]),
-            )
-        raise ValueError(f"Unknown hash algo_key in catalog: {algo!r}")
 
     if kind == "neural":
         from collector_vision.embedders.neural import NeuralEmbedder
