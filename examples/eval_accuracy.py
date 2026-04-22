@@ -4,8 +4,13 @@
 Filenames must embed the Scryfall UUID:
     {scryfall_uuid}_{anything}.jpg
 
-Runs the full pipeline on every image, compares the returned card_id
-against the UUID in the filename, and reports detection rate and accuracy.
+Runs the full pipeline on every image and reports:
+  - Detection rate
+  - Edition accuracy  — exact Scryfall UUID match (specific printing)
+  - Card accuracy     — oracle_id match (correct card, any printing)
+
+Card accuracy requires oracle_ids in the catalog (available in catalogs
+built with CollectorVision 0.1+).
 
 Usage
 -----
@@ -40,8 +45,9 @@ def main() -> None:
     catalog = cvg.Catalog.load(args.catalog)
     detector = cvg.NeuralCornerDetector()
     catalog_ids = set(catalog.card_ids)
+    has_oracle = bool(catalog.card_to_oracle)
 
-    detected = top1 = topk = total = 0
+    detected = edition1 = editionk = oracle1 = oraclek = total = 0
 
     for img_path in images:
         true_id = UUID_RE.search(img_path.name).group(0).lower()
@@ -60,16 +66,30 @@ def main() -> None:
         hits = [cid for _, cid in catalog.search(emb, top_k=args.top_k)]
 
         if hits[0] == true_id:
-            top1 += 1
+            edition1 += 1
         if true_id in hits:
-            topk += 1
+            editionk += 1
+
+        if has_oracle:
+            true_oracle = catalog.card_to_oracle.get(true_id)
+            if true_oracle:
+                hit_oracles = [catalog.card_to_oracle.get(cid) for cid in hits]
+                if hit_oracles[0] == true_oracle:
+                    oracle1 += 1
+                if true_oracle in hit_oracles:
+                    oraclek += 1
 
     def pct(n, d): return f"{100*n/d:.1f}%" if d else "n/a"
 
-    print(f"Dataset:    {args.image_dir.name}  ({total} images in catalog)")
-    print(f"Detected:   {detected}/{total}  ({pct(detected, total)})")
-    print(f"Top-1:      {top1}/{detected}  ({pct(top1, detected)})")
-    print(f"Top-{args.top_k}:      {topk}/{detected}  ({pct(topk, detected)})")
+    print(f"Dataset:        {args.image_dir.name}  ({total} images in catalog)")
+    print(f"Detected:       {detected}/{total}  ({pct(detected, total)})")
+    print(f"Edition top-1:  {edition1}/{detected}  ({pct(edition1, detected)})")
+    print(f"Edition top-{args.top_k}:  {editionk}/{detected}  ({pct(editionk, detected)})")
+    if has_oracle:
+        print(f"Card top-1:     {oracle1}/{detected}  ({pct(oracle1, detected)})")
+        print(f"Card top-{args.top_k}:     {oraclek}/{detected}  ({pct(oraclek, detected)})")
+    else:
+        print("(Card accuracy unavailable — catalog has no oracle_ids)")
 
 
 if __name__ == "__main__":
