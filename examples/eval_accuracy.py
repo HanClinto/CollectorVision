@@ -29,7 +29,8 @@ def main() -> None:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("input", type=Path, help="Image file or directory")
     parser.add_argument("--catalog", required=True, help="hf://user/repo/key or .npz path")
-    parser.add_argument("--top-k", type=int, default=3)
+    parser.add_argument("--top-k", type=int, nargs="+", default=[1, 3, 5],
+                        help="One or more k values to report (default: 1 3 5)")
     args = parser.parse_args()
 
     paths = (sorted(args.input.glob("*.jpg"))
@@ -40,8 +41,11 @@ def main() -> None:
 
     catalog  = cvg.Catalog.load(args.catalog)
     detector = cvg.NeuralCornerDetector()
+    max_k    = max(args.top_k)
 
-    detected = edition1 = editionk = oracle1 = oraclek = total = 0
+    detected = total = 0
+    edition_hits = {k: 0 for k in args.top_k}
+    oracle_hits  = {k: 0 for k in args.top_k}
 
     for path in paths:
         true_id = UUID_RE.search(path.name).group(0).lower()
@@ -55,21 +59,23 @@ def main() -> None:
         detected += 1
 
         emb  = catalog.embedder.embed([detection.dewarp(cv2.imread(str(path)))])[0]
-        hits = [cid for _, cid in catalog.search(emb, top_k=args.top_k)]
+        hits = [cid for _, cid in catalog.search(emb, top_k=max_k)]
 
-        edition1  += hits[0] == true_id
-        editionk  += true_id in hits
+        true_oracle = catalog.card_to_oracle.get(true_id)
+        hit_oracles = [catalog.card_to_oracle.get(c) for c in hits]
 
-        true_oracle  = catalog.card_to_oracle.get(true_id)
-        hit_oracles  = [catalog.card_to_oracle.get(c) for c in hits]
-        oracle1  += bool(true_oracle) and hit_oracles[0] == true_oracle
-        oraclek  += bool(true_oracle) and true_oracle in hit_oracles
+        for k in args.top_k:
+            edition_hits[k] += true_id in hits[:k]
+            if true_oracle:
+                oracle_hits[k] += true_oracle in hit_oracles[:k]
 
     def pct(n, d): return f"{100 * n / d:.1f}%" if d else "—"
 
-    print(f"Images:          {total}  ({detected} detected)")
-    print(f"Edition  top-1:  {pct(edition1,  detected)}   top-{args.top_k}: {pct(editionk,  detected)}")
-    print(f"Card     top-1:  {pct(oracle1,   detected)}   top-{args.top_k}: {pct(oraclek,   detected)}")
+    ks = "   ".join(f"top-{k}" for k in args.top_k)
+    print(f"Images:   {total}  ({detected} detected)")
+    print(f"          {ks}")
+    print("Edition   " + "   ".join(f"{pct(edition_hits[k], detected):>5}" for k in args.top_k))
+    print("Card      " + "   ".join(f"{pct(oracle_hits[k],  detected):>5}" for k in args.top_k))
 
 
 if __name__ == "__main__":
