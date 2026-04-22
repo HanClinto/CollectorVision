@@ -268,8 +268,17 @@ GET /catalogs    — lists loaded catalog names
 - [ ] CoreML conversion via `coremltools`; Swift package `CollectorVisionKit`
 
 #### B4. On-device catalog considerations
-- [ ] Catalog size tiers: milo1 ~54 MB (stream on first use); consider flat binary format
-- [ ] Consider flat binary format for faster mobile load vs NPZ
+- [ ] Catalog size tiers: milo1 ~55 MB f32 (stream on first use)
+- [ ] **f16 embeddings** — tested and confirmed zero accuracy loss; cuts catalog to ~29 MB.
+      The format already supports it: `Catalog.load()` reads any dtype and numpy handles
+      the search correctly.  To enable, the catalog builder just needs
+      `embeddings=embeddings.astype(np.float16)` before `np.savez_compressed`.
+      Hold off until targeting edge/mobile — on desktop the RAM and download savings
+      are not worth the added dtype complexity at query time.
+- [ ] **int8 quantization** — would cut to ~13 MB.  Requires storing a per-row or
+      per-column scale factor alongside the embeddings and rescaling before the dot
+      product.  Worth benchmarking for Pi Zero / Android bundle use case.
+- [ ] Consider flat binary format for faster mobile load vs NPZ (NPZ is zip-wrapped)
 
 ---
 
