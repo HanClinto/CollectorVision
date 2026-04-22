@@ -3,9 +3,30 @@
 A Catalog bundles:
   - the card embedding matrix
   - card IDs (one per row — callers look up names/metadata from the source)
+  - oracle IDs (optional — one oracle_id per row for card-level near-miss matching)
   - the embedder specification needed to embed query images consistently
 
 Users select a catalog file; the library derives everything else from it.
+
+NPZ format
+----------
+Required keys:
+
+  embeddings    (N, D) float32          embedding matrix
+  card_ids      (N,) str  or (N, 16) uint8   primary key (e.g. Scryfall UUID)
+  source        scalar str              "scryfall", "tcgplayer", …
+  embedder_spec scalar str              JSON embedder specification
+
+Optional keys:
+
+  oracle_ids    (N,) str  or (N, 16) uint8   card-level ID (groups all printings)
+
+UUID storage: UUIDs may be stored either as ``<U36`` strings (legacy) or as
+``(N, 16) uint8`` packed binary (9× more compact).  Both formats are read
+transparently; new catalogs should use packed binary.
+
+Pack:   ``np.array([bytes.fromhex(s.replace('-','')) for s in ids], dtype=np.uint8)``
+Unpack: ``f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:]}"`` where ``h = row.tobytes().hex()``
 """
 from __future__ import annotations
 
@@ -22,9 +43,28 @@ if TYPE_CHECKING:
 
 # NPZ keys
 _KEY_EMBEDDINGS  = "embeddings"    # (N, D) float32
-_KEY_CARD_IDS    = "card_ids"      # (N,) str — primary key (e.g. Scryfall UUID)
-_KEY_SOURCE      = "source"        # scalar str — "scryfall", "tcgplayer", …
-_KEY_EMBEDDER    = "embedder_spec" # scalar str — JSON embedder specification
+_KEY_CARD_IDS    = "card_ids"      # (N,) str or (N, 16) uint8
+_KEY_ORACLE_IDS  = "oracle_ids"    # (N,) str or (N, 16) uint8 — optional
+_KEY_SOURCE      = "source"        # scalar str
+_KEY_EMBEDDER    = "embedder_spec" # scalar str — JSON
+
+
+def _unpack_ids(arr: np.ndarray) -> list[str]:
+    """Convert a UUID array (string or packed binary) to a list of UUID strings."""
+    if arr.dtype == np.uint8:
+        # Packed binary: (N, 16) uint8 → list of "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+        out = []
+        for row in arr:
+            h = row.tobytes().hex()
+            out.append(f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:]}")
+        return out
+    return arr.tolist()
+
+
+def pack_ids(ids: list[str]) -> np.ndarray:
+    """Pack a list of UUID strings into a compact (N, 16) uint8 array."""
+    raw = b"".join(bytes.fromhex(s.replace("-", "")) for s in ids)
+    return np.frombuffer(raw, dtype=np.uint8).reshape(len(ids), 16).copy()
 
 
 class Catalog:
@@ -35,6 +75,14 @@ class Catalog:
 
     The embedder required to query this catalog is available via
     :attr:`Catalog.embedder`.
+
+    Attributes
+    ----------
+    card_ids:
+        List of primary-key UUIDs (e.g. Scryfall card UUID), one per row.
+    oracle_ids:
+        List of oracle UUIDs (groups all printings of the same card), or
+        ``None`` if the catalog was not built with oracle IDs.
     """
 
     def __init__(
@@ -43,9 +91,11 @@ class Catalog:
         card_ids: list[str],
         source: str,
         embedder_spec: dict,
+        oracle_ids: list[str] | None = None,
     ) -> None:
         self.embeddings = embeddings
         self.card_ids = card_ids
+        self.oracle_ids = oracle_ids
         self.source = source
         self.embedder_spec = embedder_spec
 
@@ -96,11 +146,18 @@ class Catalog:
         if _KEY_EMBEDDER in data.files:
             embedder_spec = json.loads(str(data[_KEY_EMBEDDER]))
 
+        oracle_ids = (
+            _unpack_ids(data[_KEY_ORACLE_IDS])
+            if _KEY_ORACLE_IDS in data.files
+            else None
+        )
+
         return cls(
             embeddings=data[_KEY_EMBEDDINGS],
-            card_ids=data[_KEY_CARD_IDS].tolist(),
+            card_ids=_unpack_ids(data[_KEY_CARD_IDS]),
             source=str(data[_KEY_SOURCE]) if _KEY_SOURCE in data.files else "unknown",
             embedder_spec=embedder_spec,
+            oracle_ids=oracle_ids,
         )
 
     @property
@@ -188,9 +245,13 @@ class Catalog:
                     f"  {catalogs[0].source}: {ref_spec}\n"
                     f"  {c.source}: {c.embedder_spec}"
                 )
+        oracle_ids = None
+        if all(c.oracle_ids is not None for c in catalogs):
+            oracle_ids = sum((c.oracle_ids for c in catalogs), [])
         return cls(
             embeddings=np.concatenate([c.embeddings for c in catalogs], axis=0),
             card_ids=sum((c.card_ids for c in catalogs), []),
+            oracle_ids=oracle_ids,
             source="+".join(c.source for c in catalogs),
             embedder_spec=ref_spec,
         )
@@ -227,23 +288,16 @@ class Catalog:
         return len(self.card_ids)
 
     def __repr__(self) -> str:
+        has_oracle = self.oracle_ids is not None
         return (
-            f"Catalog(source={self.source!r}, n={len(self)}, algo={self.algo_key!r})"
+            f"Catalog(source={self.source!r}, n={len(self)}, "
+            f"algo={self.algo_key!r}, oracle_ids={has_oracle})"
         )
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-def _source_primary_key(source: str) -> str:
-    """Return the canonical ID field name for a catalog source."""
-    return {
-        "scryfall":   "scryfall_id",
-        "tcgplayer":  "tcgplayer_id",
-        "pokemontcg": "pokemontcg_id",
-    }.get(source, "card_id")
-
 
 def _embedder_from_spec(spec: dict) -> "Embedder":
     """Reconstruct an Embedder from the spec dict stored in the catalog."""
