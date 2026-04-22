@@ -2,21 +2,17 @@
 """CollectorVision — plug-and-play card identification server.
 
 A minimal FastAPI server that exposes card identification as a REST API.
-Uses a single Identifier instance (lazy-loaded on first request).
-
-Compatible with the 07_web_scanner client — accepts the same
-``{"records": [{"_base64": "..."}]}`` request format and returns the
-same ``{"records": [...], "_status": {...}}`` envelope.
+Gallery and detector are loaded lazily on first request and reused.
 
 Usage
 -----
     # Install deps
-    pip install collectorvision fastapi uvicorn[standard]
+    pip install "collectorvision[server]"
 
-    # Run (downloads gallery automatically on first start)
-    python server.py --gallery ./magic-scryfall-milo1-2026-04.npz
+    # Run with local gallery file
+    python server.py --gallery ./milo1-scryfall-mtg-2026-04.npz
 
-    # Or with HuggingFace auto-download (requires network on first run)
+    # Run with HuggingFace auto-download (downloads on first request)
     python server.py --hfd HanClinto/milo scryfall-mtg
 
     # HTTPS (required for camera access from other devices on the LAN)
@@ -33,7 +29,7 @@ Endpoints
         Simpler for curl / browser testing.
 
     GET  /health
-        Returns {"status": "ok"} — useful for readiness probes.
+        Returns {"status": "ok"}.
 
     GET  /
         Redirects to /docs (Swagger UI).
@@ -55,23 +51,21 @@ from fastapi.responses import JSONResponse, RedirectResponse
 import collector_vision as cvg
 
 # ---------------------------------------------------------------------------
-# CLI args (parsed once so uvicorn can also pick them up)
+# CLI args
 # ---------------------------------------------------------------------------
 
 _parser = argparse.ArgumentParser(description="CollectorVision identification server")
 _parser.add_argument("--gallery",  type=Path,
                      help="Path to a local .npz gallery file")
-_parser.add_argument("--hfd",      nargs=2, metavar=("REPO", "NAME"),
-                     help="Auto-download gallery from HuggingFace: --hfd REPO NAME")
+_parser.add_argument("--hfd",      nargs=2, metavar=("REPO", "KEY"),
+                     help="Auto-download gallery from HuggingFace: --hfd REPO KEY")
 _parser.add_argument("--host",     default="127.0.0.1")
 _parser.add_argument("--port",     type=int, default=8000)
-_parser.add_argument("--top-k",    type=int, default=5,
-                     help="Number of alternatives to return per image")
+_parser.add_argument("--top-k",    type=int, default=5)
 _parser.add_argument("--min-sharpness", type=float, default=0.0,
-                     help="SimCC sharpness gate [0-1]; 0=disabled (default). "
-                          "~0.02 skips frames with no visible card.")
+                     help="SimCC sharpness gate; 0=disabled. ~0.02 skips blank frames.")
 _parser.add_argument("--detector-none", action="store_true",
-                     help="Skip corner detection — treat inputs as pre-cropped card images.")
+                     help="Skip corner detection — inputs are pre-cropped card images.")
 _parser.add_argument("--ssl",      action="store_true",
                      help="Serve over HTTPS using a self-signed certificate.")
 _args, _ = _parser.parse_known_args()
@@ -88,7 +82,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # local tool — all origins OK
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -105,38 +99,38 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
-# Lazy Identifier singleton
+# Lazy singletons
 # ---------------------------------------------------------------------------
 
-_identifier: cvg.Identifier | None = None
+_gallery: cvg.Gallery | None = None
+_detector: cvg.NeuralCornerDetector | None = None
+_detector_loaded = False
 
 
-def _get_identifier() -> cvg.Identifier:
-    global _identifier
-    if _identifier is not None:
-        return _identifier
-
-    # Gallery source
+def _get_gallery() -> cvg.Gallery:
+    global _gallery
+    if _gallery is not None:
+        return _gallery
     if _args.gallery:
-        gallery_src = _args.gallery
+        _gallery = cvg.Gallery.load(_args.gallery)
     elif _args.hfd:
-        repo, name = _args.hfd
-        gallery_src = cvg.HFD(repo, name)
+        repo, key = _args.hfd
+        _gallery = cvg.Gallery.load(cvg.HFD(repo, key).resolve())
     else:
         raise HTTPException(
             status_code=503,
             detail="No gallery configured. Start the server with --gallery or --hfd.",
         )
+    return _gallery
 
-    # Detector
-    if _args.detector_none:
-        detector = None
-    else:
-        from collector_vision.detectors.neural import NeuralCornerDetector
-        detector = NeuralCornerDetector(min_sharpness=_args.min_sharpness)
 
-    _identifier = cvg.Identifier(gallery_src, detector=detector)
-    return _identifier
+def _get_detector() -> cvg.NeuralCornerDetector | None:
+    global _detector, _detector_loaded
+    if not _detector_loaded:
+        if not _args.detector_none:
+            _detector = cvg.NeuralCornerDetector(min_sharpness=_args.min_sharpness)
+        _detector_loaded = True
+    return _detector
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +153,6 @@ def _bgr_from_b64(b64: str) -> np.ndarray:
 
 
 def _crop_jpeg(bgr: np.ndarray, max_dim: int = 300) -> str:
-    """Return a small JPEG preview of the crop as a base64 string."""
     h, w = bgr.shape[:2]
     scale = min(1.0, max_dim / max(h, w))
     if scale < 1.0:
@@ -173,63 +166,73 @@ def _crop_jpeg(bgr: np.ndarray, max_dim: int = 300) -> str:
 # ---------------------------------------------------------------------------
 
 def _identify_bgr(bgr: np.ndarray, *, top_k: int) -> dict:
-    """Run the full pipeline on one BGR image. Returns a record dict."""
     t0 = time.perf_counter()
-    identifier = _get_identifier()
+    gallery  = _get_gallery()
+    detector = _get_detector()
 
+    sharpness  = None
+    card_present = True
+    crop_jpeg  = None
+
+    from PIL import Image
+
+    # Step 1: detect + dewarp
+    if detector is not None:
+        detection = detector.detect(bgr)
+        sharpness = detection.extra.get("sharpness", 0.0)
+        card_present = detection.card_present
+
+        if sharpness < _args.min_sharpness:
+            return {
+                "_status":      {"code": 200, "text": "OK"},
+                "card_present": False,
+                "sharpness":    round(sharpness, 5),
+                "_timing":      {"total_ms": round((time.perf_counter() - t0) * 1000, 1)},
+            }
+
+        if detection.card_present:
+            crop_pil  = detection.dewarp(bgr)
+            crop_bgr  = cv2.cvtColor(np.array(crop_pil), cv2.COLOR_RGB2BGR)
+            crop_jpeg = _crop_jpeg(crop_bgr)
+        else:
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            crop_pil  = Image.fromarray(rgb)
+            crop_jpeg = _crop_jpeg(bgr)
+    else:
+        sharpness = None
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        crop_pil  = Image.fromarray(rgb)
+        crop_jpeg = _crop_jpeg(bgr)
+
+    # Step 2: embed + search
     try:
-        result = identifier.identify(bgr, top_k=top_k)
+        emb  = gallery.embedder.embed(crop_pil)
+        hits = gallery.search(emb, top_k=top_k)
     except Exception as exc:
         return {
-            "_status":     {"code": 500, "text": f"Identification error: {exc}"},
+            "_status":      {"code": 500, "text": f"Identification error: {exc}"},
             "card_present": False,
         }
 
     t1 = time.perf_counter()
 
-    # Build the dewarped crop preview using the detector directly so we can
-    # include it in the response without running inference twice.
-    # (If detector=None, the full image is the crop.)
-    detector = identifier._get_detector()
-    sharpness = None
-    crop_jpeg = None
-    card_present = True
-
-    if detector is not None:
-        from collector_vision.identifier import _dewarp
-        det_result = detector.detect(bgr)
-        sharpness = det_result.extra.get("sharpness")
-        card_present = det_result.card_present
-
-        if det_result.card_present and det_result.corners is not None:
-            crop_bgr = _dewarp(bgr, det_result.corners)
-            crop_jpeg = _crop_jpeg(crop_bgr)
-        else:
-            # No card detected — still return identification (low confidence)
-            crop_jpeg = _crop_jpeg(bgr)
-    else:
-        crop_jpeg = _crop_jpeg(bgr)
-
     out: dict = {
-        "_status":     {"code": 200, "text": "OK"},
+        "_status":      {"code": 200, "text": "OK"},
         "card_present": card_present,
-        "_timing":     {"total_ms": round((t1 - t0) * 1000, 1)},
+        "_timing":      {"total_ms": round((t1 - t0) * 1000, 1)},
     }
-
     if sharpness is not None:
-        out["sharpness"] = round(sharpness, 5)
-
+        out["sharpness"] = round(float(sharpness), 5)
     if crop_jpeg:
         out["crop_jpeg"] = crop_jpeg
-
-    if result.ids:
-        out["ids"]        = result.ids
-        out["confidence"] = round(result.confidence, 4)
+    if hits:
+        best_score, best_id = hits[0]
+        out["card_id"]      = best_id
+        out["confidence"]   = round(best_score, 4)
         out["alternatives"] = [
-            {"ids": alt.ids, "confidence": round(alt.confidence, 4)}
-            for alt in result.alternatives
+            {"card_id": cid, "confidence": round(score, 4)}
+            for score, cid in hits[1:]
         ]
-
     return out
 
 
@@ -241,7 +244,7 @@ def _identify_bgr(bgr: np.ndarray, *, top_k: int) -> dict:
 async def identify(request: Request):
     """Identify cards from base64-encoded images.
 
-    Accepts the same JSON envelope as the 07_web_scanner API::
+    Body::
 
         {
           "records": [
@@ -249,10 +252,6 @@ async def identify(request: Request):
             ...
           ]
         }
-
-    Per-record optional fields:
-
-    - ``"top_k"`` — override the number of alternatives (default: server ``--top-k``)
 
     Returns::
 
@@ -263,7 +262,7 @@ async def identify(request: Request):
               "card_present": true,
               "sharpness":  0.042,
               "crop_jpeg":  "<base64 preview>",
-              "ids":        {"scryfall_id": "..."},
+              "card_id":    "abc123...",
               "confidence": 0.94,
               "alternatives": [...]
             }
@@ -283,21 +282,16 @@ async def identify(request: Request):
     for rec in records:
         b64 = rec.get("_base64") or rec.get("base64")
         if not b64:
-            results.append({
-                "_status":     {"code": 400, "text": "Missing '_base64' field"},
-                "card_present": False,
-            })
+            results.append({"_status": {"code": 400, "text": "Missing '_base64' field"},
+                            "card_present": False})
             continue
 
         top_k = int(rec.get("top_k", _args.top_k))
-
         try:
             bgr = _bgr_from_b64(b64)
         except ValueError as exc:
-            results.append({
-                "_status":     {"code": 400, "text": str(exc)},
-                "card_present": False,
-            })
+            results.append({"_status": {"code": 400, "text": str(exc)},
+                            "card_present": False})
             continue
 
         results.append(_identify_bgr(bgr, top_k=top_k))
@@ -312,16 +306,13 @@ async def identify_upload(
 ):
     """Identify cards from uploaded image files (multipart form).
 
-    Simpler than the base64 endpoint — useful for curl, browser forms,
-    and quick testing::
-
-        curl -X POST http://localhost:8000/identify/upload \\
-             -F "files=@card.jpg"
-
     Multiple files are treated as frames of the **same physical card** and
-    votes are summed before ranking (same as ``Identifier.identify(*frames)``).
-    To identify multiple *different* cards in one request, use ``POST /identify``
-    with separate records.
+    scores are summed before ranking.  To identify multiple *different* cards,
+    use ``POST /identify`` with separate records.
+
+    Example::
+
+        curl -X POST http://localhost:8000/identify/upload -F "files=@card.jpg"
     """
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
@@ -329,7 +320,6 @@ async def identify_upload(
     resolved_top_k = top_k if top_k is not None else _args.top_k
 
     if len(files) == 1:
-        # Single frame — use _identify_bgr for the full record response
         data = await files[0].read()
         try:
             bgr = _bgr_from_bytes(data)
@@ -337,34 +327,44 @@ async def identify_upload(
             raise HTTPException(status_code=400, detail=str(exc))
         return JSONResponse(_identify_bgr(bgr, top_k=resolved_top_k))
 
-    # Multiple frames — run multi-frame voting via Identifier.identify()
-    bgrs = []
+    # Multiple frames — aggregate scores
+    gallery  = _get_gallery()
+    detector = _get_detector()
+
+    from collections import defaultdict
+    from PIL import Image
+
+    t0 = time.perf_counter()
+    score_map: dict[str, float] = defaultdict(float)
+
     for f in files:
         data = await f.read()
         try:
-            bgrs.append(_bgr_from_bytes(data))
+            bgr = _bgr_from_bytes(data)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"{f.filename}: {exc}")
 
-    t0 = time.perf_counter()
-    identifier = _get_identifier()
-    result = identifier.identify(*bgrs, top_k=resolved_top_k)
+        if detector is not None:
+            detection = detector.detect(bgr)
+            crop_pil  = detection.dewarp(bgr) if detection.card_present else Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+        else:
+            crop_pil = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+
+        emb = gallery.embedder.embed(crop_pil)
+        for score, card_id in gallery.search(emb, top_k=resolved_top_k):
+            score_map[card_id] += score
+
+    hits = sorted(score_map.items(), key=lambda x: x[1], reverse=True)[:resolved_top_k]
     t1 = time.perf_counter()
 
+    best_id, best_score = hits[0]
     return JSONResponse({
-        "_status":     {"code": 200, "text": "OK"},
+        "_status":      {"code": 200, "text": "OK"},
         "card_present": True,
-        "ids":          result.ids,
-        "confidence":   round(result.confidence, 4),
-        "alternatives": [
-            {"ids": alt.ids, "confidence": round(alt.confidence, 4)}
-            for alt in result.alternatives
-        ],
-        "frame_results": [
-            {"ids": fr.ids, "confidence": round(fr.confidence, 4)}
-            for fr in result.frame_results
-        ],
-        "_timing": {"total_ms": round((t1 - t0) * 1000, 1)},
+        "card_id":      best_id,
+        "confidence":   round(best_score, 4),
+        "alternatives": [{"card_id": cid, "confidence": round(s, 4)} for cid, s in hits[1:]],
+        "_timing":      {"total_ms": round((t1 - t0) * 1000, 1)},
     })
 
 
@@ -376,20 +376,15 @@ if __name__ == "__main__":
     import uvicorn
 
     if _args.ssl:
-        # Generate a throwaway self-signed cert for LAN access
-        # (browser will warn; acceptable for local dev)
-        import ssl, tempfile, subprocess  # noqa: E401
+        import tempfile, subprocess
         with tempfile.TemporaryDirectory() as tmp:
-            cert = f"{tmp}/cert.pem"
-            key  = f"{tmp}/key.pem"
+            cert, key = f"{tmp}/cert.pem", f"{tmp}/key.pem"
             subprocess.run([
                 "openssl", "req", "-x509", "-newkey", "rsa:2048",
                 "-keyout", key, "-out", cert, "-days", "365", "-nodes",
                 "-subj", "/CN=localhost",
             ], check=True, capture_output=True)
-            uvicorn.run(
-                "server:app", host=_args.host, port=_args.port,
-                ssl_certfile=cert, ssl_keyfile=key,
-            )
+            uvicorn.run("server:app", host=_args.host, port=_args.port,
+                        ssl_certfile=cert, ssl_keyfile=key)
     else:
         uvicorn.run("server:app", host=_args.host, port=_args.port)

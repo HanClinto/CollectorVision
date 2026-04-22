@@ -169,6 +169,40 @@ class Gallery:
             embedder_spec=ref_spec,
         )
 
+    def search(self, embedding: np.ndarray, top_k: int = 5) -> list[tuple[float, str]]:
+        """Find the closest cards to an embedding vector.
+
+        Parameters
+        ----------
+        embedding:
+            Query vector — ``(D,)`` float32 for neural galleries,
+            ``(B,)`` uint8 for hash galleries.  Must match the gallery's
+            own embedder output (use :attr:`embedder` to produce it).
+        top_k:
+            Number of results to return.
+
+        Returns
+        -------
+        List of ``(score, card_id)`` tuples sorted by descending score.
+        Score is cosine similarity for neural galleries, normalised Hamming
+        similarity for hash galleries (both in the range [0, 1]).
+
+        Example::
+
+            gallery = Gallery.load("milo1-scryfall-mtg-2026-04.npz")
+            crop = detection.dewarp(image)
+            emb = gallery.embedder.embed(crop)
+            hits = gallery.search(emb, top_k=3)
+            score, card_id = hits[0]
+        """
+        from collector_vision import retrieval
+
+        if self.mode == "hash":
+            raw = retrieval.hamming_search(embedding, self.embeddings, top_k=top_k)
+        else:
+            raw = retrieval.cosine_search(embedding, self.embeddings, top_k=top_k)
+        return [(score, self.card_ids[idx]) for score, idx in raw]
+
     def __len__(self) -> int:
         return len(self.card_ids)
 
