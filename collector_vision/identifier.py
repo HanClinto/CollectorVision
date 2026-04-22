@@ -5,10 +5,10 @@ Typical usage::
     import collector_vision as cvg
 
     # Local gallery file
-    cvid = cvg.Identifier("./magic-scryfall-phash16-2026-04.npz")
+    cvid = cvg.Identifier("./milo1-scryfall-mtg-2026-04.npz")
 
     # Auto-download from HuggingFace (re-checks for updates every 7 days)
-    cvid = cvg.Identifier(cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"))
+    cvid = cvg.Identifier(cvg.HFD("HanClinto/milo", "scryfall-mtg"))
 
     result = cvid.identify("photo.jpg")
     print(result.ids, result.confidence)
@@ -61,30 +61,30 @@ class Identifier:
     --------
     Local file::
 
-        cvid = cvg.Identifier("./magic-scryfall-phash16-2026-04.npz")
+        cvid = cvg.Identifier("./milo1-scryfall-mtg-2026-04.npz")
 
     Auto-download from HuggingFace::
 
-        cvid = cvg.Identifier(cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"))
+        cvid = cvg.Identifier(cvg.HFD("HanClinto/milo", "scryfall-mtg"))
 
     Multi-gallery (must share the same embedding algorithm)::
 
         cvid = cvg.Identifier(
-            cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"),
-            cvg.HFD("CollectorVision/galleries", "pokemon-tcgplayer-phash16"),
+            cvg.HFD("HanClinto/milo", "scryfall-mtg"),
+            cvg.HFD("HanClinto/milo", "tcgplayer-pokemon"),
         )
 
     Canny detector (faster on clean backgrounds, no GPU needed)::
 
         from collector_vision.detectors import CannyCornerDetector
         cvid = cvg.Identifier(
-            cvg.HFD("CollectorVision/galleries", "magic-scryfall-phash16"),
+            cvg.HFD("HanClinto/milo", "scryfall-mtg"),
             detector=CannyCornerDetector(),
         )
 
     No detection — input is already a card crop::
 
-        cvid = cvg.Identifier("./magic-scryfall-phash16-2026-04.npz", detector=None)
+        cvid = cvg.Identifier("./milo1-scryfall-mtg-2026-04.npz", detector=None)
     """
 
     def __init__(
@@ -95,8 +95,8 @@ class Identifier:
         if not galleries:
             raise ValueError(
                 "Provide at least one gallery source, e.g.:\n"
-                "  Identifier('./magic-scryfall-phash16-2026-04.npz')\n"
-                "  Identifier(HFD('CollectorVision/galleries', 'magic-scryfall-phash16'))"
+                "  Identifier('./milo1-scryfall-mtg-2026-04.npz')\n"
+                "  Identifier(HFD('HanClinto/milo', 'scryfall-mtg'))"
             )
 
         self._sources = galleries
@@ -300,13 +300,20 @@ def _hits_to_result(
     """Build a CardResult from a ranked (score, gallery_index) list."""
     if not hits:
         return CardResult()
+
+    from collector_vision.gallery import _source_primary_key
+    pk = _source_primary_key(gallery.source)
+
+    def _make_ids(idx: int) -> dict:
+        return {pk: gallery.card_ids[idx]}
+
     best_score, best_idx = hits[0]
     alts = [
-        CardResult(ids=gallery.ids[idx], confidence=float(score))
+        CardResult(ids=_make_ids(idx), confidence=float(score))
         for score, idx in hits[1:]
     ]
     return CardResult(
-        ids=gallery.ids[best_idx],
+        ids=_make_ids(best_idx),
         confidence=float(best_score),
         alternatives=alts,
     )

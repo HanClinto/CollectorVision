@@ -12,11 +12,11 @@ Checklist for turning the scaffold into a shippable library.
 - [x] Per-frame `frame_results` returned when multiple images are passed
 - [x] Cosine and Hamming retrieval in `collector_vision/retrieval.py`
 
-### 1b. NeuralCornerDetector (Reggie) ✅
+### 1b. NeuralCornerDetector (Cornelius) ✅
 - [x] ONNX-based inference via `onnxruntime` — no PyTorch at runtime
 - [x] SimCC sharpness gate (mean peak of 8 softmax distributions) instead of
       unreliable presence logit
-- [x] Bundled as `collector_vision/weights/reggie.onnx` (8.2 MB, single file)
+- [x] Bundled as `collector_vision/weights/cornelius.onnx` (8.2 MB, single file)
 
 ### 1c. NeuralEmbedder (Milo) ✅
 - [x] ONNX-based inference via `onnxruntime`
@@ -49,7 +49,7 @@ Checklist for turning the scaffold into a shippable library.
 
 ## 2. Model weights ✅
 
-- [x] Corner detector (Reggie) — `reggie.onnx` (8.2 MB, merged from export)
+- [x] Corner detector (Cornelius) — `cornelius.onnx` (8.2 MB, merged from export)
 - [x] Embedder (Milo) — `milo.onnx` (5.0 MB, merged from export)
 - [x] Both are single-file ONNX, no paired `.data` file
 - [x] Bundled in `collector_vision/weights/`; `package_data` configured in `pyproject.toml`
@@ -70,25 +70,26 @@ Gallery construction lives in **CollectorVision-Pipeline** (section 14).
 |---|---|---|
 | `embeddings` | (N, D) float32 or (N, B) uint8 | Embedding matrix |
 | `card_ids` | (N,) str | Primary key per row (e.g. Scryfall UUID) |
-| `ids_json` | (N,) str | JSON-encoded per-card ids dict |
 | `source` | scalar str | `"scryfall"`, `"tcgplayer"`, … |
 | `mode` | scalar str | `"embedding"` or `"hash"` |
 | `embedder_spec` | scalar str | JSON spec for reconstructing the embedder |
 
+Card names and metadata are not stored in the gallery — callers use the returned
+ID to look up metadata (e.g. via Scryfall API or a local catalog).
+
 - [ ] Document the NPZ format fully in `collector_vision/gallery.py` module docstring
 - [ ] `tests/test_gallery.py` — `Gallery.load()` round-trips a synthetic NPZ; missing
       optional keys handled gracefully; `_merge()` rejects incompatible specs
-- [ ] Update `_BUNDLED_MANIFEST` in `manifest.py` once Pipeline publishes first galleries
-- [ ] Confirm `HFD` → `Gallery.load()` → `identify()` works end-to-end against live HF
+- [x] Confirm `HFD` → `Gallery.load()` → `identify()` works end-to-end against live HF
 
 ---
 
 ## 4. HuggingFace setup
 
-- [ ] Create HF organization `CollectorVision`
-- [ ] `CollectorVision/galleries` (Datasets repo) — README, gallery NPZ uploads via Pipeline
-- [ ] `CollectorVision/models` (Hub repo) — `reggie.onnx`, `milo.onnx`, model cards
-- [ ] Verify `HFD("CollectorVision/galleries", "magic-scryfall-milo1").resolve()` end-to-end
+- [x] `HanClinto/milo` — model repo hosting Milo weights + galleries (`galleries/*.npz`)
+- [ ] Upload `cornelius.onnx` and `milo.onnx` to HF Hub with model cards
+- [ ] Write model cards: architecture, training data, input spec, license, accuracy table
+- [x] `HFD("HanClinto/milo", "scryfall-mtg").resolve()` confirmed end-to-end ✅
 
 ---
 
@@ -149,7 +150,7 @@ Gallery construction lives in **CollectorVision-Pipeline** (section 14).
 - [ ] `tests/smoke/test_install.py`
   - `import collector_vision as cvg` — no error
   - `cvg.__version__` is a string
-  - `cvg.Game.MAGIC` accessible
+  - `cvg.Game.MTG` accessible
   - `cvg.HFD` callable
   - `cvg.weights.check()` returns expected keys
 
@@ -246,7 +247,7 @@ GET /v1/defaults
 ### Strategy B — On-device
 
 #### B1. ONNX models ✅
-- [x] Reggie exported to ONNX (`reggie.onnx`, 8.2 MB) and verified
+- [x] Cornelius exported to ONNX (`cornelius.onnx`, 8.2 MB) and verified
 - [x] Milo exported to ONNX (`milo.onnx`, 5.0 MB) and verified
 - [ ] Upload to HF Hub alongside future `.pt` reference files
 
@@ -273,12 +274,12 @@ GET /v1/defaults
 - [ ] Future: Yu-Gi-Oh, Flesh and Blood, Lorcana, Digimon, One Piece, DBS
 
 ### 14b. Gallery builder
-- [ ] `pipeline/build_gallery.py` — writes `{game}-{source}-{algo}-{YYYY-MM}.npz`
-  with keys: `embeddings`, `card_ids`, `ids_json`, `source`, `mode`, `embedder_spec`
+- [ ] `pipeline/build_gallery.py` — writes `{algo}-{source}-{game}-{YYYY-MM}.npz`
+  with keys: `embeddings`, `card_ids`, `source`, `mode`, `embedder_spec`
 
 ### 14c. Publishing
-- [ ] `pipeline/upload_gallery.py` — upload NPZ, update `manifest.json` on HF Datasets
-- [ ] Open PR against CollectorVision to update `_BUNDLED_MANIFEST` after upload
+- [ ] `pipeline/upload_gallery.py` — upload NPZ to `HanClinto/milo` under `galleries/`,
+      update `manifest.json` at repo root
 
 ### 14d. Automation
 - [ ] GitHub Actions monthly refresh
@@ -290,11 +291,11 @@ GET /v1/defaults
 
 | Milestone | Status | Key items |
 |---|---|---|
-| **M0 — Code complete** | ✅ | `identify(*images)`, Reggie + Milo wired, retrieval, Canny |
-| **M1 — Weights finalized** | ✅ | `reggie.onnx` + `milo.onnx` bundled; single-file, clean names |
+| **M0 — Code complete** | ✅ | `identify(*images)`, Cornelius + Milo wired, retrieval, Canny |
+| **M1 — Weights finalized** | ✅ | `cornelius.onnx` + `milo.onnx` bundled; single-file, clean names |
 | **M1.5 — Examples** | ✅ | `examples/identify_image.py`, `examples/server/` |
-| **M2 — First gallery** | ⬜ | `magic-scryfall-milo1` built in Pipeline, uploaded, `HFD` resolves it |
-| **M3 — End-to-end works** | ⬜ | `pip install`, `Identifier(HFD(...)).identify("photo.jpg")` returns IDs |
+| **M2 — First gallery** | ✅ | `milo1-scryfall-mtg` built, uploaded to `HanClinto/milo`, `HFD` resolves it |
+| **M3 — End-to-end works** | ✅ | `pip install -e .`, smoke test passes, `Gallery.for_game(Game.MTG)` confirmed |
 | **M4 — Full gallery set** | ⬜ | Magic + Pokémon milo1 + phash16 galleries live |
 | **M5 — PyPI v0.1.0** | ⬜ | CI green, tests pass, published to PyPI |
 | **M6 — Automated** | ⬜ | Dependabot, docs site, CHANGELOG |
