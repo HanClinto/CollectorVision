@@ -16,11 +16,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Hash-based embedders (HashEmbedder) — not needed for the default Milo neural catalog
-hash = [
-    "imagehash>=4.3",
-    "scipy>=1.10",
-]
 # Example server
 server = [
     "fastapi>=0.110",

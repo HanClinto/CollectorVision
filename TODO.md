@@ -30,7 +30,7 @@ Checklist for turning the scaffold into a shippable library.
 - [x] Returns `DetectionResult(card_present=False)` when no valid quadrilateral found
 
 ### 1e. Retrieval helpers ✅
-- [x] `collector_vision/retrieval.py` — `cosine_search()` and `hamming_search()`
+- [x] `collector_vision/retrieval.py` — `cosine_search()` (cosine similarity over L2-normalised vectors)
 
 ### 1f. Metadata lookup (future module)
 The pipeline returns IDs only. A thin lookup helper is planned but not blocking v0.1.0:
