@@ -1,7 +1,5 @@
 """Nearest-neighbour retrieval helpers.
 
-Used internally by Identifier.identify(); not part of the public API.
-
 Both functions return a list of (score, index) tuples sorted by descending
 score (higher = better match), truncated to top_k entries.
 
@@ -18,7 +16,7 @@ import numpy as np
 
 def cosine_search(
     query_vec: np.ndarray,
-    gallery_embeddings: np.ndarray,
+    catalog_embeddings: np.ndarray,
     top_k: int = 5,
 ) -> list[tuple[float, int]]:
     """Top-k cosine similarity search.
@@ -27,7 +25,7 @@ def cosine_search(
     ----------
     query_vec:
         (D,) float32, L2-normalised.
-    gallery_embeddings:
+    catalog_embeddings:
         (N, D) float32, L2-normalised rows.
     top_k:
         Number of results to return.
@@ -36,13 +34,12 @@ def cosine_search(
     -------
     List of (score, index) sorted by descending score.
     """
-    scores: np.ndarray = gallery_embeddings @ query_vec  # (N,)
+    scores: np.ndarray = catalog_embeddings @ query_vec  # (N,)
     n = len(scores)
 
     if top_k >= n:
         idxs = np.argsort(scores)[::-1]
     else:
-        # argpartition is O(N); argsort of the partition is O(top_k log top_k)
         part = np.argpartition(scores, -top_k)[-top_k:]
         idxs = part[np.argsort(scores[part])[::-1]]
 
@@ -51,7 +48,7 @@ def cosine_search(
 
 def hamming_search(
     query_bits: np.ndarray,
-    gallery_bits: np.ndarray,
+    catalog_bits: np.ndarray,
     top_k: int = 5,
 ) -> list[tuple[float, int]]:
     """Top-k Hamming similarity search.
@@ -60,8 +57,8 @@ def hamming_search(
     ----------
     query_bits:
         (B,) uint8 — packed bit vector.
-    gallery_bits:
-        (N, B) uint8 — packed bit vectors, one row per gallery card.
+    catalog_bits:
+        (N, B) uint8 — packed bit vectors, one row per catalog card.
     top_k:
         Number of results to return.
 
@@ -71,7 +68,7 @@ def hamming_search(
     """
     n_bits = query_bits.shape[0] * 8
 
-    xor = np.bitwise_xor(gallery_bits, query_bits[np.newaxis, :])  # (N, B)
+    xor = np.bitwise_xor(catalog_bits, query_bits[np.newaxis, :])  # (N, B)
     distances = np.unpackbits(xor, axis=1).sum(axis=1).astype(np.float32)  # (N,)
     scores = 1.0 - distances / n_bits  # (N,) normalised similarity
 

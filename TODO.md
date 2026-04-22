@@ -59,10 +59,10 @@ Checklist for turning the scaffold into a shippable library.
 
 ---
 
-## 3. Gallery format
+## 3. Catalog format
 
-CollectorVision consumes gallery NPZ files — it does not build them.
-Gallery construction lives in **CollectorVision-Pipeline** (section 14).
+CollectorVision consumes catalog NPZ files — it does not build them.
+Catalog construction lives in **CollectorVision-Pipeline** (section 14).
 
 **Required NPZ keys:**
 
@@ -74,19 +74,19 @@ Gallery construction lives in **CollectorVision-Pipeline** (section 14).
 | `mode` | scalar str | `"embedding"` or `"hash"` |
 | `embedder_spec` | scalar str | JSON spec for reconstructing the embedder |
 
-Card names and metadata are not stored in the gallery — callers use the returned
+Card names and metadata are not stored in the catalog — callers use the returned
 ID to look up metadata (e.g. via Scryfall API or a local catalog).
 
-- [ ] Document the NPZ format fully in `collector_vision/gallery.py` module docstring
-- [ ] `tests/test_gallery.py` — `Gallery.load()` round-trips a synthetic NPZ; missing
+- [ ] Document the NPZ format fully in `collector_vision/catalog.py` module docstring
+- [ ] `tests/test_catalog.py` — `Catalog.load()` round-trips a synthetic NPZ; missing
       optional keys handled gracefully; `_merge()` rejects incompatible specs
-- [x] Confirm `HFD` → `Gallery.load()` → `identify()` works end-to-end against live HF
+- [x] Confirm `HFD` → `Catalog.load()` → `identify()` works end-to-end against live HF
 
 ---
 
 ## 4. HuggingFace setup
 
-- [x] `HanClinto/milo` — model repo hosting Milo weights + galleries (`galleries/*.npz`)
+- [x] `HanClinto/milo` — model repo hosting Milo weights + catalogs (`catalogs/*.npz`)
 - [ ] Upload `cornelius.onnx` and `milo.onnx` to HF Hub with model cards
 - [ ] Write model cards: architecture, training data, input spec, license, accuracy table
 - [x] `HFD("HanClinto/milo", "scryfall-mtg").resolve()` confirmed end-to-end ✅
@@ -134,14 +134,14 @@ ID to look up metadata (e.g. via Scryfall API or a local catalog).
 ### 7a. Unit tests
 - [ ] `test_hfd.py` — mock manifest; stale/fresh cache; `cache_refresh=None`; eviction
 - [ ] `test_games.py` — `parse_game()` happy + error paths; enum values
-- [ ] `test_gallery.py` — synthetic NPZ load, `_merge()`, incompatible spec rejection
+- [ ] `test_catalog.py` — synthetic NPZ load, `_merge()`, incompatible spec rejection
 - [ ] `test_retrieval.py` — cosine and hamming search correctness + top-k ordering
 - [ ] `test_canny_detector.py` — CannyCornerDetector on a synthetic card image
 
 ### 7b. Integration tests
 - [ ] `tests/integration/test_identify.py`
-  - Synthetic gallery NPZ + test card image (small, checked in)
-  - `Identifier("test_gallery.npz").identify("test_card.jpg")` returns correct ID
+  - Synthetic catalog NPZ + test card image (small, checked in)
+  - `Catalog.load("test_catalog.npz")` returns correct ID
   - Multi-image voting with `frame_results`
   - `include_crop=True` returns a crop image
   - Gated by `pytest -m integration` (requires bundled weights)
@@ -162,7 +162,7 @@ ID to look up metadata (e.g. via Scryfall API or a local catalog).
 - [ ] API reference — docstrings on all public classes
 - [ ] CONTRIBUTING.md — dev setup, test commands, PR process
 - [ ] CHANGELOG.md — start at 0.1.0.dev0
-- [ ] How-to: build a gallery (points to Pipeline)
+- [ ] How-to: build a catalog (points to Pipeline)
 - [ ] Consider ReadTheDocs or GitHub Pages
 
 ---
@@ -171,7 +171,7 @@ ID to look up metadata (e.g. via Scryfall API or a local catalog).
 
 - [ ] Add contact details to COMMERCIAL_LICENSE.md
 - [ ] SPDX license headers in each Python source file
-- [ ] Decide on gallery data license (check Scryfall ToS re: derived works)
+- [ ] Decide on catalog data license (check Scryfall ToS re: derived works)
 - [ ] Verify `LICENSE` file (full AGPL-3.0 text) exists
 
 ---
@@ -206,22 +206,22 @@ ID to look up metadata (e.g. via Scryfall API or a local catalog).
 ## 12. API server
 
 > Reference: `ccg_card_id/07_web_scanner`. A minimal version is already in
-> `examples/server/server.py`. The production port below adds multi-gallery,
+> `examples/server/server.py`. The production port below adds multi-catalog,
 > browser UI, and Docker.
 
 ### 12a. API format (Ximilar-compatible)
 ```
 POST /v1/identify
-  body:     {"records": [{"_base64": "...", "gallery": "magic-scryfall-milo1"}]}
+  body:     {"records": [{"_base64": "...", "catalog": "scryfall-mtg"}]}
   response: {"records": [{...}], "_status": {"code": 200, "text": "OK"}}
 
 GET /v1/health
-GET /v1/galleries    — lists loaded gallery names
+GET /v1/catalogs    — lists loaded catalog names
 GET /v1/defaults
 ```
 
 ### 12b. Full server port
-- [ ] Multi-gallery support — dict of `name → Identifier`
+- [ ] Multi-catalog support — dict of `name → Catalog`
 - [ ] Copy browser UI + ScanBucket client from `07_web_scanner/client/`
 - [ ] SSL self-signed cert generation (LAN camera access)
 - [ ] `collectorvision-server` CLI entry point (`pyproject.toml`)
@@ -253,13 +253,13 @@ GET /v1/defaults
 
 #### B2. Android
 - [ ] ONNX Runtime for Android; Android Archive (AAR) on Maven Central
-- [ ] Bundle phash16 gallery (~3 MB) for offline; milo1 gallery streamed on demand
+- [ ] Bundle phash16 catalog (~3 MB) for offline; milo1 catalog streamed on demand
 
 #### B3. iOS
 - [ ] CoreML conversion via `coremltools`; Swift package `CollectorVisionKit`
 
-#### B4. On-device gallery considerations
-- [ ] Gallery size tiers: phash16 ~3 MB (bundleable), milo1 ~54 MB (stream on first use)
+#### B4. On-device catalog considerations
+- [ ] Catalog size tiers: phash16 ~3 MB (bundleable), milo1 ~54 MB (stream on first use)
 - [ ] Consider flat binary format for faster mobile load vs NPZ
 
 ---
@@ -273,12 +273,12 @@ GET /v1/defaults
 - [ ] Pokémon TCG API — sync all cards, download images
 - [ ] Future: Yu-Gi-Oh, Flesh and Blood, Lorcana, Digimon, One Piece, DBS
 
-### 14b. Gallery builder
-- [ ] `pipeline/build_gallery.py` — writes `{algo}-{source}-{game}-{YYYY-MM}.npz`
+### 14b. Catalog builder
+- [ ] `pipeline/build_catalog.py` — writes `{algo}-{source}-{game}-{YYYY-MM}.npz`
   with keys: `embeddings`, `card_ids`, `source`, `mode`, `embedder_spec`
 
 ### 14c. Publishing
-- [ ] `pipeline/upload_gallery.py` — upload NPZ to `HanClinto/milo` under `galleries/`,
+- [ ] `pipeline/upload_catalog.py` — upload NPZ to `HanClinto/milo` under `catalogs/`,
       update `manifest.json` at repo root
 
 ### 14d. Automation
@@ -294,12 +294,12 @@ GET /v1/defaults
 | **M0 — Code complete** | ✅ | `identify(*images)`, Cornelius + Milo wired, retrieval, Canny |
 | **M1 — Weights finalized** | ✅ | `cornelius.onnx` + `milo.onnx` bundled; single-file, clean names |
 | **M1.5 — Examples** | ✅ | `examples/identify_image.py`, `examples/server/` |
-| **M2 — First gallery** | ✅ | `milo1-scryfall-mtg` built, uploaded to `HanClinto/milo`, `HFD` resolves it |
-| **M3 — End-to-end works** | ✅ | `pip install -e .`, smoke test passes, `Gallery.for_game(Game.MTG)` confirmed |
-| **M4 — Full gallery set** | ⬜ | Magic + Pokémon milo1 + phash16 galleries live |
+| **M2 — First catalog** | ✅ | `milo1-scryfall-mtg` built, uploaded to `HanClinto/milo`, `HFD` resolves it |
+| **M3 — End-to-end works** | ✅ | `pip install -e .`, smoke test passes, `Catalog.for_game(Game.MTG)` confirmed |
+| **M4 — Full catalog set** | ⬜ | Magic + Pokémon milo1 + phash16 catalogs live |
 | **M5 — PyPI v0.1.0** | ⬜ | CI green, tests pass, published to PyPI |
 | **M6 — Automated** | ⬜ | Dependabot, docs site, CHANGELOG |
-| **M6p — Pipeline v1** | ⬜ | CollectorVision-Pipeline repo; first galleries built and published |
+| **M6p — Pipeline v1** | ⬜ | CollectorVision-Pipeline repo; first catalogs built and published |
 | **M7 — Benchmark** | ⬜ | Public benchmark on HF, eval harness, results in README |
 | **M8 — API server** | ⬜ | Full web_scanner port, Docker, HF Space demo |
 | **M9 — Mobile (API)** | ⬜ | React Native + Flutter packages |

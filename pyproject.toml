@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Hash-based embedders (HashEmbedder) — not needed for the default Milo neural gallery
+# Hash-based embedders (HashEmbedder) — not needed for the default Milo neural catalog
 hash = [
     "imagehash>=4.3",
     "scipy>=1.10",
