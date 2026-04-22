@@ -1,35 +1,23 @@
-"""HFD — HuggingFace model-repo gallery reference with transparent local caching.
+"""HFD — HuggingFace model-repo catalog reference with transparent local caching.
 
-Galleries live alongside the model weights in the same HuggingFace model repo,
-under a ``galleries/`` subfolder.  HFD wraps one such gallery: on first use it
-fetches ``galleries/manifest.json`` to find the latest snapshot filename,
+Catalogs live alongside the model weights in the same HuggingFace model repo,
+under a ``catalogs/`` subfolder.  HFD wraps one such catalog: on first use it
+fetches ``catalogs/manifest.json`` to find the latest snapshot filename,
 downloads it, and caches it locally.  Subsequent calls within ``cache_refresh``
 (default 7 days) return the cached file with no network activity.
 
 Typical usage::
 
-    import collector_vision as cvg
+    catalog = cvg.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
 
-    # MTG gallery, auto-download
-    cvid = cvg.Identifier(cvg.HFD("HanClinto/milo", "scryfall-mtg"))
+    # Or construct HFD directly for more control:
+    from collector_vision.hfd import HFD
+    catalog = cvg.Catalog.load(HFD("HanClinto/milo", "scryfall-mtg"))
 
-    # Pokémon gallery
-    cvid = cvg.Identifier(cvg.HFD("HanClinto/milo", "tcgplayer-pokemon"))
-
-    # Multi-game — merge into one search index
-    cvid = cvg.Identifier(
-        cvg.HFD("HanClinto/milo", "scryfall-mtg"),
-        cvg.HFD("HanClinto/milo", "tcgplayer-pokemon"),
-    )
-
-    # Prefer Gallery.for_game for the common case:
-    from collector_vision.games import Game
-    gallery = cvg.Gallery.for_game(Game.MTG)
-
-The cache lives in ``~/.cache/collectorvision/<repo>/<gallery_key>/``.
+The cache lives in ``~/.cache/collectorvision/<repo>/<catalog_key>/``.
 Override the root with ``$COLLECTORVISION_CACHE`` or the ``cache_dir`` argument.
 
-``galleries/manifest.json`` format::
+``catalogs/manifest.json`` format::
 
     {
       "scryfall-mtg": {
@@ -53,21 +41,20 @@ from pathlib import Path
 
 
 _DEFAULT_REFRESH = timedelta(days=7)
-# Model repos (not dataset repos) — no "datasets/" in the path
 _HF_MODEL_BASE = "https://huggingface.co/{repo}/resolve/main/"
-_GALLERIES_SUBFOLDER = "galleries"
+_CATALOGS_SUBFOLDER = "catalogs"
 
 
 class HFD:
-    """Reference to a gallery stored in a CollectorVision HuggingFace model repo.
+    """Reference to a catalog stored in a CollectorVision HuggingFace model repo.
 
     Parameters
     ----------
     repo:
         HuggingFace model repository id, e.g. ``"HanClinto/milo"``.
-    gallery_key:
-        Which gallery within the repo, e.g. ``"scryfall-mtg"``.
-        Matches a key in ``galleries/manifest.json``.
+    catalog_key:
+        Which catalog within the repo, e.g. ``"scryfall-mtg"``.
+        Matches a key in ``catalogs/manifest.json``.
     cache_refresh:
         How long to trust the local manifest cache before re-checking HF.
         Default 7 days.  Pass ``timedelta(0)`` to always check, or ``None``
@@ -81,35 +68,31 @@ class HFD:
     def __init__(
         self,
         repo: str,
-        gallery_key: str,
+        catalog_key: str,
         cache_refresh: timedelta | None = _DEFAULT_REFRESH,
         cache_dir: Path | None = None,
         offline: bool = False,
     ) -> None:
         self._repo = repo
-        self._gallery_key = gallery_key
+        self._catalog_key = catalog_key
         self._cache_refresh = cache_refresh
         self._offline = offline
         root = cache_dir or _default_cache_dir()
-        # Per-repo, per-gallery subdirectory avoids any filename collisions
-        self._cache_dir = root / repo.replace("/", "_") / gallery_key
-        self._base_url = _HF_MODEL_BASE.format(repo=repo) + _GALLERIES_SUBFOLDER + "/"
+        self._cache_dir = root / repo.replace("/", "_") / catalog_key
+        self._base_url = _HF_MODEL_BASE.format(repo=repo) + _CATALOGS_SUBFOLDER + "/"
 
     # ------------------------------------------------------------------
     # Public
     # ------------------------------------------------------------------
 
     def resolve(self) -> Path:
-        """Return the local path to the gallery NPZ, downloading if needed.
-
-        Called automatically by :class:`~collector_vision.identifier.Identifier`.
-        """
+        """Return the local path to the catalog NPZ, downloading if needed."""
         manifest = self._get_manifest()
-        entry = manifest.get(self._gallery_key)
+        entry = manifest.get(self._catalog_key)
         if not entry:
             available = list(manifest.keys())
             raise KeyError(
-                f"Gallery key {self._gallery_key!r} not found in {self._repo!r} manifest.\n"
+                f"Catalog key {self._catalog_key!r} not found in {self._repo!r} manifest.\n"
                 f"Available: {available or '(manifest is empty)'}"
             )
         filename = entry["latest"]
@@ -118,8 +101,8 @@ class HFD:
         if not local_path.exists():
             if self._offline:
                 raise FileNotFoundError(
-                    f"Gallery not cached locally: {local_path}\n"
-                    f"Initialise HFD without offline=True to download it."
+                    f"Catalog not cached locally: {local_path}\n"
+                    "Initialise HFD without offline=True to download it."
                 )
             self._evict_old(filename)
             _download(self._base_url + filename, local_path)
@@ -129,15 +112,14 @@ class HFD:
         return local_path
 
     def __repr__(self) -> str:
-        return f"HFD({self._repo!r}, {self._gallery_key!r})"
+        return f"HFD({self._repo!r}, {self._catalog_key!r})"
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
     def _manifest_path(self) -> Path:
-        # Manifest is shared across all gallery keys in a repo
-        return (self._cache_dir.parent) / "manifest.json"
+        return self._cache_dir.parent / "manifest.json"
 
     def _manifest_stale(self) -> bool:
         p = self._manifest_path()
@@ -157,7 +139,7 @@ class HFD:
                 return json.loads(p.read_text(encoding="utf-8"))
             raise FileNotFoundError(
                 f"No cached manifest for {self._repo!r}.\n"
-                f"Initialise HFD without offline=True to download it."
+                "Initialise HFD without offline=True to download it."
             )
 
         url = self._base_url + "manifest.json"
@@ -173,12 +155,12 @@ class HFD:
                 return json.loads(p.read_text(encoding="utf-8"))
             raise RuntimeError(
                 f"Could not fetch manifest from {url!r} and no local cache found.\n"
-                f"Check your internet connection, or download the gallery manually.\n"
+                "Check your internet connection, or download the catalog manually.\n"
                 f"Original error: {exc}"
             ) from exc
 
     def _evict_old(self, keep_filename: str) -> None:
-        """Delete stale NPZ files in this gallery's cache dir."""
+        """Delete stale NPZ files in this catalog's cache dir."""
         for old in self._cache_dir.glob("*.npz"):
             if old.name != keep_filename:
                 try:

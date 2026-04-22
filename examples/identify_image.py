@@ -6,15 +6,15 @@ Shows every step:
   2. Detect card corners (NeuralCornerDetector / Cornelius)
   3. Dewarp to aligned crop
   4. Embed (NeuralEmbedder / Milo)
-  5. Nearest-neighbour search against the gallery
+  5. Nearest-neighbour search against the catalog
   6. Metadata lookup via Scryfall API
 
 Usage
 -----
     python examples/identify_image.py <image.jpg> [image2.jpg ...]
 
-    # Use a local gallery file instead of downloading
-    python examples/identify_image.py --gallery ./milo1-scryfall-mtg-2026-04.npz <image.jpg>
+    # Use a local catalog file instead of downloading
+    python examples/identify_image.py --catalog ./milo1-scryfall-mtg-2026-04.npz <image.jpg>
 
 Multiple images of the same physical card are treated as frames — scores are
 summed across frames before ranking.
@@ -22,7 +22,7 @@ summed across frames before ranking.
 Smoke-test (no card image required)
 ------------------------------------
     python examples/identify_image.py --smoke-test
-    python examples/identify_image.py --smoke-test --gallery ./milo1-scryfall-mtg-2026-04.npz
+    python examples/identify_image.py --smoke-test --catalog ./milo1-scryfall-mtg-2026-04.npz
 """
 import argparse
 import json
@@ -35,10 +35,10 @@ import numpy as np
 import collector_vision as cvg
 
 
-def load_gallery(args) -> cvg.Gallery:
-    if args.gallery:
-        return cvg.Gallery.load(args.gallery)
-    return cvg.Gallery.load("hf://HanClinto/milo/scryfall-mtg")
+def load_catalog(args) -> cvg.Catalog:
+    if args.catalog:
+        return cvg.Catalog.load(args.catalog)
+    return cvg.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
 
 
 def lookup_scryfall(scryfall_id: str) -> dict:
@@ -47,7 +47,7 @@ def lookup_scryfall(scryfall_id: str) -> dict:
         return json.loads(resp.read())
 
 
-def identify_images(image_paths: list[str], gallery: cvg.Gallery) -> None:
+def identify_images(image_paths: list[str], catalog: cvg.Catalog) -> None:
     detector = cvg.NeuralCornerDetector()
 
     # ── Steps 1–3: load, detect, dewarp ──────────────────────────────────────
@@ -73,17 +73,16 @@ def identify_images(image_paths: list[str], gallery: cvg.Gallery) -> None:
         sys.exit(1)
 
     # ── Step 4: embed ─────────────────────────────────────────────────────────
-    embedder = gallery.embedder
-    embeddings = embedder.embed(crops)        # (n_frames, 128) float32
+    embeddings = catalog.embedder.embed(crops)   # (n_frames, 128) float32
 
     # ── Step 5: nearest-neighbour search, aggregate across frames ────────────
     if len(crops) == 1:
-        hits = gallery.search(embeddings[0], top_k=5)
+        hits = catalog.search(embeddings[0], top_k=5)
     else:
         from collections import defaultdict
         score_map: dict[str, float] = defaultdict(float)
         for emb in embeddings:
-            for score, card_id in gallery.search(emb, top_k=5):
+            for score, card_id in catalog.search(emb, top_k=5):
                 score_map[card_id] += score
         hits = sorted(score_map.items(), key=lambda x: x[1], reverse=True)[:5]
         hits = [(score, card_id) for card_id, score in hits]
@@ -107,10 +106,10 @@ def identify_images(image_paths: list[str], gallery: cvg.Gallery) -> None:
         print(f"Scryfall lookup failed: {exc}")
 
 
-def smoke_test(gallery: cvg.Gallery) -> None:
-    print(f"Gallery: {gallery}")
-    assert len(gallery) > 0, "Gallery is empty"
-    assert gallery.card_ids[0], "First card_id is blank"
+def smoke_test(catalog: cvg.Catalog) -> None:
+    print(f"Catalog: {catalog}")
+    assert len(catalog) > 0, "Catalog is empty"
+    assert catalog.card_ids[0], "First card_id is blank"
 
     detector = cvg.NeuralCornerDetector()
     blank = np.zeros((800, 600, 3), dtype=np.uint8)
@@ -122,10 +121,10 @@ def smoke_test(gallery: cvg.Gallery) -> None:
     from PIL import Image
     crop = Image.fromarray(blank[..., ::-1])  # skip dewarp on blank — no corners
 
-    emb = gallery.embedder.embed(crop)
+    emb = catalog.embedder.embed(crop)
     assert emb.shape == (128,), f"Expected (128,), got {emb.shape}"
 
-    hits = gallery.search(emb, top_k=3)
+    hits = catalog.search(emb, top_k=3)
     assert len(hits) == 3
     assert all(isinstance(score, float) and isinstance(cid, str) for score, cid in hits)
 
@@ -137,18 +136,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("images", nargs="*", metavar="IMAGE")
-    parser.add_argument("--gallery", metavar="PATH",
-                        help="Local .npz gallery file (default: auto-download from HuggingFace)")
+    parser.add_argument("--catalog", metavar="PATH",
+                        help="Local .npz catalog file (default: auto-download from HuggingFace)")
     parser.add_argument("--smoke-test", action="store_true",
                         help="Run a headless pipeline check instead of identifying a card")
     args = parser.parse_args()
 
-    gallery = load_gallery(args)
+    catalog = load_catalog(args)
 
     if args.smoke_test:
-        smoke_test(gallery)
+        smoke_test(catalog)
     elif args.images:
-        identify_images(args.images, gallery)
+        identify_images(args.images, catalog)
     else:
         parser.print_help()
         sys.exit(1)
