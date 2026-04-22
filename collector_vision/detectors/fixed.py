@@ -20,8 +20,8 @@ Usage::
         ], dtype=np.float32)
     )
 
-    # To bypass detection entirely on a per-call basis, use detector=None
-    # when constructing the Identifier and pre-crop the image yourself.
+    # To bypass detection entirely, pre-crop the image and call dewarp() directly
+    # with a FixedCornerDetector that covers the full frame.
 """
 from __future__ import annotations
 

@@ -4,7 +4,7 @@ from collector_vision.hfd import HFD
 from collector_vision.catalog import Catalog
 from collector_vision.games import Game, Embedding
 from collector_vision.interfaces import DetectionResult
-from collector_vision.detectors import NeuralCornerDetector, CannyCornerDetector
+from collector_vision.detectors import NeuralCornerDetector, FixedCornerDetector
 
 __all__ = [
     "HFD",
@@ -13,6 +13,6 @@ __all__ = [
     "Embedding",
     "DetectionResult",
     "NeuralCornerDetector",
-    "CannyCornerDetector",
+    "FixedCornerDetector",
 ]
 __version__ = "0.1.0.dev0"

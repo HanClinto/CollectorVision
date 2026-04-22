@@ -11,8 +11,9 @@ Checklist for turning the scaffold into a shippable library.
 - [x] `DetectionResult.dewarp(bgr)` → PIL Image
 - [x] `Catalog.search(emb, top_k)` → `[(score, card_id), ...]`
 - [x] `min_sharpness` gate on `detect()` — blurry/blank frames return `card_present=False`
-- [x] Cosine and Hamming retrieval in `collector_vision/retrieval.py`
+- [x] Cosine retrieval in `collector_vision/retrieval.py`
 - [x] `examples/identify_image.py` walks through all five steps including Scryfall lookup
+- [x] `examples/custom_identifier.py` shows swapping in Canny detector or pHash embedder
 
 ### 1b. NeuralCornerDetector (Cornelius) ✅
 - [x] ONNX-based inference via `onnxruntime` — no PyTorch at runtime
@@ -25,9 +26,8 @@ Checklist for turning the scaffold into a shippable library.
 - [x] 128-d L2-normalised embeddings from 448×448 input
 - [x] Bundled as `collector_vision/weights/milo.onnx` (5.0 MB, single file)
 
-### 1d. CannyCornerDetector ✅
-- [x] Contour-based detection in `collector_vision/detectors/canny.py`
-- [x] Returns `DetectionResult(card_present=False)` when no valid quadrilateral found
+### 1d. FixedCornerDetector ✅
+- [x] Pass-through detector for known card positions in `collector_vision/detectors/fixed.py`
 
 ### 1e. Retrieval helpers ✅
 - [x] `collector_vision/retrieval.py` — `cosine_search()` (cosine similarity over L2-normalised vectors)
@@ -60,10 +60,9 @@ Catalog construction lives in **CollectorVision-Pipeline** (section 14).
 
 | Key | Shape / type | Description |
 |---|---|---|
-| `embeddings` | (N, D) float32 or (N, B) uint8 | Embedding matrix |
+| `embeddings` | (N, D) float32 | Embedding matrix |
 | `card_ids` | (N,) str | Primary key per row (e.g. Scryfall UUID) |
 | `source` | scalar str | `"scryfall"`, `"tcgplayer"`, … |
-| `mode` | scalar str | `"embedding"` or `"hash"` |
 | `embedder_spec` | scalar str | JSON spec for reconstructing the embedder |
 
 Card names and metadata are not stored in the catalog — callers use the returned
@@ -127,8 +126,7 @@ ID to look up metadata via Scryfall API or a game-specific data source.
 - [ ] `test_hfd.py` — mock manifest; stale/fresh cache; `cache_refresh=None`; eviction
 - [ ] `test_games.py` — `parse_game()` happy + error paths; enum values
 - [ ] `test_catalog.py` — synthetic NPZ load, `_merge()`, incompatible spec rejection
-- [ ] `test_retrieval.py` — cosine and hamming search correctness + top-k ordering
-- [ ] `test_canny_detector.py` — CannyCornerDetector on a synthetic card image
+- [ ] `test_retrieval.py` — cosine search correctness + top-k ordering
 
 ### 7b. Integration tests
 - [x] `examples/identify_image.py --smoke-test` — headless pipeline check (no real card needed)
@@ -241,13 +239,13 @@ GET /catalogs    — lists loaded catalog names
 
 #### B2. Android
 - [ ] ONNX Runtime for Android; Android Archive (AAR) on Maven Central
-- [ ] Bundle phash16 catalog (~3 MB) for offline; milo1 catalog streamed on demand
+- [ ] Bundle small milo1 catalog subset for offline; full catalog streamed on demand
 
 #### B3. iOS
 - [ ] CoreML conversion via `coremltools`; Swift package `CollectorVisionKit`
 
 #### B4. On-device catalog considerations
-- [ ] Catalog size tiers: phash16 ~3 MB (bundleable), milo1 ~54 MB (stream on first use)
+- [ ] Catalog size tiers: milo1 ~54 MB (stream on first use); consider flat binary format
 - [ ] Consider flat binary format for faster mobile load vs NPZ
 
 ---
@@ -263,7 +261,7 @@ GET /catalogs    — lists loaded catalog names
 
 ### 14b. Catalog builder
 - [ ] `pipeline/build_catalog.py` — writes `{algo}-{source}-{game}-{YYYY-MM}.npz`
-  with keys: `embeddings`, `card_ids`, `source`, `mode`, `embedder_spec`
+  with keys: `embeddings`, `card_ids`, `source`, `embedder_spec`
 
 ### 14c. Publishing
 - [ ] `pipeline/upload_catalog.py` — upload NPZ to `HanClinto/milo` under `catalogs/`,
@@ -279,12 +277,12 @@ GET /catalogs    — lists loaded catalog names
 
 | Milestone | Status | Key items |
 |---|---|---|
-| **M0 — Code complete** | ✅ | Explicit pipeline API, Cornelius + Milo wired, Catalog.search(), Canny |
+| **M0 — Code complete** | ✅ | Explicit pipeline API, Cornelius + Milo wired, Catalog.search() |
 | **M1 — Weights finalized** | ✅ | `cornelius.onnx` + `milo.onnx` bundled and on HF Hub with model cards |
 | **M1.5 — Examples** | ✅ | `examples/identify_image.py` (5-step walkthrough + smoke test), `examples/server/` |
 | **M2 — First catalog** | ✅ | `milo1-scryfall-mtg` built, uploaded to `HanClinto/milo`, `hf://` URI confirmed |
 | **M3 — End-to-end works** | ✅ | `pip install -e .`, smoke test passes, full pipeline verified |
-| **M4 — Full catalog set** | ⬜ | Magic + Pokémon milo1 + phash16 catalogs live |
+| **M4 — Full catalog set** | ⬜ | Magic + Pokémon milo1 catalogs live |
 | **M5 — PyPI v0.1.0** | ⬜ | CI green, tests pass, published to PyPI |
 | **M6 — Automated** | ⬜ | Dependabot, docs site, CHANGELOG |
 | **M6p — Pipeline v1** | ⬜ | CollectorVision-Pipeline repo; first catalogs built and published |

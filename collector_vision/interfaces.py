@@ -2,8 +2,8 @@
 
 Any object satisfying these protocols can be used in the pipeline — no
 subclassing required.  The bundled implementations (NeuralCornerDetector,
-CannyCornerDetector, NeuralEmbedder, HashEmbedder) all satisfy them, and
-users can supply their own without touching CollectorVision internals.
+FixedCornerDetector, NeuralEmbedder) all satisfy them, and users can supply
+their own without touching CollectorVision internals.
 """
 from __future__ import annotations
 
@@ -86,8 +86,7 @@ class Embedder(Protocol):
     - Single image → (D,) float32 vector.
     - List of images → (N, D) float32 array, one row per image.
 
-    Vectors should be L2-normalised for cosine similarity retrieval, or
-    packed uint8 bits for Hamming distance retrieval.
+    Vectors should be L2-normalised for cosine similarity retrieval.
     """
 
     def embed(self, images: "Image | list[Image]") -> np.ndarray: ...
