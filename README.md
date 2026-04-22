@@ -24,8 +24,8 @@ Requires Python 3.10+. No GPU required — inference runs on CPU via ONNX Runtim
 import cv2
 import collector_vision as cvg
 
-# Load gallery (downloads ~54 MB on first run, cached after that)
-gallery = cvg.Gallery.load(cvg.HFD("HanClinto/milo", "scryfall-mtg").resolve())
+# Load gallery (downloads ~54 MB on first run, cached locally after that)
+gallery = cvg.Gallery.load("hf://HanClinto/milo/scryfall-mtg")
 
 # 1. Detect card corners
 image = cv2.imread("photo.jpg")
@@ -47,12 +47,13 @@ print(card_id, score)   # "abc123-...", 0.94
 
 ## Local gallery file
 
-Download a gallery from [HuggingFace](https://huggingface.co/HanClinto/milo/tree/main/galleries)
-and pass the path directly — nothing touches the network at runtime:
+Pass a local path and nothing touches the network:
 
 ```python
 gallery = cvg.Gallery.load("./milo1-scryfall-mtg-2026-04.npz")
 ```
+
+Gallery files are available at [HuggingFace](https://huggingface.co/HanClinto/milo/tree/main/galleries).
 
 ---
 
