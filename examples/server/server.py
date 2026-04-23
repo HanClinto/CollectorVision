@@ -14,16 +14,36 @@ Usage
 
 Endpoints
 ---------
-    POST /identify          JSON body: {"records": [{"_base64": "<image>"}]}
-    POST /identify/upload   Multipart form with one or more image files.
+    POST /identify          JSON body (supports rolling embedding buffer — see below).
+    POST /identify/upload   Multipart form, single image. Simpler for curl / testing.
     GET  /health            {"status": "ok"}
     GET  /                  Redirects to /docs (Swagger UI).
+
+Live-camera rolling buffer
+--------------------------
+Every response includes the embedding for that frame.  For a live feed, maintain
+a client-side deque of the last N embeddings and send them back with the next
+request.  The server averages the buffer with the current frame before searching,
+giving a consensus identification without re-uploading any image data::
+
+    from collections import deque
+    buffer = deque(maxlen=5)
+
+    while capturing:
+        frame = grab_frame()
+        result = requests.post("/identify", json={
+            "_base64": to_b64(frame),
+            "prior_embeddings": list(buffer),
+        }).json()
+
+        if result["card_present"]:
+            buffer.append(result["embedding"])
+            print(result["card_id"], result["confidence"])
 """
 from __future__ import annotations
 
 import base64
 import time
-from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -37,14 +57,13 @@ from PIL import Image
 import collector_vision as cvg
 
 # ---------------------------------------------------------------------------
-# Startup configuration — set before creating the TestClient or calling
-# uvicorn.run().  The lifespan handler reads these module-level variables.
+# Configuration — set before the lifespan starts (TestClient or uvicorn.run)
 # ---------------------------------------------------------------------------
 
-catalog_source: str | Path | None = None   # path, hf:// URI, or None
+catalog_source: str | Path | None = None
 top_k_default:  int   = 5
 min_sharpness:  float = 0.0
-detector_none:  bool  = False              # True → skip detection (pre-cropped inputs)
+detector_none:  bool  = False
 
 
 def configure(
@@ -81,7 +100,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"],
 
 
 # ---------------------------------------------------------------------------
-# Core pipeline — detect, dewarp, embed, search
+# Core pipeline
 # ---------------------------------------------------------------------------
 
 def _decode_bgr(data: bytes) -> np.ndarray:
@@ -91,8 +110,13 @@ def _decode_bgr(data: bytes) -> np.ndarray:
     return bgr
 
 
-def _identify(bgr: np.ndarray, catalog: cvg.Catalog,
-              detector: "cvg.NeuralCornerDetector | None", top_k: int) -> dict:
+def _identify(
+    bgr: np.ndarray,
+    catalog: cvg.Catalog,
+    detector: "cvg.NeuralCornerDetector | None",
+    top_k: int,
+    prior_embeddings: "list[list[float]] | None" = None,
+) -> dict:
     t0 = time.perf_counter()
 
     # Detect + dewarp (or pass straight through if detection is disabled)
@@ -107,7 +131,7 @@ def _identify(bgr: np.ndarray, catalog: cvg.Catalog,
     else:
         crop = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
 
-    # Thumbnail of the crop for visual confirmation in the response
+    # Thumbnail of the dewarped crop for visual confirmation
     crop_bgr = cv2.cvtColor(np.array(crop), cv2.COLOR_RGB2BGR)
     h, w = crop_bgr.shape[:2]
     scale = min(1.0, 300 / max(h, w))
@@ -116,16 +140,31 @@ def _identify(bgr: np.ndarray, catalog: cvg.Catalog,
     _, buf = cv2.imencode(".jpg", crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
     crop_jpeg = base64.b64encode(buf.tobytes()).decode()
 
-    # Embed + search
-    emb  = catalog.embedder.embed(crop)
-    hits = catalog.search(emb, top_k=top_k)
+    # Embed the current frame
+    current_emb = catalog.embedder.embed(crop)
 
+    # Average with prior embeddings from the client's rolling buffer (if any),
+    # then renormalize — gives a consensus embedding without re-uploading images.
+    if prior_embeddings:
+        all_embs = np.stack([current_emb] + [np.array(e, dtype=np.float32)
+                                              for e in prior_embeddings])
+        search_emb = all_embs.mean(axis=0)
+        norm = np.linalg.norm(search_emb)
+        if norm > 0:
+            search_emb /= norm
+    else:
+        search_emb = current_emb
+
+    hits = catalog.search(search_emb, top_k=top_k)
     best_score, best_id = hits[0]
+
     result = {
         "card_present": True,
         "card_id":      best_id,
-        "confidence":   round(best_score, 4),
-        "alternatives": [{"card_id": cid, "confidence": round(s, 4)} for s, cid in hits[1:]],
+        "confidence":   round(float(best_score), 4),
+        "alternatives": [{"card_id": cid, "confidence": round(float(s), 4)}
+                         for s, cid in hits[1:]],
+        "embedding":    current_emb.tolist(),   # client stores this in its rolling buffer
         "crop_jpeg":    crop_jpeg,
         "_timing":      {"total_ms": round((time.perf_counter() - t0) * 1000, 1)},
     }
@@ -150,102 +189,68 @@ async def health():
 
 @app.post("/identify")
 async def identify(request: Request):
-    """Identify cards from base64-encoded images.
+    """Identify a card from a base64-encoded image.
 
-    Body: ``{"records": [{"_base64": "<JPEG or PNG as base64>"}, ...]}``
+    Body::
 
-    Each record may include ``"top_k"`` to override the server default.
+        {
+          "_base64": "<JPEG or PNG as base64>",
+          "top_k": 5,
+          "prior_embeddings": [[...128 floats...], ...]
+        }
+
+    ``prior_embeddings`` is optional.  Populate it from the ``"embedding"``
+    fields of recent responses to improve identification accuracy across a
+    live camera feed without re-uploading image data.
+
+    Response includes ``"embedding"`` — the 128-d vector for this frame.
+    Add it to your client-side rolling buffer for the next request.
     """
     try:
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    records = body.get("records")
-    if not isinstance(records, list) or not records:
-        raise HTTPException(status_code=400, detail="'records' must be a non-empty list")
+    b64 = body.get("_base64") or body.get("base64")
+    if not b64:
+        raise HTTPException(status_code=400, detail="Missing '_base64' field")
 
-    catalog  = request.app.state.catalog
-    detector = request.app.state.detector
-    results  = []
+    try:
+        bgr = _decode_bgr(base64.b64decode(b64))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
-    for rec in records:
-        b64 = rec.get("_base64") or rec.get("base64")
-        if not b64:
-            results.append({"_status": {"code": 400, "text": "Missing '_base64' field"},
-                            "card_present": False})
-            continue
-        try:
-            bgr = _decode_bgr(base64.b64decode(b64))
-        except Exception as exc:
-            results.append({"_status": {"code": 400, "text": str(exc)},
-                            "card_present": False})
-            continue
-        results.append(_identify(bgr, catalog, detector,
-                                  top_k=int(rec.get("top_k", top_k_default))))
+    prior = body.get("prior_embeddings") or []
+    top_k = int(body.get("top_k", top_k_default))
 
-    return JSONResponse({"records": results})
+    return JSONResponse(_identify(bgr, request.app.state.catalog,
+                                  request.app.state.detector, top_k, prior))
 
 
 @app.post("/identify/upload")
 async def identify_upload(
     request: Request,
-    files: list[UploadFile] = File(...),
+    file: UploadFile = File(...),
     top_k: int | None = None,
 ):
-    """Identify cards from uploaded image files (multipart form).
+    """Identify a card from an uploaded image file.
 
-    Multiple files are treated as frames of the **same physical card** —
-    scores are summed before ranking.
+    Simpler than ``/identify`` for curl / browser testing.  Does not support
+    the rolling embedding buffer — use ``/identify`` for live-camera clients.
 
-    Example: ``curl -X POST http://localhost:8000/identify/upload -F "files=@card.jpg"``
+    Example::
+
+        curl -X POST http://localhost:8000/identify/upload -F "file=@card.jpg"
     """
-    if not files:
-        raise HTTPException(status_code=400, detail="No files uploaded")
+    data = await file.read()
+    try:
+        bgr = _decode_bgr(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
-    catalog  = request.app.state.catalog
-    detector = request.app.state.detector
-    k        = top_k if top_k is not None else top_k_default
-
-    if len(files) == 1:
-        data = await files[0].read()
-        return JSONResponse(_identify(_decode_bgr(data), catalog, detector, top_k=k))
-
-    # Multiple frames — aggregate scores across frames of the same card
-    t0        = time.perf_counter()
-    score_map: dict[str, float] = defaultdict(float)
-
-    for f in files:
-        data = await f.read()
-        try:
-            bgr = _decode_bgr(data)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"{f.filename}: {exc}")
-
-        if detector is not None:
-            det = detector.detect(bgr, min_sharpness=min_sharpness)
-            if not det.card_present:
-                continue
-            crop = det.dewarp(bgr)
-        else:
-            crop = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-
-        for score, card_id in catalog.search(catalog.embedder.embed(crop), top_k=k):
-            score_map[card_id] += score
-
-    hits = sorted(score_map.items(), key=lambda x: x[1], reverse=True)[:k]
-    if not hits:
-        return JSONResponse({"card_present": False,
-                             "_timing": {"total_ms": round((time.perf_counter() - t0) * 1000, 1)}})
-
-    best_id, best_score = hits[0]
-    return JSONResponse({
-        "card_present": True,
-        "card_id":      best_id,
-        "confidence":   round(best_score, 4),
-        "alternatives": [{"card_id": cid, "confidence": round(s, 4)} for cid, s in hits[1:]],
-        "_timing":      {"total_ms": round((time.perf_counter() - t0) * 1000, 1)},
-    })
+    k = top_k if top_k is not None else top_k_default
+    return JSONResponse(_identify(bgr, request.app.state.catalog,
+                                  request.app.state.detector, k))
 
 
 # ---------------------------------------------------------------------------
