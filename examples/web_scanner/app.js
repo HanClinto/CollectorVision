@@ -735,10 +735,11 @@ class CameraSurface {
   }
 
   captureFrame() {
-    const { sx, sy, sw, sh, dw, dh } = this.coverCrop();
-    this.frameCanvas.width = dw;
-    this.frameCanvas.height = dh;
-    this.frameCtx.drawImage(this.video, sx, sy, sw, sh, 0, 0, dw, dh);
+    const vw = this.video.videoWidth;
+    const vh = this.video.videoHeight;
+    this.frameCanvas.width = vw;
+    this.frameCanvas.height = vh;
+    this.frameCtx.drawImage(this.video, 0, 0, vw, vh, 0, 0, vw, vh);
     return this.frameCanvas;
   }
 
@@ -756,9 +757,17 @@ class CameraSurface {
     if (!corners || corners.length !== 4) {
       return;
     }
+    const { sx, sy, sw, sh } = this.coverCrop();
     const width = this.canvas.width;
     const height = this.canvas.height;
-    const pts = corners.map(([x, y]) => [x * width, y * height]);
+    const pts = corners.map(([x, y]) => {
+      const px = x * this.video.videoWidth;
+      const py = y * this.video.videoHeight;
+      return [
+        ((px - sx) / sw) * width,
+        ((py - sy) / sh) * height,
+      ];
+    });
 
     this.ctx.beginPath();
     this.ctx.moveTo(pts[0][0], pts[0][1]);
@@ -1073,6 +1082,8 @@ function setupViewToggle() {
     const expanded = page.dataset.cameraMode === "expanded";
     page.dataset.cameraMode = expanded ? "small" : "expanded";
     button.textContent = expanded ? "Expand" : "Shrink";
+    requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+    setTimeout(() => window.dispatchEvent(new Event("resize")), 200);
   });
 }
 
