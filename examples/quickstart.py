@@ -2,7 +2,7 @@
 """Identify a Magic: The Gathering card from a photo.
 
 Run from the repo root:
-    python examples/identify_image.py
+    python examples/quickstart.py
 """
 import json
 import urllib.request
