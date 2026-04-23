@@ -38,7 +38,7 @@ for s, cid in hits[1:]:
 # 6. Metadata lookup via Scryfall API
 req = urllib.request.Request(
     f"https://api.scryfall.com/cards/{card_id}",
-    headers={"User-Agent": "collectorvision-example/0.1", "Accept": "application/json"},
+    headers={"Accept": "application/json"},
 )
 with urllib.request.urlopen(req, timeout=10) as r:
     card = json.loads(r.read())
