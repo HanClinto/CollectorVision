@@ -144,3 +144,12 @@ uv venv
 source .venv/bin/activate
 uv pip install -e '.[dev]'
 ```
+
+## Web Scanner
+
+The mobile-first browser scanner lives in `examples/web_scanner`.
+
+GitHub Pages deployment is wired to publish that folder directly from `main`.
+Once Pages is enabled for the repo, the scanner should be available at:
+
+`https://hanclinto.github.io/CollectorVision/`
