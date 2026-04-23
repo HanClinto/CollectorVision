@@ -388,14 +388,21 @@ function loadOpenCv() {
     return Promise.resolve(globalThis.cv);
   }
   return new Promise((resolve, reject) => {
-    globalThis.Module = {
-      onRuntimeInitialized() {
-        resolve(globalThis.cv);
-      },
-    };
     const script = document.createElement("script");
     script.src = "./vendor/opencv/opencv.js";
     script.async = true;
+    script.onload = () => {
+      const cv = globalThis.cv;
+      if (cv?.getPerspectiveTransform) {
+        resolve(cv);
+        return;
+      }
+      if (typeof cv?.then === "function") {
+        cv.then((readyCv) => resolve(readyCv)).catch(reject);
+        return;
+      }
+      reject(new Error("opencv.js loaded but did not expose cv"));
+    };
     script.onerror = () => reject(new Error("Failed to load opencv.js"));
     document.head.appendChild(script);
   });
