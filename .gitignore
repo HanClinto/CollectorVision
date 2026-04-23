@@ -14,3 +14,4 @@ build/
 .env
 test_output/
 test_images/
+media/
