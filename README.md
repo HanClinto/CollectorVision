@@ -11,6 +11,12 @@ Supports Magic: The Gathering today. Pokémon, Yu-Gi-Oh, and others are planned.
 > **Not yet on PyPI.** Install directly from GitHub:
 
 ```bash
+uv pip install git+https://github.com/HanClinto/CollectorVision.git
+```
+
+Or with plain `pip`:
+
+```bash
 pip install git+https://github.com/HanClinto/CollectorVision.git
 ```
 
@@ -130,3 +136,11 @@ Other games and sources coming soon. To request a specific game/source, open an 
 ## License
 
 AGPL-3.0. Commercial licenses available — see [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md).
+
+## Development
+
+```bash
+uv venv
+source .venv/bin/activate
+uv pip install -e '.[dev]'
+```
