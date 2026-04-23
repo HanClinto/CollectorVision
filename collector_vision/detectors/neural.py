@@ -129,7 +129,9 @@ class NeuralCornerDetector:
         -------
         DetectionResult with normalised (x, y) corners in TL, TR, BR, BL order.
         ``card_present`` is False when sharpness is below ``min_sharpness``.
-        ``extra["sharpness"]`` and ``extra["presence"]`` are available for diagnostics.
+        ``result.sharpness`` holds the SimCC mean-peak value (or ``None`` for
+        older checkpoints).  ``extra["presence"]`` holds the raw presence logit
+        sigmoid for diagnostics.
         """
         x = _preprocess(image, self._input_size)
         outs = self._sess.run(None, {self._input_name: x})
@@ -138,16 +140,14 @@ class NeuralCornerDetector:
         presence_logit = float(outs[1].squeeze())
         presence = float(1.0 / (1.0 + np.exp(-presence_logit)))  # sigmoid
 
-        extra: dict = {"presence": presence}
-
+        sharpness: float | None = None
         if self._has_sharpness:
-            sharpness = float(outs[2].squeeze())
-            extra["sharpness"] = sharpness
+            sharpness    = float(outs[2].squeeze())
             card_present = sharpness >= min_sharpness
-            confidence = sharpness
+            confidence   = sharpness
         else:
             card_present = presence >= self._presence_threshold
-            confidence = presence
+            confidence   = presence
 
         corners = _order_corners(corners_flat.reshape(4, 2).astype(np.float32))
 
@@ -155,7 +155,8 @@ class NeuralCornerDetector:
             corners=corners,
             card_present=card_present,
             confidence=confidence,
-            extra=extra,
+            sharpness=sharpness,
+            extra={"presence": presence},
         )
 
     def __repr__(self) -> str:

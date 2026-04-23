@@ -20,7 +20,7 @@ catalog = cvg.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
 image     = cv2.imread(str(IMAGE))
 detector  = cvg.NeuralCornerDetector()
 detection = detector.detect(image)
-print(f"Detected  sharpness={detection.extra['sharpness']:.3f}")
+print(f"Detected  sharpness={detection.sharpness:.3f}")
 
 # 3. Dewarp to aligned crop
 crop = detection.dewarp(image)

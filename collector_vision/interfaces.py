@@ -33,18 +33,20 @@ class CornerDetector(Protocol):
 class DetectionResult:
     """Output of a CornerDetector.detect() call."""
 
-    __slots__ = ("corners", "card_present", "confidence", "extra")
+    __slots__ = ("corners", "card_present", "confidence", "sharpness", "extra")
 
     def __init__(
         self,
         corners: np.ndarray | None,     # (4, 2) float32, normalised [0, 1]
         card_present: bool = True,
         confidence: float = 1.0,
+        sharpness: float | None = None,
         extra: dict | None = None,
     ) -> None:
         self.corners = corners
         self.card_present = card_present
         self.confidence = confidence
+        self.sharpness = sharpness
         self.extra = extra or {}
 
     def dewarp(self, bgr: np.ndarray) -> "Image":
