@@ -2,7 +2,7 @@
 
 Card identification library for collectible card games. Feed it a photo, get back a card identity.
 
-Supports Magic: The Gathering today, with Pokémon and others on the way.
+Supports Magic: The Gathering today. Pokémon, Yu-Gi-Oh, and others are planned.
 
 ---
 
@@ -38,7 +38,7 @@ The full pipeline runs end-to-end in under 100ms on a laptop CPU.
 import cv2
 import collector_vision as cvg
 
-# Load catalog (downloads ~54 MB on first run, cached locally after that)
+# Load catalog (downloads ~29 MB on first run, cached locally after that)
 catalog = cvg.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
 
 # 1. Detect card corners
@@ -117,7 +117,7 @@ hits = catalog.search(emb)
 
 | Game | Source | Catalog key | Size |
 |---|---|---|---|
-| Magic: The Gathering | Scryfall | `scryfall-mtg` | ~54 MB |
+| Magic: The Gathering | Scryfall | `scryfall-mtg` | ~29 MB |
 
 Browse at **https://huggingface.co/HanClinto/milo/tree/main/catalogs**
 

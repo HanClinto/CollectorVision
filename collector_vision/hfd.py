@@ -33,11 +33,14 @@ Override the root with ``$COLLECTORVISION_CACHE`` or the ``cache_dir`` argument.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import urllib.request
 from datetime import timedelta
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 _DEFAULT_REFRESH = timedelta(days=7)
@@ -182,7 +185,7 @@ def _download(url: str, dest: Path, chunk_size: int = 1 << 20) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(".download")
     try:
-        print(f"Downloading {dest.name} ...")
+        log.info("Downloading %s ...", dest.name)
         with urllib.request.urlopen(url, timeout=60) as resp:
             total = int(resp.headers.get("Content-Length", 0))
             written = 0
@@ -195,11 +198,9 @@ def _download(url: str, dest: Path, chunk_size: int = 1 << 20) -> None:
                     written += len(chunk)
                     if total:
                         pct = written * 100 // total
-                        print(f"\r  {pct:3d}%  {written // 1024 // 1024} MB", end="", flush=True)
-            if total:
-                print()
+                        log.debug("  %3d%%  %d MB", pct, written // 1024 // 1024)
         tmp.rename(dest)
-        print(f"  saved → {dest}")
+        log.info("  saved → %s", dest)
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
