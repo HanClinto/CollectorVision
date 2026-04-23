@@ -53,12 +53,15 @@ def main() -> None:
             continue
         total += 1
 
-        detection = detector.detect(cv2.imread(str(path)))
+        bgr = cv2.imread(str(path))
+        if bgr is None:
+            continue
+        detection = detector.detect(bgr)
         if not detection.card_present:
             continue
         detected += 1
 
-        emb  = catalog.embedder.embed([detection.dewarp(cv2.imread(str(path)))])[0]
+        emb  = catalog.embedder.embed([detection.dewarp(bgr)])[0]
         hits = [cid for _, cid in catalog.search(emb, top_k=max_k)]
 
         true_oracle = catalog.card_to_oracle.get(true_id)

@@ -18,6 +18,20 @@ Requires Python 3.10+. No GPU required — inference runs on CPU via ONNX Runtim
 
 ---
 
+## How it works
+
+Given a photo of a card held in hand (or on a table, in a sleeve, etc.), CollectorVision finds the four corners, dewarps the card to a canonical crop, and produces a compact 128-d embedding vector:
+
+![Pipeline: photo → corner detection → dewarped crop → 128-d embedding](docs/pipeline.jpg)
+
+That embedding is then matched against a catalog of ~108k reference embeddings using nearest-neighbour search:
+
+![Search: query embedding matched against catalog candidates](docs/pipeline_search.jpg)
+
+The full pipeline runs end-to-end in under 100ms on a laptop CPU.
+
+---
+
 ## Quickstart
 
 ```python
@@ -28,7 +42,7 @@ import collector_vision as cvg
 catalog = cvg.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
 
 # 1. Detect card corners
-image = cv2.imread("photo.jpg")
+image = cv2.imread("examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg")
 detector = cvg.NeuralCornerDetector()
 detection = detector.detect(image)
 
