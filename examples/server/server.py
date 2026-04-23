@@ -60,10 +60,11 @@ import collector_vision as cvg
 # Configuration — set before the lifespan starts (TestClient or uvicorn.run)
 # ---------------------------------------------------------------------------
 
-catalog_source: str | Path | None = None
-top_k_default:  int   = 5
-min_sharpness:  float = 0.0
-detector_none:  bool  = False
+catalog_source:       str | Path | None = None
+top_k_default:        int   = 5
+min_sharpness:        float = 0.0
+detector_none:        bool  = False
+min_prior_similarity: float = 0.7   # drop prior embeddings with cosine sim < this
 
 
 def configure(
@@ -71,13 +72,15 @@ def configure(
     top_k: int = 5,
     min_sharpness_val: float = 0.0,
     no_detector: bool = False,
+    min_prior_sim: float = 0.7,
 ) -> None:
     """Configure the server before startup (used by tests and scripts)."""
-    global catalog_source, top_k_default, min_sharpness, detector_none
-    catalog_source = catalog
-    top_k_default  = top_k
-    min_sharpness  = min_sharpness_val
-    detector_none  = no_detector
+    global catalog_source, top_k_default, min_sharpness, detector_none, min_prior_similarity
+    catalog_source       = catalog
+    top_k_default        = top_k
+    min_sharpness        = min_sharpness_val
+    detector_none        = no_detector
+    min_prior_similarity = min_prior_sim
 
 
 @asynccontextmanager
@@ -145,9 +148,16 @@ def _identify(
 
     # Average with prior embeddings from the client's rolling buffer (if any),
     # then renormalize — gives a consensus embedding without re-uploading images.
+    # Priors whose cosine similarity with the current frame is below
+    # min_prior_similarity are discarded (bad corner grabs produce distant vectors
+    # that would drag the average away from the true card embedding).
     if prior_embeddings:
-        all_embs = np.stack([current_emb] + [np.array(e, dtype=np.float32)
-                                              for e in prior_embeddings])
+        kept = [current_emb]
+        for e in prior_embeddings:
+            e_arr = np.array(e, dtype=np.float32)
+            if float(np.dot(current_emb, e_arr)) >= min_prior_similarity:
+                kept.append(e_arr)
+        all_embs   = np.stack(kept)
         search_emb = all_embs.mean(axis=0)
         norm = np.linalg.norm(search_emb)
         if norm > 0:
@@ -269,11 +279,14 @@ if __name__ == "__main__":
     p.add_argument("--host",          default="127.0.0.1")
     p.add_argument("--port",          type=int, default=8000)
     p.add_argument("--top-k",         type=int, default=5)
-    p.add_argument("--min-sharpness", type=float, default=0.0,
+    p.add_argument("--min-sharpness",   type=float, default=0.0,
                    help="SimCC sharpness gate; 0=disabled. ~0.02 skips blank frames.")
-    p.add_argument("--detector-none", action="store_true",
+    p.add_argument("--min-prior-sim",   type=float, default=0.7,
+                   help="Cosine similarity threshold for rolling-buffer priors (0–1). "
+                        "Priors below this value are discarded before averaging.")
+    p.add_argument("--detector-none",   action="store_true",
                    help="Skip corner detection — inputs are pre-cropped card images.")
-    p.add_argument("--ssl",           action="store_true",
+    p.add_argument("--ssl",             action="store_true",
                    help="Serve over HTTPS using a self-signed certificate.")
     args = p.parse_args()
 
@@ -281,12 +294,14 @@ if __name__ == "__main__":
         catalog=f"hf://{args.hfd[0]}/{args.hfd[1]}" if args.hfd else args.catalog,
         top_k=args.top_k,
         min_sharpness_val=args.min_sharpness,
+        min_prior_sim=args.min_prior_sim,
         no_detector=args.detector_none,
     )
 
     if args.ssl:
         import subprocess
         import tempfile
+
         tmp  = tempfile.mkdtemp()
         cert, key = f"{tmp}/cert.pem", f"{tmp}/key.pem"
         subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048",

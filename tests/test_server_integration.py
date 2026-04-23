@@ -107,6 +107,28 @@ def test_identify_rolling_buffer(client, sample_bytes):
     assert body["confidence"] > 0.8
 
 
+def test_rolling_buffer_filters_distant_prior(client, sample_bytes):
+    """A random (noise) prior is below the similarity threshold and gets dropped."""
+    import numpy as np
+
+    b64 = base64.b64encode(sample_bytes).decode()
+
+    # Random unit-vector — will be far from any real card embedding
+    rng  = np.random.default_rng(42)
+    noise = rng.standard_normal(128).astype(np.float32)
+    noise /= np.linalg.norm(noise)
+
+    r = client.post("/identify", json={
+        "_base64": b64,
+        "prior_embeddings": [noise.tolist()],
+    })
+    body = r.json()
+    # Noisy prior should be silently discarded; result unchanged
+    assert body["card_present"] is True
+    assert body["card_id"] == SCRYING_GLASS_ID
+    assert body["confidence"] > 0.8
+
+
 # ---------------------------------------------------------------------------
 # /identify/upload  (single-image form endpoint)
 # ---------------------------------------------------------------------------
