@@ -561,8 +561,10 @@ function updateCropPreview(cropCanvas) {
   if (!wrapper || !target) {
     return;
   }
+  // Draw 1:1 — target canvas is sized to DEWARP_W×DEWARP_H so this shows
+  // exactly what the embedder receives, at full resolution.
   const ctx = target.getContext("2d");
-  ctx.drawImage(cropCanvas, 0, 0, target.width, target.height);
+  ctx.drawImage(cropCanvas, 0, 0);
   wrapper.hidden = false;
 }
 
@@ -717,13 +719,18 @@ class CameraSurface {
     const scaledH = vh * scale;
     const cropX = (scaledW - cssW) / 2;
     const cropY = (scaledH - cssH) / 2;
+    // sw/sh are the source region in native video pixels.  Use them as the
+    // destination size too so captureFrame operates at full camera resolution
+    // rather than the (much smaller) CSS layout dimensions.
+    const sw = cssW / scale;
+    const sh = cssH / scale;
     return {
       sx: cropX / scale,
       sy: cropY / scale,
-      sw: cssW / scale,
-      sh: cssH / scale,
-      dw: cssW,
-      dh: cssH,
+      sw,
+      sh,
+      dw: Math.round(sw),
+      dh: Math.round(sh),
     };
   }
 

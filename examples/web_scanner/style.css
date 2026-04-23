@@ -561,8 +561,8 @@ dd {
 
 .crop-canvas {
   display: block;
-  width: 126px;
-  height: 176px;
+  width: 252px;
+  height: 352px;
   border-radius: 0.5rem;
   border: 1px solid var(--line);
   background: var(--camera);
