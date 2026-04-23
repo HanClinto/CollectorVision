@@ -25,9 +25,6 @@
         <header class="app-bar">
           <h1 class="app-bar__title">CollectorVision</h1>
           <div class="app-bar__actions">
-            <button class="icon-button" id="view-toggle" type="button" aria-label="Toggle camera size">
-              Expand
-            </button>
             <button class="icon-button" id="settings-toggle" type="button" aria-label="Open settings">
               Settings
             </button>
@@ -41,24 +38,19 @@
               <canvas id="camera-overlay" class="camera-canvas"></canvas>
               <div class="camera-overlay">
                 <span class="camera-badge" id="camera-badge">Camera idle</span>
-                <p class="camera-copy">
-                  Portrait-first scanner surface. Live video, overlay, and crop
-                  preview go here.
-                </p>
                 <button class="camera-start" id="camera-start" type="button">
                   Start Camera
                 </button>
               </div>
             </div>
-
-            <div class="status-strip">
-              <span class="pill" id="webgpu-status">Checking WebGPU...</span>
-              <span class="pill" id="manifest-status">Manifest pending</span>
-              <span class="pill" id="models-status">Models pending</span>
-              <span class="pill" id="catalog-status">Catalog pending</span>
-            </div>
           </div>
         </section>
+
+        <div class="camera-divider">
+          <button class="camera-chevron" id="view-toggle" type="button" aria-label="Toggle camera size">
+            <span class="camera-chevron__glyph" aria-hidden="true">⌄</span>
+          </button>
+        </div>
 
         <section class="action-bar">
           <button class="action-button" id="copy-list" type="button">Copy</button>
@@ -93,7 +85,7 @@
           <dl class="settings-grid">
             <div>
               <dt>Primary Path</dt>
-              <dd>WebGPU + ONNX Runtime Web + OpenCV.js</dd>
+              <dd>WebGPU + ONNX Runtime Web + local JS dewarp</dd>
             </div>
             <div>
               <dt>Catalog Cache</dt>
