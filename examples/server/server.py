@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import io
 import time
 from pathlib import Path
 
@@ -179,13 +178,13 @@ def _identify_bgr(bgr: np.ndarray, *, top_k: int) -> dict:
     # Step 1: detect + dewarp
     if detector is not None:
         detection = detector.detect(bgr, min_sharpness=_args.min_sharpness)
-        sharpness = detection.extra.get("sharpness", 0.0)
+        sharpness = detection.sharpness
 
         if not detection.card_present:
             return {
                 "_status":      {"code": 200, "text": "OK"},
                 "card_present": False,
-                "sharpness":    round(float(sharpness), 5),
+                "sharpness":    round(float(sharpness), 5) if sharpness is not None else None,
                 "_timing":      {"total_ms": round((time.perf_counter() - t0) * 1000, 1)},
             }
 
@@ -312,7 +311,6 @@ async def identify_upload(
         raise HTTPException(status_code=400, detail="No files uploaded")
 
     resolved_top_k = top_k if top_k is not None else _args.top_k
-
     if len(files) == 1:
         data = await files[0].read()
         try:
@@ -352,6 +350,12 @@ async def identify_upload(
 
     hits = sorted(score_map.items(), key=lambda x: x[1], reverse=True)[:resolved_top_k]
     t1 = time.perf_counter()
+    if not hits:
+        return JSONResponse({
+            "_status": {"code": 200, "text": "OK"},
+            "card_present": False,
+            "_timing": {"total_ms": round((t1 - t0) * 1000, 1)},
+        })
 
     best_id, best_score = hits[0]
     return JSONResponse({
@@ -372,7 +376,8 @@ if __name__ == "__main__":
     import uvicorn
 
     if _args.ssl:
-        import tempfile, subprocess
+        import subprocess
+        import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             cert, key = f"{tmp}/cert.pem", f"{tmp}/key.pem"
             subprocess.run([

@@ -68,7 +68,10 @@ def pack_ids(ids: list[str]) -> np.ndarray:
     or converting a catalog NPZ to store card/oracle IDs efficiently.
     Empty strings produce a zero row.
     """
-    raw = b"".join(bytes.fromhex(s.replace("-", "")) for s in ids)
+    raw = b"".join(
+        (b"\x00" * 16) if not s else bytes.fromhex(s.replace("-", ""))
+        for s in ids
+    )
     return np.frombuffer(raw, dtype=np.uint8).reshape(len(ids), 16).copy()
 
 
@@ -245,6 +248,8 @@ class Catalog:
             from collector_vision.games import Game
             catalog = Catalog.for_games(Game.MTG, Game.YUGIOH)
         """
+        if not games:
+            raise ValueError("Catalog.for_games() requires at least one game")
         loaded = [
             cls.for_game(g, embedding=embedding, cache_dir=cache_dir, offline=offline)
             for g in games

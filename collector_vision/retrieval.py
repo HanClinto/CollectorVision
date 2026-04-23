@@ -30,8 +30,22 @@ def cosine_search(
     -------
     List of (score, index) sorted by descending score.
     """
+    if query_vec.ndim != 1:
+        raise ValueError(f"query_vec must be 1-D, got shape {query_vec.shape}")
+    if catalog_embeddings.ndim != 2:
+        raise ValueError(
+            f"catalog_embeddings must be 2-D, got shape {catalog_embeddings.shape}"
+        )
+    if catalog_embeddings.shape[1] != query_vec.shape[0]:
+        raise ValueError(
+            "query_vec and catalog_embeddings have incompatible dimensions: "
+            f"{query_vec.shape[0]} vs {catalog_embeddings.shape[1]}"
+        )
+
     scores: np.ndarray = catalog_embeddings @ query_vec  # (N,)
     n = len(scores)
+    if n == 0:
+        return []
 
     if top_k >= n:
         idxs = np.argsort(scores)[::-1]
