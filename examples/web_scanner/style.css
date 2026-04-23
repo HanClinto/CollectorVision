@@ -352,12 +352,12 @@ h2 {
   display: inline-block;
   font-size: 1.05rem;
   line-height: 1;
-  transform: translateY(-0.02rem);
+  transform: rotate(180deg) translateY(0.02rem);
   transition: transform 180ms ease;
 }
 
 .page[data-camera-mode="small"] .camera-chevron__glyph {
-  transform: rotate(180deg);
+  transform: translateY(-0.02rem);
 }
 
 .action-bar {
