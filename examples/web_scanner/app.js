@@ -398,7 +398,11 @@ function loadOpenCv() {
         return;
       }
       if (typeof cv?.then === "function") {
-        cv.then((readyCv) => resolve(readyCv)).catch(reject);
+        try {
+          cv.then((readyCv) => resolve(readyCv));
+        } catch (error) {
+          reject(error);
+        }
         return;
       }
       reject(new Error("opencv.js loaded but did not expose cv"));
