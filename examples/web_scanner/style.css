@@ -183,10 +183,6 @@ body[data-loading="true"] .loading-screen {
   color: #fff7ed;
 }
 
-.page[data-camera-mode="small"] .camera-placeholder {
-  min-height: 11.5rem;
-}
-
 h2 {
   margin: 0;
   font-size: 1.15rem;
@@ -243,6 +239,15 @@ h2 {
       transparent 1px,
       transparent 1.8rem
     );
+  transition: min-height 180ms ease;
+}
+
+.page[data-camera-mode="small"] .camera-placeholder {
+  min-height: clamp(12rem, 30svh, 18rem);
+}
+
+.page[data-camera-mode="expanded"] .camera-placeholder {
+  min-height: clamp(20rem, 50svh, 34rem);
 }
 
 .camera-video,
@@ -252,6 +257,7 @@ h2 {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center center;
 }
 
 .camera-video {
