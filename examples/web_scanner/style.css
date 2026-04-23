@@ -551,6 +551,23 @@ dd {
   background: var(--accent-soft);
 }
 
+.crop-preview {
+  margin-bottom: 1rem;
+}
+
+.crop-preview .section-kicker {
+  margin: 0 0 0.45rem;
+}
+
+.crop-canvas {
+  display: block;
+  width: 126px;
+  height: 176px;
+  border-radius: 0.5rem;
+  border: 1px solid var(--line);
+  background: var(--camera);
+}
+
 @media (max-width: 640px) {
   .page {
     width: 100vw;

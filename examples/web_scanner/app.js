@@ -425,13 +425,17 @@ function sigmoid(x) {
 }
 
 function orderCorners(points) {
+  // Canonical order: TL, TR, BR, BL — matches the Python _order_corners convention.
+  // TL = min(x+y), BR = max(x+y), TR = min(y-x), BL = max(y-x).
+  // NOTE: use (y - x), not (x - y), so that TR gets the most-negative value
+  // (large x, small y) and BL gets the most-positive value (small x, large y).
   const sums = points.map(([x, y]) => x + y);
-  const diffs = points.map(([x, y]) => x - y);
+  const diffs = points.map(([x, y]) => y - x);
   return [
-    points[sums.indexOf(Math.min(...sums))],
-    points[diffs.indexOf(Math.min(...diffs))],
-    points[sums.indexOf(Math.max(...sums))],
-    points[diffs.indexOf(Math.max(...diffs))],
+    points[sums.indexOf(Math.min(...sums))],   // TL
+    points[diffs.indexOf(Math.min(...diffs))],  // TR
+    points[sums.indexOf(Math.max(...sums))],    // BR
+    points[diffs.indexOf(Math.max(...diffs))],  // BL
   ];
 }
 
@@ -549,6 +553,17 @@ function fillInputTensor(canvas, size) {
   }
 
   return tensor;
+}
+
+function updateCropPreview(cropCanvas) {
+  const wrapper = document.getElementById("crop-preview");
+  const target = document.getElementById("crop-canvas");
+  if (!wrapper || !target) {
+    return;
+  }
+  const ctx = target.getContext("2d");
+  ctx.drawImage(cropCanvas, 0, 0, target.width, target.height);
+  wrapper.hidden = false;
 }
 
 class ScanBucket {
@@ -1107,6 +1122,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog)
 
     camera.drawCorners(detection.corners);
     const crop = runtime.dewarp(frame, detection.corners);
+    updateCropPreview(crop);
     const embedding = await runtime.embed(crop);
     const best = runtime.search(embedding);
 
