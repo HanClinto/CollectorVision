@@ -357,15 +357,42 @@ class CameraSurface {
 
   bind(onStart) {
     this.startButton.addEventListener("click", async () => {
-      await this.start();
-      onStart();
+      if (this.startButton.disabled) {
+        return;
+      }
+      this.startButton.disabled = true;
+      try {
+        await this.start();
+        await onStart();
+      } catch (error) {
+        console.error(error);
+        this.badge.textContent = this.describeCameraError(error);
+        this.startButton.disabled = false;
+      }
     });
+  }
+
+  setLoading(message) {
+    this.badge.textContent = message;
+    this.startButton.disabled = true;
+  }
+
+  setReady() {
+    this.badge.textContent = "Ready to start camera";
+    this.startButton.disabled = false;
   }
 
   async start() {
     if (this.stream) {
       return;
     }
+    if (!window.isSecureContext) {
+      throw new Error("Camera requires HTTPS or localhost.");
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Camera API unavailable in this browser.");
+    }
+    this.badge.textContent = "Requesting camera";
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: "environment",
@@ -375,9 +402,15 @@ class CameraSurface {
       audio: false,
     });
     this.stream = stream;
+    this.video.playsInline = true;
+    this.video.muted = true;
     this.video.srcObject = stream;
-    await new Promise((resolve) => {
-      this.video.onloadedmetadata = resolve;
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Camera metadata timed out.")), 5000);
+      this.video.onloadedmetadata = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
     });
     await this.video.play();
     this.page.dataset.cameraReady = "true";
@@ -459,6 +492,19 @@ class CameraSurface {
       this.ctx.arc(x, y, 5, 0, Math.PI * 2);
       this.ctx.fill();
     }
+  }
+
+  describeCameraError(error) {
+    if (error?.name === "NotAllowedError") {
+      return "Camera permission denied";
+    }
+    if (error?.name === "NotFoundError") {
+      return "No camera found";
+    }
+    if (error?.name === "NotReadableError") {
+      return "Camera is busy in another app";
+    }
+    return error?.message || "Camera failed";
   }
 }
 
@@ -836,6 +882,7 @@ async function loadManifest() {
 async function boot() {
   const scans = [];
   const audioBus = createAudioBus();
+  const camera = new CameraSurface();
 
   renderNotes();
   renderScanList(scans);
@@ -843,6 +890,7 @@ async function boot() {
   setupViewToggle();
   setupActions(scans);
   audioBus.preload();
+  camera.setLoading("Loading scanner");
 
   assertWebGpu();
   setText("webgpu-status", "Available");
@@ -858,9 +906,11 @@ async function boot() {
   setText("models-status", "Models ready");
   setText("catalog-status", `${manifest.catalog.rows} cards ready`);
 
-  const camera = new CameraSurface();
   const loop = createScannerLoop(camera, runtime, scans, audioBus, manifest);
-  camera.bind(() => loop.start());
+  camera.bind(async () => {
+    loop.start();
+  });
+  camera.setReady();
   document.getElementById("run-sample").addEventListener("click", () => {
     loop.runSample().catch((error) => {
       console.error(error);
