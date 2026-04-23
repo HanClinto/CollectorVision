@@ -20,9 +20,9 @@ Building a hash catalog is left as an exercise — the NPZ structure is:
 
 Usage
 -----
-    python examples/custom_identifier.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg --catalog hf://HanClinto/milo/scryfall-mtg
-    python examples/custom_identifier.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg --catalog hf://HanClinto/milo/scryfall-mtg --detector canny
-    python examples/custom_identifier.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg --catalog hf://HanClinto/milo/scryfall-mtg --embedder phash
+    python examples/advanced/custom_pipeline.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg --catalog hf://HanClinto/milo/scryfall-mtg
+    python examples/advanced/custom_pipeline.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg --catalog hf://HanClinto/milo/scryfall-mtg --detector canny
+    python examples/advanced/custom_pipeline.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg --catalog hf://HanClinto/milo/scryfall-mtg --embedder phash
 """
 import argparse
 import sys
