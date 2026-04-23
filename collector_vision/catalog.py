@@ -62,7 +62,12 @@ def _unpack_ids(arr: np.ndarray) -> list[str]:
 
 
 def pack_ids(ids: list[str]) -> np.ndarray:
-    """Pack a list of UUID strings into a compact (N, 16) uint8 array."""
+    """Pack a list of UUID strings into a compact ``(N, 16)`` uint8 array.
+
+    Inverse of the unpacking in :func:`_unpack_ids`.  Use this when building
+    or converting a catalog NPZ to store card/oracle IDs efficiently.
+    Empty strings produce a zero row.
+    """
     raw = b"".join(bytes.fromhex(s.replace("-", "")) for s in ids)
     return np.frombuffer(raw, dtype=np.uint8).reshape(len(ids), 16).copy()
 

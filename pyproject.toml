@@ -6,8 +6,22 @@ build-backend = "setuptools.build_meta"
 name = "collectorvision"
 version = "0.1.0.dev0"
 description = "Card identification library for collectible card games (MTG, Pokémon, and more)"
+readme = "README.md"
 license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.10"
+authors = [{ name = "HanClinto", email = "hanclinto@gmail.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Games/Entertainment",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "onnxruntime>=1.17",
     "Pillow>=9.0",
@@ -21,7 +35,12 @@ server = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
 ]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "build", "twine"]
+
+[project.urls]
+Homepage = "https://github.com/HanClinto/CollectorVision"
+Repository = "https://github.com/HanClinto/CollectorVision"
+"Bug Tracker" = "https://github.com/HanClinto/CollectorVision/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
