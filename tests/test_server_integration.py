@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 ROOT   = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg"
@@ -16,7 +17,6 @@ SAMPLE = ROOT / "examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg
 sys.path.insert(0, str(ROOT / "examples" / "server"))
 
 from server import app, configure  # noqa: E402
-from fastapi.testclient import TestClient
 
 SCRYING_GLASS_ID = "7286819f-6c57-4503-898c-528786ad86e9"
 
