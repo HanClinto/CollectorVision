@@ -251,6 +251,7 @@ h2 {
 }
 
 .camera-video,
+.camera-preview,
 .camera-canvas {
   position: absolute;
   inset: 0;
@@ -264,7 +265,11 @@ h2 {
   display: none;
 }
 
-.page[data-camera-ready="true"] .camera-video {
+.camera-preview {
+  display: none;
+}
+
+.page[data-camera-ready="true"] .camera-preview {
   display: block;
 }
 
