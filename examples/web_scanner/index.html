@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CollectorVision Web Scanner</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="app-bar">
+        <h1 class="app-bar__title">CollectorVision</h1>
+        <div class="app-bar__actions">
+          <button class="icon-button" id="view-toggle" type="button" aria-label="Toggle camera size">
+            Expand
+          </button>
+          <button class="icon-button" id="settings-toggle" type="button" aria-label="Open settings">
+            Settings
+          </button>
+        </div>
+      </header>
+
+      <section class="camera-shell">
+        <div class="camera-stage">
+          <div class="camera-placeholder">
+            <video id="camera-video" class="camera-video" playsinline muted></video>
+            <canvas id="camera-overlay" class="camera-canvas"></canvas>
+            <div class="camera-overlay">
+              <span class="camera-badge" id="camera-badge">Camera idle</span>
+              <p class="camera-copy">
+                Portrait-first scanner surface. Live video, overlay, and crop
+                preview go here.
+              </p>
+              <button class="camera-start" id="camera-start" type="button">
+                Start Camera
+              </button>
+            </div>
+          </div>
+
+          <div class="status-strip">
+            <span class="pill" id="webgpu-status">Checking WebGPU...</span>
+            <span class="pill" id="manifest-status">Manifest pending</span>
+            <span class="pill" id="models-status">Models pending</span>
+            <span class="pill" id="catalog-status">Catalog pending</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="action-bar">
+        <button class="action-button" id="copy-list" type="button">Copy</button>
+        <button class="action-button" id="download-csv" type="button">CSV</button>
+        <button class="action-button action-button--accent" id="clear-list" type="button">
+          Clear
+        </button>
+      </section>
+
+      <section class="panel panel--list">
+        <header class="panel-header">
+          <div>
+            <p class="ledger-total" id="ledger-total">$0.00</p>
+            <h2>Scanned Cards</h2>
+          </div>
+          <span class="count-badge" id="scan-count">0 cards</span>
+        </header>
+
+        <ul class="scan-list" id="scan-list"></ul>
+      </section>
+
+      <aside class="settings-sheet" id="settings-sheet" hidden>
+        <div class="sheet-handle"></div>
+        <header class="panel-header">
+          <div>
+            <p class="section-kicker">Settings</p>
+            <h2>Scanner Runtime</h2>
+          </div>
+          <button class="sheet-close" id="settings-close" type="button">Close</button>
+        </header>
+
+        <dl class="settings-grid">
+          <div>
+            <dt>Primary Path</dt>
+            <dd>WebGPU + ONNX Runtime Web + OpenCV.js</dd>
+          </div>
+          <div>
+            <dt>Catalog Cache</dt>
+            <dd>IndexedDB with manifest versioning</dd>
+          </div>
+          <div>
+            <dt>Metadata</dt>
+            <dd>Live Scryfall enrichment after local recognition</dd>
+          </div>
+          <div>
+            <dt>Export</dt>
+            <dd>Clipboard text and CSV download</dd>
+          </div>
+        </dl>
+
+        <section class="panel panel--nested">
+          <h2>Asset Contract</h2>
+          <pre class="code" id="asset-contract"></pre>
+        </section>
+
+        <section class="panel panel--nested">
+          <h2>Implementation Notes</h2>
+          <ul class="notes" id="notes"></ul>
+        </section>
+
+        <section class="panel panel--nested">
+          <h2>Local Smoke Test</h2>
+          <button class="action-button action-button--block" id="run-sample" type="button">
+            Run Bundled Sample
+          </button>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

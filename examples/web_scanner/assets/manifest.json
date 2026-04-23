@@ -1,0 +1,15 @@
+{
+  "version": "0.1.0",
+  "models": {
+    "cornelius": "models/cornelius.onnx",
+    "milo": "models/milo.onnx"
+  },
+  "catalog": {
+    "embeddings": "catalog/scryfall-mtg-embeddings.f16.bin",
+    "card_ids": "catalog/scryfall-mtg-card-ids.json",
+    "rows": 108354,
+    "dims": 128,
+    "dtype": "float16"
+  },
+  "sample_frame": "samples/mtg-sample.jpg"
+}

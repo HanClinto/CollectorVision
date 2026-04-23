@@ -1,0 +1,14 @@
+{
+  "version": "0.1.0",
+  "models": {
+    "cornelius": "assets/models/cornelius.onnx",
+    "milo": "assets/models/milo.onnx"
+  },
+  "catalog": {
+    "embeddings": "assets/catalog/scryfall-mtg-embeddings.f32",
+    "card_ids": "assets/catalog/scryfall-mtg-card-ids.json",
+    "metadata": "assets/catalog/scryfall-mtg-metadata.json",
+    "rows": 108000,
+    "dims": 128
+  }
+}
