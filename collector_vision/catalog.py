@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    from collector_vision.hfd import HFD
     from collector_vision.interfaces import Embedder
     from collector_vision.games import Game, Embedding
 
@@ -122,7 +123,7 @@ class Catalog:
             self.oracle_to_cards = {}
 
     @classmethod
-    def load(cls, source: "str | Path | HFD") -> "Catalog":
+    def load(cls, source: str | Path | HFD) -> "Catalog":
         """Load a catalog from a local NPZ file or a HuggingFace reference.
 
         Parameters

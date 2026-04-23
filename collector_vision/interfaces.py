@@ -9,9 +9,12 @@ a DetectionResult with your own corners and call dewarp() on it.
 """
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 # Dewarped card output size — card aspect ratio ~63.5 × 88.9 mm
 _DEWARP_W = 252  # 4 × 63
@@ -49,7 +52,7 @@ class DetectionResult:
         self.sharpness = sharpness
         self.extra = extra or {}
 
-    def dewarp(self, bgr: np.ndarray) -> "Image":
+    def dewarp(self, bgr: np.ndarray) -> Image:
         """Perspective-warp the card region to a flat rectangle.
 
         Parameters
@@ -93,4 +96,4 @@ class Embedder(Protocol):
     Vectors should be L2-normalised for cosine similarity retrieval.
     """
 
-    def embed(self, images: "Image | list[Image]") -> np.ndarray: ...
+    def embed(self, images: Image | list[Image]) -> np.ndarray: ...

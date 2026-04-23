@@ -285,7 +285,8 @@ if __name__ == "__main__":
     )
 
     if args.ssl:
-        import subprocess, tempfile
+        import subprocess
+        import tempfile
         tmp  = tempfile.mkdtemp()
         cert, key = f"{tmp}/cert.pem", f"{tmp}/key.pem"
         subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048",
