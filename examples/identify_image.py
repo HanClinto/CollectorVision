@@ -11,10 +11,10 @@ Shows every step:
 
 Usage
 -----
-    python examples/identify_image.py <image.jpg> [image2.jpg ...]
+    python examples/identify_image.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg
 
     # Use a local catalog file instead of downloading
-    python examples/identify_image.py --catalog ./milo1-scryfall-mtg-2026-04.npz <image.jpg>
+    python examples/identify_image.py --catalog ./milo1-scryfall-mtg-2026-04.npz examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg
 
 Multiple images of the same physical card are treated as frames — scores are
 summed across frames before ranking.

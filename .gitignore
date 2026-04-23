@@ -13,3 +13,4 @@ build/
 *.db
 .env
 test_output/
+test_images/
