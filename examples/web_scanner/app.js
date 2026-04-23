@@ -622,6 +622,8 @@ class CameraSurface {
   constructor(debugLog) {
     this.page = document.querySelector(".page");
     this.video = document.getElementById("camera-video");
+    this.preview = document.getElementById("camera-preview");
+    this.previewCtx = this.preview.getContext("2d");
     this.canvas = document.getElementById("camera-overlay");
     this.ctx = this.canvas.getContext("2d");
     this.badge = document.getElementById("camera-badge");
@@ -631,6 +633,7 @@ class CameraSurface {
     this.frameCanvas = document.createElement("canvas");
     this.frameCtx = this.frameCanvas.getContext("2d", { willReadFrequently: true });
     this._resizeHandler = () => this.resize();
+    this._previewFrame = null;
   }
 
   bind(onStart) {
@@ -700,14 +703,17 @@ class CameraSurface {
     this.startButton.hidden = true;
     this.resize();
     window.addEventListener("resize", this._resizeHandler);
+    this.renderPreview();
   }
 
   resize() {
-    const width = this.video.clientWidth || this.video.videoWidth;
-    const height = this.video.clientHeight || this.video.videoHeight;
+    const width = this.preview.clientWidth || this.video.clientWidth || this.video.videoWidth;
+    const height = this.preview.clientHeight || this.video.clientHeight || this.video.videoHeight;
     if (!width || !height) {
       return;
     }
+    this.preview.width = width;
+    this.preview.height = height;
     this.canvas.width = width;
     this.canvas.height = height;
   }
@@ -743,6 +749,20 @@ class CameraSurface {
     this.frameCanvas.height = dh;
     this.frameCtx.drawImage(this.video, sx, sy, sw, sh, 0, 0, dw, dh);
     return this.frameCanvas;
+  }
+
+  renderPreview() {
+    if (!this.stream) {
+      return;
+    }
+    this.resize();
+    const { sx, sy, sw, sh } = this.coverCrop();
+    const width = this.preview.width;
+    const height = this.preview.height;
+    if (width && height) {
+      this.previewCtx.drawImage(this.video, sx, sy, sw, sh, 0, 0, width, height);
+    }
+    this._previewFrame = requestAnimationFrame(() => this.renderPreview());
   }
 
   clearOverlay() {
