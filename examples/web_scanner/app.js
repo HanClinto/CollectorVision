@@ -27,12 +27,13 @@ const NOTES = [
   "Scryfall enrichment runs after confirmation so the recognition loop stays local.",
   "Settings include a bundled sample-frame smoke test for local bring-up.",
   "scan.wav fires on confirm; price-tier sounds fire after Scryfall returns.",
+  "Perspective dewarp runs locally in JS so startup stays simple and self-contained.",
 ];
 
 const LOADING_STEPS = [
   { id: "webgpu", label: "Checking WebGPU" },
   { id: "manifest", label: "Loading manifest" },
-  { id: "opencv", label: "Loading OpenCV runtime" },
+  { id: "dewarp", label: "Preparing dewarp" },
   { id: "detector", label: "Loading corner detector" },
   { id: "embedder", label: "Loading embedder" },
   { id: "catalog", label: "Loading catalog" },
@@ -383,33 +384,40 @@ function assertWebGpu() {
   }
 }
 
-function loadOpenCv() {
-  if (globalThis.cv?.getPerspectiveTransform) {
-    return Promise.resolve(globalThis.cv);
-  }
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "./vendor/opencv/opencv.js";
-    script.async = true;
-    script.onload = () => {
-      const cv = globalThis.cv;
-      if (cv?.getPerspectiveTransform) {
-        resolve(cv);
-        return;
-      }
-      if (typeof cv?.then === "function") {
-        try {
-          cv.then((readyCv) => resolve(readyCv));
-        } catch (error) {
-          reject(error);
-        }
-        return;
-      }
-      reject(new Error("opencv.js loaded but did not expose cv"));
-    };
-    script.onerror = () => reject(new Error("Failed to load opencv.js"));
-    document.head.appendChild(script);
+async function configureWebGpu(debugLog) {
+  const adapter = await navigator.gpu.requestAdapter({
+    powerPreference: "high-performance",
   });
+  if (!adapter) {
+    throw new Error("Failed to get a WebGPU adapter.");
+  }
+
+  const requestedStorageBuffers = Math.min(
+    10,
+    adapter.limits.maxStorageBuffersPerShaderStage ?? 8,
+  );
+  const originalRequestDevice = adapter.requestDevice.bind(adapter);
+  Object.defineProperty(adapter, "requestDevice", {
+    configurable: true,
+    value: async (descriptor = {}) => originalRequestDevice({
+      ...descriptor,
+      requiredLimits: {
+        ...(descriptor.requiredLimits ?? {}),
+        maxStorageBuffersPerShaderStage: requestedStorageBuffers,
+      },
+    }),
+  });
+
+  ort.env.webgpu.adapter = adapter;
+
+  debugLog.info(
+    "webgpu adapter ready",
+    `maxStorageBuffersPerShaderStage=${requestedStorageBuffers}`,
+  );
+}
+
+function prepareDewarp() {
+  return Promise.resolve(true);
 }
 
 function sigmoid(x) {
@@ -425,6 +433,86 @@ function orderCorners(points) {
     points[sums.indexOf(Math.max(...sums))],
     points[diffs.indexOf(Math.max(...diffs))],
   ];
+}
+
+function solveLinearSystem(matrix, vector) {
+  const size = vector.length;
+  const a = matrix.map((row, index) => [...row, vector[index]]);
+
+  for (let col = 0; col < size; col += 1) {
+    let pivot = col;
+    for (let row = col + 1; row < size; row += 1) {
+      if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) {
+        pivot = row;
+      }
+    }
+    if (Math.abs(a[pivot][col]) < 1e-10) {
+      throw new Error("Could not solve dewarp transform.");
+    }
+    if (pivot !== col) {
+      [a[col], a[pivot]] = [a[pivot], a[col]];
+    }
+    const scale = a[col][col];
+    for (let k = col; k <= size; k += 1) {
+      a[col][k] /= scale;
+    }
+    for (let row = 0; row < size; row += 1) {
+      if (row === col) {
+        continue;
+      }
+      const factor = a[row][col];
+      for (let k = col; k <= size; k += 1) {
+        a[row][k] -= factor * a[col][k];
+      }
+    }
+  }
+
+  return a.map((row) => row[size]);
+}
+
+function computeHomography(srcPoints, dstPoints) {
+  const matrix = [];
+  const vector = [];
+
+  for (let i = 0; i < 4; i += 1) {
+    const [x, y] = srcPoints[i];
+    const [u, v] = dstPoints[i];
+    matrix.push([x, y, 1, 0, 0, 0, -u * x, -u * y]);
+    vector.push(u);
+    matrix.push([0, 0, 0, x, y, 1, -v * x, -v * y]);
+    vector.push(v);
+  }
+
+  const [h11, h12, h13, h21, h22, h23, h31, h32] = solveLinearSystem(matrix, vector);
+  return [h11, h12, h13, h21, h22, h23, h31, h32, 1];
+}
+
+function applyHomography(matrix, x, y) {
+  const denom = matrix[6] * x + matrix[7] * y + matrix[8];
+  return [
+    (matrix[0] * x + matrix[1] * y + matrix[2]) / denom,
+    (matrix[3] * x + matrix[4] * y + matrix[5]) / denom,
+  ];
+}
+
+function sampleBilinear(data, width, height, x, y, channel) {
+  const clampedX = Math.min(Math.max(x, 0), width - 1);
+  const clampedY = Math.min(Math.max(y, 0), height - 1);
+  const x0 = Math.floor(clampedX);
+  const y0 = Math.floor(clampedY);
+  const x1 = Math.min(x0 + 1, width - 1);
+  const y1 = Math.min(y0 + 1, height - 1);
+  const tx = clampedX - x0;
+  const ty = clampedY - y0;
+
+  const i00 = (y0 * width + x0) * 4 + channel;
+  const i10 = (y0 * width + x1) * 4 + channel;
+  const i01 = (y1 * width + x0) * 4 + channel;
+  const i11 = (y1 * width + x1) * 4 + channel;
+
+  const top = data[i00] * (1 - tx) + data[i10] * tx;
+  const bottom = data[i01] * (1 - tx) + data[i11] * tx;
+  return top * (1 - ty) + bottom * ty;
 }
 
 function normalizeEmbedding(embedding) {
@@ -683,9 +771,8 @@ class CameraSurface {
 }
 
 class BrowserRuntime {
-  constructor(manifest, cv) {
+  constructor(manifest) {
     this.manifest = manifest;
-    this.cv = cv;
     this.detector = null;
     this.embedder = null;
     this.inputNames = {};
@@ -694,6 +781,7 @@ class BrowserRuntime {
     this.dewarpCanvas = document.createElement("canvas");
     this.dewarpCanvas.width = DEWARP_W;
     this.dewarpCanvas.height = DEWARP_H;
+    this.dewarpCtx = this.dewarpCanvas.getContext("2d", { willReadFrequently: true });
   }
 
   async load(onStage) {
@@ -766,34 +854,48 @@ class BrowserRuntime {
   }
 
   dewarp(frameCanvas, corners) {
-    const cv = this.cv;
-    const src = cv.imread(frameCanvas);
-    const dst = new cv.Mat();
     const width = frameCanvas.width;
     const height = frameCanvas.height;
-
-    const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    const srcPts = [
       corners[0][0] * width, corners[0][1] * height,
       corners[1][0] * width, corners[1][1] * height,
       corners[2][0] * width, corners[2][1] * height,
       corners[3][0] * width, corners[3][1] * height,
-    ]);
-    const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    ];
+    const dstPts = [
       0, 0,
       DEWARP_W - 1, 0,
       DEWARP_W - 1, DEWARP_H - 1,
       0, DEWARP_H - 1,
-    ]);
-    const matrix = cv.getPerspectiveTransform(srcPts, dstPts);
-    const size = new cv.Size(DEWARP_W, DEWARP_H);
-    cv.warpPerspective(src, dst, matrix, size, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
-    cv.imshow(this.dewarpCanvas, dst);
+    ];
+    const sourcePoints = [
+      [srcPts[0], srcPts[1]],
+      [srcPts[2], srcPts[3]],
+      [srcPts[4], srcPts[5]],
+      [srcPts[6], srcPts[7]],
+    ];
+    const targetPoints = [
+      [dstPts[0], dstPts[1]],
+      [dstPts[2], dstPts[3]],
+      [dstPts[4], dstPts[5]],
+      [dstPts[6], dstPts[7]],
+    ];
+    const inverse = computeHomography(targetPoints, sourcePoints);
+    const srcData = frameCanvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, width, height);
+    const dstData = this.dewarpCtx.createImageData(DEWARP_W, DEWARP_H);
 
-    src.delete();
-    dst.delete();
-    srcPts.delete();
-    dstPts.delete();
-    matrix.delete();
+    for (let y = 0; y < DEWARP_H; y += 1) {
+      for (let x = 0; x < DEWARP_W; x += 1) {
+        const [sx, sy] = applyHomography(inverse, x, y);
+        const offset = (y * DEWARP_W + x) * 4;
+        dstData.data[offset] = sampleBilinear(srcData.data, width, height, sx, sy, 0);
+        dstData.data[offset + 1] = sampleBilinear(srcData.data, width, height, sx, sy, 1);
+        dstData.data[offset + 2] = sampleBilinear(srcData.data, width, height, sx, sy, 2);
+        dstData.data[offset + 3] = 255;
+      }
+    }
+
+    this.dewarpCtx.putImageData(dstData, 0, 0);
 
     return this.dewarpCanvas;
   }
@@ -1054,6 +1156,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog)
       const sampleFrame = await loadImageToCanvas(`./assets/${manifest.sample_frame}`);
       setText("camera-badge", "Running sample");
       await processFrame(sampleFrame, false);
+      setText("camera-badge", "Sample ready");
     },
   };
 }
@@ -1111,6 +1214,7 @@ async function boot() {
   camera.setLoading("Loading scanner");
 
   assertWebGpu();
+  await configureWebGpu(debugLog);
   setText("webgpu-status", "Available");
   loadingScreen.step("webgpu", "done", "Available");
   loadingScreen.progress(8, "WebGPU available");
@@ -1122,15 +1226,15 @@ async function boot() {
   loadingScreen.progress(14, "Manifest loaded");
   debugLog.info("manifest loaded", manifest.version);
 
-  loadingScreen.step("opencv", "active", "Downloading");
-  loadingScreen.progress(18, "Loading OpenCV runtime");
-  const cv = await loadOpenCv();
+  loadingScreen.step("dewarp", "active", "Ready");
+  loadingScreen.progress(18, "Preparing dewarp");
+  await prepareDewarp();
   setText("models-status", "Loading models");
-  loadingScreen.step("opencv", "done", "Ready");
-  loadingScreen.progress(24, "OpenCV runtime ready");
-  debugLog.info("opencv runtime ready");
+  loadingScreen.step("dewarp", "done", "Ready");
+  loadingScreen.progress(24, "Dewarp ready");
+  debugLog.info("dewarp ready");
 
-  const runtime = new BrowserRuntime(manifest, cv);
+  const runtime = new BrowserRuntime(manifest);
   loadingScreen.step("detector", "active", "Queued");
   loadingScreen.step("embedder", "active", "Queued");
   loadingScreen.step("catalog", "active", "Queued");

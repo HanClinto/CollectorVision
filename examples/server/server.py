@@ -146,22 +146,18 @@ def _identify(
     # Embed the current frame
     current_emb = catalog.embedder.embed(crop)
 
-    # Average with prior embeddings from the client's rolling buffer (if any),
-    # then renormalize — gives a consensus embedding without re-uploading images.
-    # Priors whose cosine similarity with the current frame is below
-    # min_prior_similarity are discarded (bad corner grabs produce distant vectors
-    # that would drag the average away from the true card embedding).
+    # Sum prior embeddings from the client's rolling buffer with the current frame.
+    # Priors below min_prior_similarity (cosine sim, via dot product on unit vectors)
+    # are discarded — bad corner grabs produce distant vectors that would dilute the sum.
+    # Renormalization is skipped: scaling a query doesn't affect cosine-similarity
+    # rankings against a normalized gallery.
     if prior_embeddings:
         kept = [current_emb]
         for e in prior_embeddings:
             e_arr = np.array(e, dtype=np.float32)
             if float(np.dot(current_emb, e_arr)) >= min_prior_similarity:
                 kept.append(e_arr)
-        all_embs   = np.stack(kept)
-        search_emb = all_embs.mean(axis=0)
-        norm = np.linalg.norm(search_emb)
-        if norm > 0:
-            search_emb /= norm
+        search_emb = np.stack(kept).sum(axis=0)
     else:
         search_emb = current_emb
 
@@ -211,7 +207,9 @@ async def identify(request: Request):
 
     ``prior_embeddings`` is optional.  Populate it from the ``"embedding"``
     fields of recent responses to improve identification accuracy across a
-    live camera feed without re-uploading image data.
+    live camera feed without re-uploading image data.  Priors whose cosine
+    similarity with the current frame falls below the server's
+    ``min_prior_similarity`` threshold are silently dropped before the sum.
 
     Response includes ``"embedding"`` — the 128-d vector for this frame.
     Add it to your client-side rolling buffer for the next request.
