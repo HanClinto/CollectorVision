@@ -157,7 +157,10 @@ function createLoadingScreen() {
 }
 
 function setText(id, value) {
-  document.getElementById(id).textContent = value;
+  const el = document.getElementById(id);
+  if (el) {
+    el.textContent = value;
+  }
 }
 
 function formatCurrency(value) {
@@ -1075,13 +1078,17 @@ function setupSettingsSheet() {
 function setupViewToggle() {
   const page = document.querySelector(".page");
   const button = document.getElementById("view-toggle");
+  const glyph = button.querySelector(".camera-chevron__glyph");
 
-  page.dataset.cameraMode = "small";
+  page.dataset.cameraMode = "expanded";
+  glyph.textContent = "⌄";
+  button.setAttribute("aria-label", "Shrink camera");
 
   button.addEventListener("click", () => {
     const expanded = page.dataset.cameraMode === "expanded";
     page.dataset.cameraMode = expanded ? "small" : "expanded";
-    button.textContent = expanded ? "Expand" : "Shrink";
+    button.setAttribute("aria-label", expanded ? "Expand camera" : "Shrink camera");
+    glyph.textContent = "⌄";
     requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
     setTimeout(() => window.dispatchEvent(new Event("resize")), 200);
   });
