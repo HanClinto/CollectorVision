@@ -63,7 +63,7 @@ def run(input_dir: Path, output_dir: Path, min_sharpness: float) -> None:
             continue
 
         detection = detector.detect(bgr, min_sharpness=min_sharpness)
-        sharpness = detection.extra.get("sharpness")
+        sharpness = detection.sharpness
 
         if detection.card_present:
             crop = detection.dewarp(bgr)
@@ -78,7 +78,11 @@ def run(input_dir: Path, output_dir: Path, min_sharpness: float) -> None:
             annotated = annotate_no_card(bgr, sharpness)
             cv2.imwrite(str(debug_dir / f"{img_path.stem}_nocard.jpg"), annotated)
             n_missed += 1
-            print(f"  missed: {img_path.name}  sharpness={sharpness:.4f}" if sharpness else f"  missed: {img_path.name}")
+            print(
+                f"  missed: {img_path.name}  sharpness={sharpness:.4f}"
+                if sharpness is not None
+                else f"  missed: {img_path.name}"
+            )
 
     total = n_detected + n_missed
     print(f"\n{input_dir.name}: {n_detected}/{total} detected  ({100*n_detected/total:.1f}%)")
