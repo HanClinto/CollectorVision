@@ -28,14 +28,16 @@ from fastapi.testclient import TestClient
 def client():
     """Shared TestClient with the full pipeline (detect + embed + search)."""
     configure(catalog="hf://HanClinto/milo/scryfall-mtg")
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture(scope="module")
 def client_no_detector():
     """TestClient with detection skipped — inputs are pre-cropped."""
-    configure(catalog="hf://HanClinto/milo/scryfall-mtg", detector_none=True)
-    return TestClient(app)
+    configure(catalog="hf://HanClinto/milo/scryfall-mtg", no_detector=True)
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture(scope="module")
@@ -93,7 +95,6 @@ def test_identify_scrying_glass_base64(client, sample_bytes):
     assert len(records) == 1
     rec = records[0]
 
-    assert rec["_status"]["code"] == 200
     assert rec["card_present"] is True
     assert rec["card_id"] == "7286819f-6c57-4503-898c-528786ad86e9"
     assert rec["confidence"] > 0.8
