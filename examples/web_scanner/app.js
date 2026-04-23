@@ -29,6 +29,132 @@ const NOTES = [
   "scan.wav fires on confirm; price-tier sounds fire after Scryfall returns.",
 ];
 
+const LOADING_STEPS = [
+  { id: "webgpu", label: "Checking WebGPU" },
+  { id: "manifest", label: "Loading manifest" },
+  { id: "opencv", label: "Loading OpenCV runtime" },
+  { id: "detector", label: "Loading corner detector" },
+  { id: "embedder", label: "Loading embedder" },
+  { id: "catalog", label: "Loading catalog" },
+];
+
+function describeValue(value) {
+  if (value instanceof Error) {
+    return value.stack || value.message;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function createDebugLog() {
+  const list = document.getElementById("debug-log");
+  const limit = 200;
+
+  function push(level, ...parts) {
+    const message = parts.map(describeValue).join(" ");
+    console[level === "info" ? "log" : level](`[CollectorVision] ${message}`);
+
+    const item = document.createElement("li");
+    item.className = "debug-entry";
+    item.dataset.level = level;
+    item.innerHTML = `
+      <p class="debug-entry__meta">${new Date().toLocaleTimeString()} · ${level.toUpperCase()}</p>
+      <p class="debug-entry__message"></p>
+    `;
+    item.querySelector(".debug-entry__message").textContent = message;
+    list.prepend(item);
+
+    while (list.children.length > limit) {
+      list.removeChild(list.lastElementChild);
+    }
+  }
+
+  document.getElementById("clear-debug").addEventListener("click", () => {
+    list.innerHTML = "";
+  });
+
+  window.addEventListener("error", (event) => {
+    push("error", event.message);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    push("error", "Unhandled promise rejection", event.reason);
+  });
+
+  return {
+    info: (...parts) => push("info", ...parts),
+    warn: (...parts) => push("warn", ...parts),
+    error: (...parts) => push("error", ...parts),
+  };
+}
+
+function createLoadingScreen() {
+  const body = document.body;
+  const message = document.getElementById("loading-message");
+  const fill = document.getElementById("loading-fill");
+  const percent = document.getElementById("loading-percent");
+  const steps = document.getElementById("loading-steps");
+  const stepEls = new Map();
+
+  for (const step of LOADING_STEPS) {
+    const item = document.createElement("li");
+    item.className = "loading-screen__step";
+    item.dataset.state = "pending";
+    item.innerHTML = `
+      <span>${step.label}</span>
+      <span class="loading-screen__step-note">Pending</span>
+    `;
+    steps.appendChild(item);
+    stepEls.set(step.id, item);
+  }
+
+  function updatePercent(value) {
+    const clamped = Math.max(0, Math.min(100, value));
+    fill.style.width = `${clamped}%`;
+    percent.textContent = `${Math.round(clamped)}%`;
+  }
+
+  return {
+    start(text = "Preparing scanner runtime") {
+      body.dataset.loading = "true";
+      message.textContent = text;
+      updatePercent(0);
+    },
+    progress(value, text) {
+      updatePercent(value);
+      if (text) {
+        message.textContent = text;
+      }
+    },
+    step(id, state, note) {
+      const el = stepEls.get(id);
+      if (!el) {
+        return;
+      }
+      el.dataset.state = state;
+      el.querySelector(".loading-screen__step-note").textContent = note;
+    },
+    finish() {
+      updatePercent(100);
+      message.textContent = "Scanner ready";
+      for (const step of LOADING_STEPS) {
+        this.step(step.id, "done", "Ready");
+      }
+      setTimeout(() => {
+        delete body.dataset.loading;
+      }, 180);
+    },
+    fail(text) {
+      message.textContent = text;
+    },
+  };
+}
+
 function setText(id, value) {
   document.getElementById(id).textContent = value;
 }
@@ -117,32 +243,64 @@ async function writeCachedAsset(key, value) {
   });
 }
 
-async function fetchJsonCached(url, version) {
-  const key = `${version}:${url}:json`;
-  const cached = await readCachedAsset(key);
-  if (cached) {
-    return cached;
-  }
+async function fetchWithProgress(url, responseType, onProgress) {
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
   }
-  const json = await response.json();
+
+  const total = Number.parseInt(response.headers.get("content-length") ?? "0", 10) || 0;
+  if (!response.body || total === 0) {
+    const payload = responseType === "json" ? await response.json() : await response.arrayBuffer();
+    onProgress?.(1, total || 1, total || 1);
+    return payload;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let loaded = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    chunks.push(value);
+    loaded += value.length;
+    onProgress?.(loaded / total, loaded, total);
+  }
+
+  const blob = new Blob(chunks);
+  if (responseType === "json") {
+    return JSON.parse(await blob.text());
+  }
+  return await blob.arrayBuffer();
+}
+
+async function fetchJsonCached(url, version, onProgress) {
+  const key = `${version}:${url}:json`;
+  const cached = await readCachedAsset(key);
+  if (cached) {
+    onProgress?.(1, 1, 1, true);
+    return cached;
+  }
+  const json = await fetchWithProgress(url, "json", (ratio, loaded, total) => {
+    onProgress?.(ratio, loaded, total, false);
+  });
   await writeCachedAsset(key, json);
   return json;
 }
 
-async function fetchBufferCached(url, version) {
+async function fetchBufferCached(url, version, onProgress) {
   const key = `${version}:${url}:buffer`;
   const cached = await readCachedAsset(key);
   if (cached) {
+    onProgress?.(1, cached.byteLength ?? 1, cached.byteLength ?? 1, true);
     return cached;
   }
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
-  }
-  const buffer = await response.arrayBuffer();
+  const buffer = await fetchWithProgress(url, "buffer", (ratio, loaded, total) => {
+    onProgress?.(ratio, loaded, total, false);
+  });
   await writeCachedAsset(key, buffer);
   return buffer;
 }
@@ -342,13 +500,14 @@ class ScanBucket {
 }
 
 class CameraSurface {
-  constructor() {
+  constructor(debugLog) {
     this.page = document.querySelector(".page");
     this.video = document.getElementById("camera-video");
     this.canvas = document.getElementById("camera-overlay");
     this.ctx = this.canvas.getContext("2d");
     this.badge = document.getElementById("camera-badge");
     this.startButton = document.getElementById("camera-start");
+    this.debugLog = debugLog;
     this.stream = null;
     this.frameCanvas = document.createElement("canvas");
     this.frameCtx = this.frameCanvas.getContext("2d", { willReadFrequently: true });
@@ -365,7 +524,7 @@ class CameraSurface {
         await this.start();
         await onStart();
       } catch (error) {
-        console.error(error);
+        this.debugLog.error("camera start failed", error);
         this.badge.textContent = this.describeCameraError(error);
         this.startButton.disabled = false;
       }
@@ -375,11 +534,13 @@ class CameraSurface {
   setLoading(message) {
     this.badge.textContent = message;
     this.startButton.disabled = true;
+    this.debugLog.info(message);
   }
 
   setReady() {
     this.badge.textContent = "Ready to start camera";
     this.startButton.disabled = false;
+    this.debugLog.info("scanner runtime loaded; camera can start");
   }
 
   async start() {
@@ -393,6 +554,7 @@ class CameraSurface {
       throw new Error("Camera API unavailable in this browser.");
     }
     this.badge.textContent = "Requesting camera";
+    this.debugLog.info("requesting camera stream");
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: "environment",
@@ -415,6 +577,7 @@ class CameraSurface {
     await this.video.play();
     this.page.dataset.cameraReady = "true";
     this.badge.textContent = "Camera live";
+    this.debugLog.info("camera stream is live", `${this.video.videoWidth}x${this.video.videoHeight}`);
     this.startButton.hidden = true;
     this.resize();
     window.addEventListener("resize", this._resizeHandler);
@@ -522,10 +685,18 @@ class BrowserRuntime {
     this.dewarpCanvas.height = DEWARP_H;
   }
 
-  async load() {
+  async load(onStage) {
     const version = this.manifest.version;
-    const detectorBuffer = await fetchBufferCached(this.urlFor(this.manifest.models.cornelius), version);
-    const embedderBuffer = await fetchBufferCached(this.urlFor(this.manifest.models.milo), version);
+    const detectorBuffer = await fetchBufferCached(
+      this.urlFor(this.manifest.models.cornelius),
+      version,
+      (ratio, loaded, total, cached) => onStage?.("detector", ratio, loaded, total, cached),
+    );
+    const embedderBuffer = await fetchBufferCached(
+      this.urlFor(this.manifest.models.milo),
+      version,
+      (ratio, loaded, total, cached) => onStage?.("embedder", ratio, loaded, total, cached),
+    );
 
     ort.env.wasm.numThreads = 1;
     this.detector = await ort.InferenceSession.create(detectorBuffer, {
@@ -538,8 +709,16 @@ class BrowserRuntime {
     this.inputNames.detector = this.detector.inputNames[0];
     this.inputNames.embedder = this.embedder.inputNames[0];
 
-    const embeddingBuffer = await fetchBufferCached(this.urlFor(this.manifest.catalog.embeddings), version);
-    const ids = await fetchJsonCached(this.urlFor(this.manifest.catalog.card_ids), version);
+    const embeddingBuffer = await fetchBufferCached(
+      this.urlFor(this.manifest.catalog.embeddings),
+      version,
+      (ratio, loaded, total, cached) => onStage?.("catalog", ratio * 0.92, loaded, total, cached),
+    );
+    const ids = await fetchJsonCached(
+      this.urlFor(this.manifest.catalog.card_ids),
+      version,
+      (ratio, loaded, total, cached) => onStage?.("catalog", 0.92 + ratio * 0.08, loaded, total, cached),
+    );
     this.embeddings = decodeFloat16Buffer(embeddingBuffer);
     this.cardIds = ids;
   }
@@ -785,13 +964,14 @@ function setupActions(scans) {
   });
 }
 
-function createScannerLoop(camera, runtime, scans, audioBus, manifest) {
+function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog) {
   const bucket = new ScanBucket();
   const scryfallCache = new Map();
   let timer = null;
   let busy = false;
 
   async function enrich(scan) {
+    debugLog.info("fetching scryfall metadata", scan.cardId);
     const data = await fetchScryfallCard(scan.cardId, scryfallCache);
     scan.name = data.name;
     scan.setCode = data.set;
@@ -799,6 +979,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest) {
     scan.priceUsd = data.prices?.usd ?? null;
     renderScanList(scans);
     await audioBus.playPriceTier(scan.priceUsd);
+    debugLog.info("scryfall metadata ready", data.name, data.set, data.prices?.usd ?? "n/a");
   }
 
   async function processFrame(frame, useBucket = true) {
@@ -827,6 +1008,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest) {
     const scan = ensureScanRecord(scans, confirmed.cardId);
     scan.count += 1;
     renderScanList(scans);
+    debugLog.info("confirmed scan", confirmed.cardId, `score=${confirmed.score.toFixed(4)}`);
     camera.flashConfirmed();
     await audioBus.playScanConfirmed();
     if (scan.name === scan.cardId) {
@@ -848,7 +1030,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest) {
         const frame = camera.captureFrame();
         processFrame(frame, true)
           .catch((error) => {
-            console.error(error);
+            debugLog.error("scan tick failed", error);
             setText("camera-badge", "Scan error");
           })
           .finally(() => {
@@ -857,6 +1039,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest) {
       }, SCAN_INTERVAL_MS);
     },
     async runSample() {
+      debugLog.info("running bundled sample frame");
       const sampleFrame = await loadImageToCanvas(`./assets/${manifest.sample_frame}`);
       setText("camera-badge", "Running sample");
       await processFrame(sampleFrame, false);
@@ -879,10 +1062,32 @@ async function loadManifest() {
   return manifest;
 }
 
+function formatBytes(value) {
+  if (!value) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
 async function boot() {
   const scans = [];
   const audioBus = createAudioBus();
-  const camera = new CameraSurface();
+  const debugLog = createDebugLog();
+  const loadingScreen = createLoadingScreen();
+  const camera = new CameraSurface(debugLog);
+
+  function setPhase(id, percent, text, note, state = "active") {
+    loadingScreen.progress(percent, text);
+    loadingScreen.step(id, state, note);
+    debugLog.info(text, note);
+  }
 
   renderNotes();
   renderScanList(scans);
@@ -890,36 +1095,76 @@ async function boot() {
   setupViewToggle();
   setupActions(scans);
   audioBus.preload();
+  debugLog.info("booting scanner");
+  loadingScreen.start("Preparing scanner runtime");
   camera.setLoading("Loading scanner");
 
   assertWebGpu();
   setText("webgpu-status", "Available");
+  loadingScreen.step("webgpu", "done", "Available");
+  loadingScreen.progress(8, "WebGPU available");
+  debugLog.info("webgpu available");
 
   const manifest = await loadManifest();
   renderManifestContract(manifest);
+  loadingScreen.step("manifest", "done", `v${manifest.version}`);
+  loadingScreen.progress(14, "Manifest loaded");
+  debugLog.info("manifest loaded", manifest.version);
 
+  loadingScreen.step("opencv", "active", "Downloading");
+  loadingScreen.progress(18, "Loading OpenCV runtime");
   const cv = await loadOpenCv();
   setText("models-status", "Loading models");
+  loadingScreen.step("opencv", "done", "Ready");
+  loadingScreen.progress(24, "OpenCV runtime ready");
+  debugLog.info("opencv runtime ready");
 
   const runtime = new BrowserRuntime(manifest, cv);
-  await runtime.load();
+  loadingScreen.step("detector", "active", "Queued");
+  loadingScreen.step("embedder", "active", "Queued");
+  loadingScreen.step("catalog", "active", "Queued");
+  await runtime.load((stage, ratio, loaded, total, cached) => {
+    const ranges = {
+      detector: [24, 44],
+      embedder: [44, 60],
+      catalog: [60, 96],
+    };
+    const [start, end] = ranges[stage];
+    const percent = start + (end - start) * ratio;
+    const note = cached ? "Cached" : `${formatBytes(loaded)} / ${formatBytes(total)}`;
+    const label = {
+      detector: "Loading corner detector",
+      embedder: "Loading embedder",
+      catalog: "Loading card catalog",
+    }[stage];
+    setPhase(stage, percent, label, note, ratio >= 1 ? "done" : "active");
+  });
   setText("models-status", "Models ready");
   setText("catalog-status", `${manifest.catalog.rows} cards ready`);
+  loadingScreen.progress(100, "Scanner ready");
+  debugLog.info("models and catalog ready", `${manifest.catalog.rows} rows`);
 
-  const loop = createScannerLoop(camera, runtime, scans, audioBus, manifest);
+  const loop = createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog);
   camera.bind(async () => {
+    debugLog.info("starting scan loop");
     loop.start();
   });
   camera.setReady();
   document.getElementById("run-sample").addEventListener("click", () => {
     loop.runSample().catch((error) => {
-      console.error(error);
+      debugLog.error("sample run failed", error);
       setText("camera-badge", "Sample failed");
     });
   });
+  loadingScreen.finish();
 }
 
 boot().catch((error) => {
   console.error(error);
   setText("webgpu-status", error.message);
+  document.body.dataset.loading = "true";
+  const loadingMessage = document.getElementById("loading-message");
+  if (loadingMessage) {
+    loadingMessage.textContent = error.message;
+  }
 });
