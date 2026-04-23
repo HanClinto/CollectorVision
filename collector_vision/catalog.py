@@ -243,7 +243,7 @@ class Catalog:
         Example::
 
             from collector_vision.games import Game
-            catalog = Catalog.for_games(Game.MTG, Game.POKEMON)
+            catalog = Catalog.for_games(Game.MTG, Game.YUGIOH)
         """
         loaded = [
             cls.for_game(g, embedding=embedding, cache_dir=cache_dir, offline=offline)
@@ -280,7 +280,7 @@ class Catalog:
         ----------
         embedding:
             Query vector — ``(D,)`` float32, L2-normalised.  Produce it with
-            ``catalog.embedder.embed([crop])[0]``.
+            ``catalog.embedder.embed(crop)``.
         top_k:
             Number of results to return.
 
@@ -290,10 +290,12 @@ class Catalog:
 
         Example::
 
-            catalog = Catalog.load("hf://HanClinto/milo/scryfall-mtg")
-            crop = detection.dewarp(image)
-            emb = catalog.embedder.embed([crop])[0]
-            hits = catalog.search(emb, top_k=3)
+            catalog   = Catalog.load("hf://HanClinto/milo/scryfall-mtg")
+            image     = cv2.imread("card.jpg")
+            detection = cvg.NeuralCornerDetector().detect(image)
+            crop      = detection.dewarp(image)
+            emb       = catalog.embedder.embed(crop)
+            hits      = catalog.search(emb, top_k=3)
             score, card_id = hits[0]
         """
         from collector_vision import retrieval
