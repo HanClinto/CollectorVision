@@ -6,7 +6,7 @@ Ship a static scanner demo that runs fully in the browser and can be hosted on
 GitHub Pages.
 
 Primary path only:
-- camera -> Cornelius -> OpenCV dewarp -> Milo -> local cosine search
+- camera -> Cornelius -> JS dewarp -> Milo -> local cosine search
 - mobile-first UI -> running scan list -> exportable results
 
 ## Browser Pipeline
@@ -34,8 +34,8 @@ Primary path only:
 ### 3. Dewarp
 
 - Convert normalized corners to pixel coordinates.
-- Use `cv.getPerspectiveTransform`.
-- Use `cv.warpPerspective`.
+- Solve the perspective transform in JS.
+- Warp the crop in JS into the canonical output.
 - Emit the canonical `252x352` crop.
 
 ### 4. Embedding
@@ -107,7 +107,6 @@ Do the same for the browser runtimes:
 - `vendor/onnxruntime-web/ort.all.min.mjs`
 - `vendor/onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs`
 - `vendor/onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm`
-- `vendor/opencv/opencv.js`
 
 ## Caching Strategy
 
@@ -130,6 +129,18 @@ Suggested stores:
   - `style.css`
   - `app.js`
   - asset files
+
+Long-term deploy model:
+
+- `main` holds app source
+- a separate asset refresh workflow builds the heavy generated bundle
+- that bundle is published as a GitHub release asset
+- Pages deploy fetches the prepared bundle from GitHub, not from HF
+
+See:
+
+- [ASSET_DEPLOY_PLAN.md](./ASSET_DEPLOY_PLAN.md)
+- [assets.bundle.json](./assets.bundle.json)
 
 ## Non-Goals
 
