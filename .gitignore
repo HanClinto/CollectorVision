@@ -15,3 +15,6 @@ build/
 test_output/
 test_images/
 media/
+examples/web_scanner/assets/
+examples/web_scanner/vendor/
+examples/web_scanner/bundle-metadata.json
