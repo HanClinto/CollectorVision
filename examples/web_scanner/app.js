@@ -712,17 +712,18 @@ class CameraSurface {
     if (!width || !height) {
       return;
     }
-    this.preview.width = width;
-    this.preview.height = height;
-    this.canvas.width = width;
-    this.canvas.height = height;
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+    this.preview.width = Math.round(width * dpr);
+    this.preview.height = Math.round(height * dpr);
+    this.canvas.width = Math.round(width * dpr);
+    this.canvas.height = Math.round(height * dpr);
   }
 
   coverCrop() {
     const vw = this.video.videoWidth;
     const vh = this.video.videoHeight;
-    const cssW = this.canvas.clientWidth || this.canvas.width;
-    const cssH = this.canvas.clientHeight || this.canvas.height;
+    const cssW = this.preview.clientWidth || this.canvas.clientWidth || this.video.clientWidth || vw;
+    const cssH = this.preview.clientHeight || this.canvas.clientHeight || this.video.clientHeight || vh;
     const scale = Math.max(cssW / vw, cssH / vh);
     const scaledW = vw * scale;
     const scaledH = vh * scale;
@@ -744,10 +745,9 @@ class CameraSurface {
   }
 
   captureFrame() {
-    const { sx, sy, sw, sh, dw, dh } = this.coverCrop();
-    this.frameCanvas.width = dw;
-    this.frameCanvas.height = dh;
-    this.frameCtx.drawImage(this.video, sx, sy, sw, sh, 0, 0, dw, dh);
+    this.frameCanvas.width = this.preview.width;
+    this.frameCanvas.height = this.preview.height;
+    this.frameCtx.drawImage(this.preview, 0, 0);
     return this.frameCanvas;
   }
 
@@ -790,13 +790,13 @@ class CameraSurface {
     }
     this.ctx.closePath();
     this.ctx.strokeStyle = "rgba(0, 230, 120, 0.92)";
-    this.ctx.lineWidth = 3;
+    this.ctx.lineWidth = Math.max(3, Math.round((window.devicePixelRatio || 1) * 2));
     this.ctx.stroke();
 
     this.ctx.fillStyle = "rgba(0, 230, 120, 0.92)";
     for (const [x, y] of pts) {
       this.ctx.beginPath();
-      this.ctx.arc(x, y, 5, 0, Math.PI * 2);
+      this.ctx.arc(x, y, Math.max(5, (window.devicePixelRatio || 1) * 4), 0, Math.PI * 2);
       this.ctx.fill();
     }
   }
@@ -1196,7 +1196,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog)
         processFrame(frame, true)
           .catch((error) => {
             debugLog.error("scan tick failed", error);
-            setText("camera-badge", "Scan error");
+            setText("camera-badge", error?.message || "Scan error");
           })
           .finally(() => {
             busy = false;
