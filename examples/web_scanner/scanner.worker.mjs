@@ -730,7 +730,15 @@ self.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
       const webgpuReady = await configureWebGpu();
-      const inferenceMode = webgpuReady ? "WebGPU" : "WASM";
+      // inferenceMode reflects what the sessions actually use, not just whether
+      // WebGPU hardware is available.  Currently both sessions use WASM only
+      // (see WorkerRuntime.load), so we report WASM even if the GPU is present.
+      // Update this when/if WebGPU EP is re-enabled for the embedder.
+      const detectorEp = "wasm";
+      const embedderEp = "wasm";
+      const inferenceMode = (detectorEp === "webgpu" || embedderEp === "webgpu")
+        ? `WebGPU (detect:${detectorEp} embed:${embedderEp})`
+        : "WASM";
       self.postMessage({ type: "progress", stage: "webgpu", inferenceMode });
       self.postMessage({ type: "progress", stage: "dewarp", ratio: 1 });
 
