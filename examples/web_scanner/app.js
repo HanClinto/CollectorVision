@@ -796,10 +796,16 @@ class CameraSurface {
       return;
     }
     const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+    const vw = this.video.videoWidth;
+    const vh = this.video.videoHeight;
+    // Use the actual video aspect ratio rather than the hardcoded 16/9
+    // PREVIEW_ASPECT so that portrait cameras (e.g. Android 720×1280) are not
+    // squeezed into a landscape process canvas.
+    const frameAspect = (vw && vh) ? vw / vh : PREVIEW_ASPECT;
     const nextDisplayWidth = Math.round(width * dpr);
     const nextDisplayHeight = Math.round(height * dpr);
-    const nextProcessWidth = Math.round(Math.max(width, height * PREVIEW_ASPECT) * dpr);
-    const nextProcessHeight = Math.round(nextProcessWidth / PREVIEW_ASPECT);
+    const nextProcessWidth = Math.round(Math.max(width, height * frameAspect) * dpr);
+    const nextProcessHeight = Math.round(nextProcessWidth / frameAspect);
     if (this.preview.width !== nextDisplayWidth || this.preview.height !== nextDisplayHeight) {
       this.preview.width = nextDisplayWidth;
       this.preview.height = nextDisplayHeight;
@@ -816,11 +822,9 @@ class CameraSurface {
       this.processCanvas.height = nextProcessHeight;
     }
 
-    const vw = this.video.videoWidth;
-    const vh = this.video.videoHeight;
     if (vw && vh) {
       this.diag.set("diag-video", `${vw} × ${vh}`);
-      this.diag.set("diag-video-aspect", `${(vw / vh).toFixed(3)} (frame ${PREVIEW_ASPECT.toFixed(3)})`);
+      this.diag.set("diag-video-aspect", `${(vw / vh).toFixed(3)} (process ${frameAspect.toFixed(3)})`);
     }
     this.diag.set("diag-dpr", String(dpr));
     this.diag.set("diag-process-canvas", `${nextProcessWidth} × ${nextProcessHeight}`);
@@ -835,27 +839,14 @@ class CameraSurface {
   }
 
   sourceCrop() {
-    const vw = this.video.videoWidth;
-    const vh = this.video.videoHeight;
-    const videoAspect = vw / vh;
-    let sx = 0;
-    let sy = 0;
-    let sw = vw;
-    let sh = vh;
-
-    if (videoAspect > PREVIEW_ASPECT) {
-      sw = vh * PREVIEW_ASPECT;
-      sx = (vw - sw) / 2;
-    } else {
-      sh = vw / PREVIEW_ASPECT;
-      sy = (vh - sh) / 2;
-    }
-
+    // Use the full video frame — do not crop to a fixed aspect ratio.
+    // A portrait camera (e.g. Android rear camera at 720×1280) would lose
+    // ~68% of its height if cropped to 16:9 here.
     return {
-      sx,
-      sy,
-      sw,
-      sh,
+      sx: 0,
+      sy: 0,
+      sw: this.video.videoWidth,
+      sh: this.video.videoHeight,
     };
   }
 
