@@ -8,16 +8,13 @@
   },
   "private": true,
   "scripts": {
-    "test": "node test_pipeline.mjs",
-    "test:webgpu": "node test_webgpu_vs_wasm.mjs",
-    "test:bisect": "node bisect_webgpu_versions.mjs"
+    "test": "node test_pipeline.mjs"
   },
   "dependencies": {
     "canvas": "^2.11.2",
     "onnxruntime-node": "^1.17.0"
   },
   "devDependencies": {
-    "onnxruntime-web": "1.24.3",
-    "playwright": "^1.44.0"
+    "onnxruntime-web": "1.24.3"
   }
 }

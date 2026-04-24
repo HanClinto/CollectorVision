@@ -436,11 +436,8 @@ async function configureWebGpu(debugLog) {
 
   ort.env.webgpu.adapter = adapter;
 
-  // Root cause resolved: the legacy JSEP backend (ort.all.min.mjs) silently
-  // produced all-zeros from the Conv operator across all tested ort-web
-  // versions 1.20–1.24.3.  Switching to the new WebGPU EP (ort.webgpu.min.mjs)
-  // fixed the issue on all tested versions including 1.24.3.
-  // See tests/js/bisect_webgpu_versions.mjs (TEST_EP=webgpu confirms PASS 1.24.3+).
+  // ort.webgpu.min.mjs (new WebGPU EP) is used — the legacy ort.all.min.mjs
+  // JSEP backend silently returned all-zeros across ort-web 1.20–1.24.3.
   ort.env.webgpu.forceFp16 = false;
 
   debugLog.info(
@@ -1285,9 +1282,7 @@ class BrowserRuntime {
     ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
     // Use the new WebGPU EP (ort.webgpu.min.mjs) with WASM fallback.
     // The legacy JSEP backend (ort.all.min.mjs) silently returned all-zeros
-    // on all tested versions (1.20–1.24.3) due to a WebGPU Conv bug.
-    // The new EP uses a separate WebGPU code path that is not affected.
-    // See tests/js/bisect_webgpu_versions.mjs — TEST_EP=webgpu passes 1.24.3+.
+    // for Conv ops across ort-web 1.20–1.24.3; new EP is not affected.
     this.detector = await ort.InferenceSession.create(detectorBuffer, {
       executionProviders: ["webgpu", "wasm"],
     });
