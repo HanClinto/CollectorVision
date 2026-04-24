@@ -277,6 +277,70 @@ await test('dewarp and embed produce a valid embedding', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// isUsableQuad regression tests
+// ---------------------------------------------------------------------------
+
+function quadArea(corners) {
+  let area = 0;
+  for (let i = 0; i < corners.length; i += 1) {
+    const [x1, y1] = corners[i];
+    const [x2, y2] = corners[(i + 1) % corners.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(area) * 0.5;
+}
+
+function isUsableQuad(corners) {
+  if (!corners || corners.length !== 4) return false;
+  const area = quadArea(corners);
+  if (!Number.isFinite(area) || area < 0.01) return false;
+  for (let i = 0; i < corners.length; i += 1) {
+    for (let j = i + 1; j < corners.length; j += 1) {
+      const dx = corners[i][0] - corners[j][0];
+      const dy = corners[i][1] - corners[j][1];
+      if ((dx * dx + dy * dy) < 0.0004) return false;
+    }
+  }
+  // Reject non-convex quads (mixed cross-product signs).
+  let pos = 0, neg = 0;
+  for (let i = 0; i < 4; i += 1) {
+    const prev = corners[(i + 3) % 4];
+    const curr = corners[i];
+    const next = corners[(i + 1) % 4];
+    const cross = (curr[0] - prev[0]) * (next[1] - curr[1])
+                - (curr[1] - prev[1]) * (next[0] - curr[0]);
+    if (cross > 0) pos += 1;
+    if (cross < 0) neg += 1;
+  }
+  if (pos > 0 && neg > 0) return false;
+  return true;
+}
+
+console.log('\nisUsableQuad');
+
+await test('rejects non-convex quad from issue #7 (portrait camera, 3 right-edge corners)', () => {
+  // Ordered corners captured from bug report cv_2026-04-24T21-19-49:
+  // three corners stacked on the right edge (model missed the top-left corner).
+  const bad = [
+    [0.8712919950, 0.1383170187],
+    [0.8652299642, 0.2562827169],
+    [0.8706384897, 0.5906347036],
+    [0.5520254373, 0.5551005601],
+  ];
+  assert(!isUsableQuad(bad), 'Expected non-convex quad to be rejected');
+});
+
+await test('accepts a well-formed card quad', () => {
+  const good = [[0.15, 0.10], [0.85, 0.12], [0.82, 0.88], [0.13, 0.86]];
+  assert(isUsableQuad(good), 'Expected valid quad to be accepted');
+});
+
+await test('rejects quad with area too small', () => {
+  const tiny = [[0.49, 0.49], [0.51, 0.49], [0.51, 0.51], [0.49, 0.51]];
+  assert(!isUsableQuad(tiny), 'Expected tiny quad to be rejected (area < 0.01)');
+});
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 

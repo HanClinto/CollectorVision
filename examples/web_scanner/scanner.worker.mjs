@@ -100,6 +100,25 @@ function isUsableQuad(corners) {
       }
     }
   }
+  // Reject non-convex quads.  When the model misses a corner (e.g. on a
+  // portrait camera where one corner is out of frame), it often returns 3
+  // nearly-collinear points on one edge and one outlier.  That produces a
+  // concave quad where one interior angle is reflex — the cross product at
+  // that vertex has the opposite sign to the other three.
+  let pos = 0;
+  let neg = 0;
+  for (let i = 0; i < 4; i += 1) {
+    const prev = corners[(i + 3) % 4];
+    const curr = corners[i];
+    const next = corners[(i + 1) % 4];
+    const cross = (curr[0] - prev[0]) * (next[1] - curr[1])
+                - (curr[1] - prev[1]) * (next[0] - curr[0]);
+    if (cross > 0) pos += 1;
+    if (cross < 0) neg += 1;
+  }
+  if (pos > 0 && neg > 0) {
+    return false;
+  }
   return true;
 }
 
