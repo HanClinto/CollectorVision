@@ -35,6 +35,7 @@ jobs:
         run: |
           SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
           sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/app.js
+          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/index.html
           echo "Stamped build ID: ${SHORT_SHA}"
 
       - name: Upload Pages artifact
