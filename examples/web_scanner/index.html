@@ -4,18 +4,18 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CollectorVision Web Scanner</title>
-    <!-- Cache-bust: if ?v= is absent or doesn't match the stamped BUILD_ID,
-         redirect to ?v=__BUILD_ID__.  This breaks caching loops: if this
-         index.html is itself stale, the canary check in app.js catches the
-         mismatch and redirects to ?v=<live build ID>, which is a URL the
-         browser has never cached, forcing a fresh fetch from the origin. -->
+    <!-- Strip the cache-busting ?v= param from the address bar immediately.
+         app.js fetches build.json on every boot; if it detects a stale page it
+         redirects to ?v=<newBuildId> so the browser bypasses its cache and
+         fetches a fresh index.html.  Once that fresh page loads we don't need
+         the param visible to users, so replaceState removes it silently. -->
     <script>
       (function () {
-        var buildId = "__BUILD_ID__";
         var params = new URLSearchParams(location.search);
-        if (params.get("v") !== buildId) {
-          params.set("v", buildId);
-          location.replace(location.pathname + "?" + params.toString() + location.hash);
+        if (params.has("v")) {
+          params.delete("v");
+          var rest = params.toString();
+          history.replaceState(null, "", location.pathname + (rest ? "?" + rest : "") + location.hash);
         }
       })();
     </script>
