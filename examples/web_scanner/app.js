@@ -1285,8 +1285,13 @@ class BrowserRuntime {
     );
 
     ort.env.wasm.numThreads = 1;
+    // Detector runs on WASM: WebGPU produces silently wrong corner outputs on
+    // some Android devices (verified: same input, CPU matches Python, WebGPU
+    // does not).  WASM is fast enough for the detector (384×384, runs every
+    // SCAN_INTERVAL_MS).  Embedder keeps WebGPU — it only runs on detected
+    // cards and is the heavier of the two models.
     this.detector = await ort.InferenceSession.create(detectorBuffer, {
-      executionProviders: ["webgpu"],
+      executionProviders: ["wasm"],
     });
     this.embedder = await ort.InferenceSession.create(embedderBuffer, {
       executionProviders: ["webgpu"],
