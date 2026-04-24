@@ -466,16 +466,25 @@ class WorkerRuntime {
     // NOTE: multi-threaded WASM requires SharedArrayBuffer / COOP+COEP headers.
     // GitHub Pages does not set these, so ort-web silently falls back to 1 thread.
     ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
-    // Corner detector always runs on WASM: WebGPU gives numerically wrong
-    // outputs for this model on several Android GPU architectures (ARM Mali,
-    // Adreno), producing coherent-but-incorrect corners that pass the convexity
-    // check and silently corrupt the entire pipeline downstream.
-    // The model is small enough that WASM is well within the 900ms scan budget.
+    // Both models run on WASM only.
+    //
+    // Corner detector (cornelius): the new WebGPU EP (ort.webgpu.min.mjs) gives
+    // numerically wrong outputs on Android ARM GPUs — coherent but incorrect corners
+    // that silently corrupt every downstream step.
+    //
+    // Embedder (milo): we have never validated milo's WebGPU output on Android in
+    // isolation, because every Android capture had wrong corners feeding the wrong
+    // crop to the embedder. Commit 1e66892 found both models broken under the legacy
+    // JSEP backend; aa0f88f switched to the new EP and assumed both were fixed based
+    // on desktop-only testing. Do not re-enable WebGPU for milo until a fresh Android
+    // capture (with correct WASM corners) confirms correct match scores.
+    //
+    // See ARCHITECTURE.md "Lessons Learned" for the full history.
     this.detector = await ort.InferenceSession.create(detectorBuffer, {
       executionProviders: ["wasm"],
     });
     this.embedder = await ort.InferenceSession.create(embedderBuffer, {
-      executionProviders: ["webgpu", "wasm"],
+      executionProviders: ["wasm"],
     });
 
     this.inputNames.detector = this.detector.inputNames[0];

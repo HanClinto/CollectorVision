@@ -169,8 +169,12 @@ Commit: `aa0f88f fix(webgpu): switch to new WebGPU EP (ort.webgpu.min.mjs)`
 ### Use `ort.webgpu.min.mjs` (new WebGPU EP) for the embedder
 
 The new EP (`ort.webgpu.min.mjs` + `ort-wasm-simd-threaded.asyncify.wasm`) fixes
-the JSEP Conv bug.  It works correctly for `milo.onnx` (embedder) on all tested
-devices and gives a significant speedup on desktop and high-end mobile GPUs.
+the JSEP Conv bug.  It works correctly for `milo.onnx` (embedder) on desktop.
+However, milo has **never been validated on Android in isolation**: every Android
+capture before the cornelius WASM fix had wrong corners feeding wrong crops to the
+embedder, so we could not distinguish embedder errors from corner errors.  Until a
+fresh Android capture (with correct WASM corners) confirms correct match scores, milo
+also runs on WASM.
 
 The new EP requires the **asyncify** WASM variant, not the jsep variant:
 ```
