@@ -707,7 +707,7 @@ function createDiagnostics() {
   const copyBtn = document.getElementById("copy-diag");
   if (copyBtn) {
     copyBtn.addEventListener("click", async () => {
-      const data = {};
+      const data = { buildId: BUILD_ID };
       for (const id of IDS) {
         data[LABELS[id]] = els[id]?.textContent ?? "—";
       }
@@ -998,15 +998,6 @@ class BrowserRuntime {
     this.dewarpCanvas.width = DEWARP_W;
     this.dewarpCanvas.height = DEWARP_H;
     this.dewarpCtx = this.dewarpCanvas.getContext("2d", { willReadFrequently: true });
-    // Reusable scratch canvas for preparing frames before detection.
-    // We center-crop the frame to the largest inscribed square so the model
-    // always sees a full-resolution square with no wasted padding pixels.
-    // A portrait 720×1280 frame letterboxed to 216×384 wastes 44% of the
-    // model's resolution; a center crop to 720×720 uses all 384×384.
-    this.detectorInputCanvas = document.createElement("canvas");
-    this.detectorInputCanvas.width = DETECTOR_SIZE;
-    this.detectorInputCanvas.height = DETECTOR_SIZE;
-    this.detectorInputCtx = this.detectorInputCanvas.getContext("2d", { willReadFrequently: true });
   }
 
   async load(onStage) {
@@ -1052,23 +1043,12 @@ class BrowserRuntime {
   }
 
   async detect(frameCanvas) {
-    // Center-crop the frame to the largest inscribed square, then scale to
-    // DETECTOR_SIZE×DETECTOR_SIZE.  This is strictly better than letterboxing
-    // for portrait cameras: a 720×1280 frame letterboxed to 384×384 only uses
-    // 216 of the 384 horizontal pixels; a center crop uses all 384.
-    // Edge case: landscape 1280×720 → scale fills width, tiny vertical crop.
-    const vw = frameCanvas.width;
-    const vh = frameCanvas.height;
-    // Scale so the short edge fills DETECTOR_SIZE exactly (overshoots on long edge).
-    const cropScale = DETECTOR_SIZE / Math.min(vw, vh);
-    const scaledW = Math.round(vw * cropScale);
-    const scaledH = Math.round(vh * cropScale);
-    // Negative pad = draw offset that clips the overflow off each edge.
-    const padX = Math.round((DETECTOR_SIZE - scaledW) / 2);
-    const padY = Math.round((DETECTOR_SIZE - scaledH) / 2);
-    this.detectorInputCtx.drawImage(frameCanvas, padX, padY, scaledW, scaledH);
-
-    const input = fillInputTensor(this.detectorInputCanvas, DETECTOR_SIZE);
+    // Squash the full frame to DETECTOR_SIZE×DETECTOR_SIZE, matching the Python
+    // _preprocess function exactly (cv2.resize to a square with no padding).
+    // The model was trained on squashed inputs so this is the correct path
+    // regardless of the frame's aspect ratio.  Cropping or letterboxing gives
+    // the model an input distribution it has never seen.
+    const input = fillInputTensor(frameCanvas, DETECTOR_SIZE);
     const outputs = await this.detector.run({
       [this.inputNames.detector]: new ort.Tensor("float32", input, [1, 3, DETECTOR_SIZE, DETECTOR_SIZE]),
     });
@@ -1078,13 +1058,12 @@ class BrowserRuntime {
       ? outputs[this.detector.outputNames[2]].data[0]
       : null;
 
-    // Map corners from [0,1] of the square detector input back to [0,1] of
-    // the original frame, reversing the center-crop transform.
+    // Corners are already in [0,1] of the full frame — no un-mapping needed.
     const points = [];
     for (let i = 0; i < 8; i += 2) {
       points.push([
-        Math.min(Math.max((cornersRaw[i] * DETECTOR_SIZE - padX) / scaledW, 0), 1),
-        Math.min(Math.max((cornersRaw[i + 1] * DETECTOR_SIZE - padY) / scaledH, 0), 1),
+        Math.min(Math.max(cornersRaw[i], 0), 1),
+        Math.min(Math.max(cornersRaw[i + 1], 0), 1),
       ]);
     }
 
