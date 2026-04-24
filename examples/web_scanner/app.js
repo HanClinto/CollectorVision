@@ -676,6 +676,13 @@ function setupCaptureButton(camera, runtime) {
     }
 
     const det = runtime._lastDetection ?? {};
+    const logEntries = Array.from(
+      document.querySelectorAll("#debug-log .debug-entry"),
+    ).reverse().map((el) => ({
+      level: el.dataset.level,
+      meta: el.querySelector(".debug-entry__meta")?.textContent ?? "",
+      message: el.querySelector(".debug-entry__message")?.textContent ?? "",
+    }));
     const meta = {
       captureId,
       buildId: BUILD_ID,
@@ -698,6 +705,7 @@ function setupCaptureButton(camera, runtime) {
       orderedCorners: det.corners ? det.corners.map(([x, y]) => ({ x, y })) : null,
       sharpness: det.sharpness ?? null,
       cardPresent: det.cardPresent ?? null,
+      consoleLog: logEntries,
     };
 
     // 1. Download the raw frame PNG (RGBA, lossless — cv2.imread() reads as BGR).
