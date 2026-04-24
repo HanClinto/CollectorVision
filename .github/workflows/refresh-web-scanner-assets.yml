@@ -1,0 +1,144 @@
+name: Refresh Web Scanner Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Force a rebuild even if the HF catalog fingerprint is unchanged
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "17 8 1 * *"
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install project
+        run: uv pip install --system -e .
+
+      - name: Resolve bundle target
+        id: bundle
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+
+          pointer = json.loads(Path("examples/web_scanner/assets.bundle.json").read_text(encoding="utf-8"))
+          catalog_key = pointer["catalog_key"]
+          if not catalog_key.startswith("hf://"):
+              raise SystemExit(f"Unsupported catalog key: {catalog_key}")
+          rest = catalog_key[len("hf://"):]
+          owner, repo, key = rest.split("/", 2)
+          print(f"release={pointer['release']}")
+          print(f"catalog_uri={catalog_key}")
+          print(f"repo={owner}/{repo}")
+          print(f"catalog_key_name={key}")
+          PY
+
+      - name: Resolve upstream fingerprint
+        id: upstream
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import urllib.request
+
+          repo = "${{ steps.bundle.outputs.repo }}"
+          catalog_key = "${{ steps.bundle.outputs.catalog_key_name }}"
+          url = f"https://huggingface.co/{repo}/resolve/main/catalogs/manifest.json"
+          with urllib.request.urlopen(url, timeout=30) as response:
+              manifest = json.loads(response.read().decode("utf-8"))
+          latest = manifest[catalog_key]["latest"]
+          print(f"catalog_filename={latest}")
+          print(f"bundle_version={latest.rsplit('.', 1)[0]}")
+          PY
+
+      - name: Download current release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .release
+          gh release download "${{ steps.bundle.outputs.release }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "web-scanner-assets-metadata.json" \
+            --dir .release || true
+
+      - name: Decide whether refresh is needed
+        id: decision
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+
+          force = "${{ inputs.force }}" == "true"
+          metadata_path = Path(".release/web-scanner-assets-metadata.json")
+          current = None
+          if metadata_path.exists():
+              current = json.loads(metadata_path.read_text(encoding="utf-8")).get("catalog_fingerprint")
+          upstream = "${{ steps.upstream.outputs.catalog_filename }}"
+          refresh = force or current != upstream
+          print(f"refresh={'true' if refresh else 'false'}")
+          print(f"current={current or ''}")
+          PY
+
+      - name: Skip unchanged bundle
+        if: steps.decision.outputs.refresh != 'true'
+        run: |
+          echo "Prepared asset bundle is already current."
+          echo "Current fingerprint: ${{ steps.decision.outputs.current }}"
+          echo "Upstream fingerprint: ${{ steps.upstream.outputs.catalog_filename }}"
+
+      - name: Export bundle
+        if: steps.decision.outputs.refresh == 'true'
+        run: |
+          rm -rf .web-scanner-build
+          python scripts/export_web_scanner_assets.py \
+            --repo "${{ steps.bundle.outputs.repo }}" \
+            --catalog-key "${{ steps.bundle.outputs.catalog_key_name }}" \
+            --bundle-version "${{ steps.upstream.outputs.bundle_version }}" \
+            --out-dir .web-scanner-build
+
+      - name: Package bundle
+        if: steps.decision.outputs.refresh == 'true'
+        run: |
+          tar --zstd -cf web-scanner-assets.tar.zst -C .web-scanner-build assets vendor bundle-metadata.json
+          cp .web-scanner-build/bundle-metadata.json web-scanner-assets-metadata.json
+
+      - name: Publish release assets
+        if: steps.decision.outputs.refresh == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ steps.bundle.outputs.release }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "${{ steps.bundle.outputs.release }}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Web Scanner Assets" \
+              --notes "Prepared asset bundle for the GitHub Pages scanner."
+          gh release upload "${{ steps.bundle.outputs.release }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber \
+            web-scanner-assets.tar.zst \
+            web-scanner-assets-metadata.json
+
+      - name: Trigger Pages deploy
+        if: steps.decision.outputs.refresh == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run deploy-pages.yml --repo "$GITHUB_REPOSITORY"
