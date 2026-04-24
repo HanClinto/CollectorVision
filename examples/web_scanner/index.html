@@ -4,6 +4,19 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CollectorVision Web Scanner</title>
+    <!-- Cache-bust: redirect to ?v=<BUILD_ID> so browsers always load the
+         latest deployed version without a manual hard-reload.  The redirect
+         only fires once per build (URL already includes the correct ?v=). -->
+    <script>
+      (function () {
+        var buildId = "__BUILD_ID__";
+        var params = new URLSearchParams(location.search);
+        if (params.get("v") !== buildId) {
+          params.set("v", buildId);
+          location.replace(location.pathname + "?" + params.toString() + location.hash);
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
