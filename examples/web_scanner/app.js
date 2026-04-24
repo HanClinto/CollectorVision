@@ -770,15 +770,17 @@ function setupCaptureButton(camera, runtime) {
     btn.textContent = "\u2026";
 
     try {
-      // Freeze a snapshot of the current processCanvas, then run detection
-      // on it so that framePng, detectorInputPng, and orderedCorners are all
-      // derived from the exact same frame (no cross-tick timing race).
+      // Snapshot the current processCanvas for the PNG.  Do NOT call
+      // runtime.detect() here — the scan loop's setInterval is also calling
+      // it concurrently on the same InferenceSession, and two overlapping
+      // await session.run() calls on one session produce corrupt outputs.
+      // Instead, reuse the most recent detection result from the scan loop.
       const snapshotCanvas = document.createElement("canvas");
       snapshotCanvas.width = camera.processCanvas.width;
       snapshotCanvas.height = camera.processCanvas.height;
       snapshotCanvas.getContext("2d").drawImage(camera.processCanvas, 0, 0);
 
-      const det = await runtime.detect(snapshotCanvas);
+      const det = runtime._lastDetection ?? {};
 
       const logEntries = Array.from(
         document.querySelectorAll("#debug-log .debug-entry"),
