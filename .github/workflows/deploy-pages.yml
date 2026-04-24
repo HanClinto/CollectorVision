@@ -28,6 +28,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Download prepared web scanner assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_NAME="$(python - <<'PY'
+          import json
+          with open("examples/web_scanner/assets.bundle.json", "r", encoding="utf-8") as f:
+              print(json.load(f)["release"])
+          PY
+          )"
+          mkdir -p /tmp/web-scanner-assets
+          gh release download "$RELEASE_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "web-scanner-assets.tar.zst" \
+            --pattern "web-scanner-assets-metadata.json" \
+            --dir /tmp/web-scanner-assets
+          rm -rf examples/web_scanner/assets examples/web_scanner/vendor examples/web_scanner/bundle-metadata.json
+          tar --zstd -xf /tmp/web-scanner-assets/web-scanner-assets.tar.zst -C examples/web_scanner
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
