@@ -463,8 +463,13 @@ class WorkerRuntime {
     // NOTE: multi-threaded WASM requires SharedArrayBuffer / COOP+COEP headers.
     // GitHub Pages does not set these, so ort-web silently falls back to 1 thread.
     ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
+    // Corner detector always runs on WASM: WebGPU gives numerically wrong
+    // outputs for this model on several Android GPU architectures (ARM Mali,
+    // Adreno), producing coherent-but-incorrect corners that pass the convexity
+    // check and silently corrupt the entire pipeline downstream.
+    // The model is small enough that WASM is well within the 900ms scan budget.
     this.detector = await ort.InferenceSession.create(detectorBuffer, {
-      executionProviders: ["webgpu", "wasm"],
+      executionProviders: ["wasm"],
     });
     this.embedder = await ort.InferenceSession.create(embedderBuffer, {
       executionProviders: ["webgpu", "wasm"],

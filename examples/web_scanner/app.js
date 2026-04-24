@@ -497,6 +497,7 @@ function setupCaptureButton(camera, captureState) {
           },
           devicePixelRatio: window.devicePixelRatio || 1,
           detectorSize: DETECTOR_SIZE,
+          inferenceMode: captureState.inferenceMode ?? null,
           detectorInput: data.detectorInput ?? null,
           rawCorners: data.rawCorners ?? null,
           orderedCorners: data.corners ? data.corners.map(([x, y]) => ({ x, y })) : null,
@@ -1301,7 +1302,7 @@ async function boot() {
   setText("models-status", "Loading models");
 
   scannerWorker.postMessage({ type: "init", manifest });
-  await scannerReady;
+  const inferenceMode = await scannerReady;
 
   setText("models-status", "Models ready");
   setText("catalog-status", `${manifest.catalog.rows} cards ready`);
@@ -1309,7 +1310,7 @@ async function boot() {
   debugLog.info("models and catalog ready", `${manifest.catalog.rows} rows`);
 
   // captureState is updated by the scanner result handler inside createScannerLoop.
-  const captureState = { lastResult: null, lastDetectorBitmap: null, lastCropBitmap: null, pendingCapture: false, onCapture: null };
+  const captureState = { lastResult: null, lastDetectorBitmap: null, lastCropBitmap: null, pendingCapture: false, onCapture: null, inferenceMode };
 
   const loop = createScannerLoop(
     camera, scannerWorker, enricherWorker, scans, audioBus, manifest, debugLog, diag, captureState,
