@@ -9,7 +9,8 @@
   "private": true,
   "scripts": {
     "test": "node test_pipeline.mjs",
-    "test:webgpu": "node test_webgpu_vs_wasm.mjs"
+    "test:webgpu": "node test_webgpu_vs_wasm.mjs",
+    "test:bisect": "node bisect_webgpu_versions.mjs"
   },
   "dependencies": {
     "canvas": "^2.11.2",

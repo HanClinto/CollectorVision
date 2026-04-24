@@ -49,7 +49,10 @@ const __dirname    = dirname(fileURLToPath(import.meta.url));
 const ROOT         = resolve(__dirname, '../..');
 const CAPTURES_DIR = resolve(ROOT, 'tests/fixtures/captures');
 const CORNELIUS    = resolve(ROOT, 'collector_vision/weights/cornelius.onnx');
-const ORT_DIST     = resolve(__dirname, 'node_modules/onnxruntime-web/dist');
+// ORT_DIST_OVERRIDE lets bisect_webgpu_versions.mjs point at a specific
+// version's extracted dist/ directory without touching node_modules.
+const ORT_DIST     = process.env.ORT_DIST_OVERRIDE
+  ?? resolve(__dirname, 'node_modules/onnxruntime-web/dist');
 
 const DETECTOR_SIZE = 384;
 const IMAGENET_MEAN = [0.485, 0.456, 0.406];
