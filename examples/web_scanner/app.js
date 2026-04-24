@@ -3,6 +3,8 @@ import * as ort from "./vendor/onnxruntime-web/ort.all.min.mjs";
 // Replaced by the deploy-pages CI workflow with the actual short commit SHA.
 const BUILD_ID = "__BUILD_ID__";
 
+const GITHUB_REPO = "HanClinto/CollectorVision";
+
 const DETECTOR_SIZE = 384;
 const EMBEDDER_SIZE = 448;
 const DEWARP_W = 252;
@@ -644,6 +646,86 @@ function updateDetectorPreview(scratchCanvas) {
   wrapper.hidden = false;
 }
 
+// Collect browser / device / camera environment info for the capture bundle
+// and for pre-populating GitHub bug reports.
+function collectSystemInfo(camera) {
+  const info = {
+    userAgent: navigator.userAgent,
+    platform: navigator.platform || null,
+    language: navigator.language,
+    hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+    deviceMemory: navigator.deviceMemory ?? null,   // Chrome only; undefined elsewhere
+    maxTouchPoints: navigator.maxTouchPoints ?? 0,
+    screen: {
+      width: screen.width,
+      height: screen.height,
+      colorDepth: screen.colorDepth,
+    },
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    },
+    webgpuAvailable: typeof navigator.gpu !== "undefined",
+    cameraTrackSettings: null,
+  };
+  if (camera?.stream) {
+    const track = camera.stream.getVideoTracks()[0];
+    if (track) {
+      info.cameraTrackSettings = track.getSettings();
+    }
+  }
+  return info;
+}
+
+// Build a GitHub new-issue URL pre-populated with a markdown summary table.
+// The title encodes the capture ID so the reporter knows which file to attach.
+function buildIssueUrl(captureId, systemInfo) {
+  const ua = systemInfo.userAgent.length > 160
+    ? systemInfo.userAgent.slice(0, 160) + "\u2026"
+    : systemInfo.userAgent;
+
+  const ts = systemInfo.cameraTrackSettings;
+  const trackStr = ts
+    ? [
+        ts.width && ts.height ? `${ts.width}×${ts.height}` : null,
+        ts.frameRate ? `@${Math.round(ts.frameRate)}fps` : null,
+        ts.facingMode ? `(${ts.facingMode})` : null,
+      ].filter(Boolean).join(" ")
+    : "—";
+
+  const lines = [
+    "## Scanner Bug Report",
+    "",
+    `**Capture file:** \`${captureId}.json.gz\` *(please attach this file below)*`,
+    "",
+    "**Problem description:**",
+    "<!-- Describe what went wrong and what card you were scanning -->",
+    "",
+    "| Field | Value |",
+    "|---|---|",
+    `| Build | \`${BUILD_ID}\` |`,
+    `| User Agent | ${ua} |`,
+    `| Platform | ${systemInfo.platform ?? "—"} |`,
+    `| Language | ${systemInfo.language} |`,
+    `| Viewport | ${systemInfo.viewport.width}×${systemInfo.viewport.height} |`,
+    `| Screen | ${systemInfo.screen.width}×${systemInfo.screen.height} (${systemInfo.screen.colorDepth}bpp) |`,
+    `| DPR | ${window.devicePixelRatio ?? 1} |`,
+    `| Touch points | ${systemInfo.maxTouchPoints} |`,
+    `| CPU cores | ${systemInfo.hardwareConcurrency ?? "—"} |`,
+    `| Device memory | ${systemInfo.deviceMemory != null ? `${systemInfo.deviceMemory} GB` : "—"} |`,
+    `| Camera track | ${trackStr} |`,
+    `| WebGPU | ${systemInfo.webgpuAvailable ? "available" : "unavailable"} |`,
+  ];
+
+  const params = new URLSearchParams({
+    title: `Bug report: ${captureId}`,
+    body: lines.join("\n"),
+    labels: "bug",
+  });
+
+  return `https://github.com/${GITHUB_REPO}/issues/new?${params}`;
+}
+
 // Downloads the current processCanvas as a PNG and a JSON sidecar.
 // The pair can be dropped into tests/fixtures/captures/ and picked up
 // automatically by the Python regression test suite.
@@ -680,10 +762,17 @@ function setupCaptureButton(camera, runtime) {
       const dataUrl = camera.processCanvas.toDataURL("image/png");
       const framePng = dataUrl.slice(dataUrl.indexOf(",") + 1);
 
+      const systemInfo = collectSystemInfo(camera);
+
       const bundle = {
         captureId,
         buildId: BUILD_ID,
         timestamp: new Date().toISOString(),
+        // Expected Scryfall card ID — null until manually identified by a developer.
+        // Set this field when filing a regression capture so the test suite can
+        // assert the correct identity once the bug is fixed.
+        expectedCardId: null,
+        systemInfo,
         videoSensor: {
           width: camera.video.videoWidth,
           height: camera.video.videoHeight,
@@ -733,6 +822,13 @@ function setupCaptureButton(camera, runtime) {
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+      // Reveal the Report link with a pre-populated GitHub issue URL.
+      const reportLink = document.getElementById("report-issue");
+      if (reportLink) {
+        reportLink.href = buildIssueUrl(captureId, systemInfo);
+        reportLink.hidden = false;
+      }
 
       btn.textContent = "Saved!";
       setTimeout(() => { btn.textContent = "Capture"; }, 2000);
