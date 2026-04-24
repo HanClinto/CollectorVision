@@ -583,6 +583,12 @@ dd {
   margin-bottom: 0.9rem;
 }
 
+.debug-dock__actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
 .debug-dock__clear {
   color: var(--ink);
   background: var(--accent-soft);

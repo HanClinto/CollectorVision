@@ -644,6 +644,79 @@ function updateDetectorPreview(scratchCanvas) {
   wrapper.hidden = false;
 }
 
+// Downloads the current processCanvas as a PNG and a JSON sidecar.
+// The pair can be dropped into tests/fixtures/captures/ and picked up
+// automatically by the Python regression test suite.
+function setupCaptureButton(camera, runtime) {
+  const btn = document.getElementById("capture-frame");
+  if (!btn) {
+    return;
+  }
+
+  btn.addEventListener("click", () => {
+    if (!camera.stream) {
+      btn.textContent = "No stream";
+      setTimeout(() => { btn.textContent = "Capture"; }, 1500);
+      return;
+    }
+
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const captureId = `cv_${ts}`;
+    btn.textContent = "\u2026";
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }
+
+    const det = runtime._lastDetection ?? {};
+    const meta = {
+      captureId,
+      buildId: BUILD_ID,
+      timestamp: new Date().toISOString(),
+      // Video sensor dimensions (before any DPR scaling).
+      videoSensor: {
+        width: camera.video.videoWidth,
+        height: camera.video.videoHeight,
+      },
+      // processCanvas is what captureFrame() copies and passes to detect().
+      // Its pixel dimensions match the native frame at full DPR resolution.
+      processCanvas: {
+        width: camera.processCanvas.width,
+        height: camera.processCanvas.height,
+      },
+      devicePixelRatio: window.devicePixelRatio || 1,
+      detectorSize: DETECTOR_SIZE,
+      detectorInput: runtime._lastDetectorInput ?? null,
+      rawCorners: runtime._lastRawCorners ?? null,
+      orderedCorners: det.corners ? det.corners.map(([x, y]) => ({ x, y })) : null,
+      sharpness: det.sharpness ?? null,
+      cardPresent: det.cardPresent ?? null,
+    };
+
+    // 1. Download the raw frame PNG (RGBA, lossless — cv2.imread() reads as BGR).
+    camera.processCanvas.toBlob((blob) => {
+      downloadBlob(blob, `${captureId}_frame.png`);
+      // 2. Download the JSON sidecar with a small delay so browsers don't block both.
+      setTimeout(() => {
+        const metaBlob = new Blob(
+          [JSON.stringify(meta, null, 2)],
+          { type: "application/json" },
+        );
+        downloadBlob(metaBlob, `${captureId}_meta.json`);
+        btn.textContent = "Saved!";
+        setTimeout(() => { btn.textContent = "Capture"; }, 2000);
+      }, 300);
+    }, "image/png");
+  });
+}
+
 class ScanBucket {
   constructor(fillAt = 2, cooldownMs = 3500) {
     this.fillAt = fillAt;
@@ -1090,12 +1163,14 @@ class BrowserRuntime {
 
     this._lastRawCorners = points.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("  ");
 
-    return {
+    const result = {
       corners: orderCorners(points),
       sharpness,
       confidence: sharpness ?? sigmoid(presenceLogit),
       cardPresent: (sharpness ?? sigmoid(presenceLogit)) >= MIN_SHARPNESS,
     };
+    this._lastDetection = result;
+    return result;
   }
 
   dewarp(frameCanvas, corners) {
@@ -1551,6 +1626,7 @@ async function boot() {
       setText("camera-badge", "Sample failed");
     });
   });
+  setupCaptureButton(camera, runtime);
   loadingScreen.finish();
 }
 
