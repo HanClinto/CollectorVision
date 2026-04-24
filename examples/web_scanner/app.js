@@ -428,18 +428,64 @@ function sigmoid(x) {
 }
 
 function orderCorners(points) {
-  // Canonical order: TL, TR, BR, BL — matches the Python _order_corners convention.
-  // TL = min(x+y), BR = max(x+y), TR = min(y-x), BL = max(y-x).
-  // NOTE: use (y - x), not (x - y), so that TR gets the most-negative value
-  // (large x, small y) and BL gets the most-positive value (small x, large y).
-  const sums = points.map(([x, y]) => x + y);
-  const diffs = points.map(([x, y]) => y - x);
-  return [
-    points[sums.indexOf(Math.min(...sums))],   // TL
-    points[diffs.indexOf(Math.min(...diffs))],  // TR
-    points[sums.indexOf(Math.max(...sums))],    // BR
-    points[diffs.indexOf(Math.max(...diffs))],  // BL
+  const cx = points.reduce((sum, [x]) => sum + x, 0) / points.length;
+  const cy = points.reduce((sum, [, y]) => sum + y, 0) / points.length;
+  const sorted = [...points].sort(
+    ([ax, ay], [bx, by]) => Math.atan2(ay - cy, ax - cx) - Math.atan2(by - cy, bx - cx),
+  );
+  let start = 0;
+  let best = Infinity;
+  for (let i = 0; i < sorted.length; i += 1) {
+    const score = sorted[i][0] + sorted[i][1];
+    if (score < best) {
+      best = score;
+      start = i;
+    }
+  }
+  const ordered = [
+    sorted[start],
+    sorted[(start + 1) % 4],
+    sorted[(start + 2) % 4],
+    sorted[(start + 3) % 4],
   ];
+  const signedArea = ordered.reduce((sum, [x1, y1], i) => {
+    const [x2, y2] = ordered[(i + 1) % ordered.length];
+    return sum + (x1 * y2 - x2 * y1);
+  }, 0);
+  if (signedArea < 0) {
+    return [ordered[0], ordered[3], ordered[2], ordered[1]];
+  }
+  return ordered;
+}
+
+function quadArea(corners) {
+  let area = 0;
+  for (let i = 0; i < corners.length; i += 1) {
+    const [x1, y1] = corners[i];
+    const [x2, y2] = corners[(i + 1) % corners.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(area) * 0.5;
+}
+
+function isUsableQuad(corners) {
+  if (!corners || corners.length !== 4) {
+    return false;
+  }
+  const area = quadArea(corners);
+  if (!Number.isFinite(area) || area < 0.01) {
+    return false;
+  }
+  for (let i = 0; i < corners.length; i += 1) {
+    for (let j = i + 1; j < corners.length; j += 1) {
+      const dx = corners[i][0] - corners[j][0];
+      const dy = corners[i][1] - corners[j][1];
+      if ((dx * dx + dy * dy) < 0.0004) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 function solveLinearSystem(matrix, vector) {
@@ -1148,10 +1194,13 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog)
 
   async function processFrame(frame, useBucket = true) {
     const detection = await runtime.detect(frame);
-    if (!detection.cardPresent) {
+    if (!detection.cardPresent || !isUsableQuad(detection.corners)) {
       camera.drawCorners(null);
       if (useBucket) {
         bucket.push(null);
+      }
+      if (detection.cardPresent && !isUsableQuad(detection.corners)) {
+        debugLog.warn("skipping invalid corner quad", detection.corners);
       }
       return;
     }
