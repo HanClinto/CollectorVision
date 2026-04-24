@@ -589,6 +589,31 @@ dd {
   flex-shrink: 0;
 }
 
+.panel--capture {
+  background: var(--accent-soft);
+  border-radius: 0.85rem;
+  border: 1px solid var(--line);
+}
+
+.capture-hint {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.capture-actions {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.capture-report-link {
+  text-align: center;
+  text-decoration: none;
+  color: var(--ink);
+  background: white;
+  border-color: var(--line);
+}
+
 .debug-dock__clear {
   color: var(--ink);
   background: var(--accent-soft);

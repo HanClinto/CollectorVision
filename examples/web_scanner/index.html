@@ -84,6 +84,20 @@
             <button class="sheet-close" id="settings-close" type="button">Close</button>
           </header>
 
+          <section class="panel panel--nested panel--capture">
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Debug</p>
+                <h2>Capture &amp; Report</h2>
+              </div>
+            </header>
+            <p class="capture-hint">Download a debug bundle, then open a pre-filled GitHub issue.</p>
+            <div class="capture-actions">
+              <button class="action-button action-button--block" id="capture-frame" type="button">⬇ Download Debug Bundle</button>
+              <a class="action-button action-button--block capture-report-link" id="report-issue" target="_blank" rel="noopener noreferrer" hidden>↗ Open GitHub Issue</a>
+            </div>
+          </section>
+
           <dl class="settings-grid">
             <div>
               <dt>Build</dt>
@@ -152,8 +166,6 @@
             <h2>Runtime Log</h2>
           </div>
           <div class="debug-dock__actions">
-            <button class="icon-button" id="capture-frame" type="button">Capture</button>
-            <a class="icon-button" id="report-issue" target="_blank" rel="noopener noreferrer" hidden>Report</a>
             <button class="icon-button debug-dock__clear" id="clear-debug" type="button">Clear</button>
           </div>
         </header>
