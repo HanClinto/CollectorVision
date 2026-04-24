@@ -39,9 +39,18 @@ const IMAGENET_STD  = [0.229, 0.224, 0.225];
 const TOLERANCE     = 0.02;
 const PAGE_TIMEOUT  = 90_000;
 
+// Which WebGPU entrypoint to test:
+//   'all'    → ort.all.min.mjs  (legacy JSEP backend, default)
+//   'webgpu' → ort.webgpu.min.mjs (new WebGPU backend, available 1.24+)
+// Override with: TEST_EP=webgpu node bisect_webgpu_versions.mjs
+const TEST_EP = process.env.TEST_EP ?? 'all';
+const ORT_MJS = TEST_EP === 'webgpu' ? 'ort.webgpu.min.mjs' : 'ort.all.min.mjs';
+
 // Versions to test, oldest → newest.
 // WebGPU JSEP first appeared in ort-web ~1.19; older versions will be SKIPped.
-const VERSIONS = [
+// 1.25.0-dev.20260209: last dev build BEFORE PR #27249 (merged Feb 11)
+// 1.25.0-dev.20260212: first dev build AFTER PR #27249 merge
+const ALL_VERSIONS = [
   '1.17.3',
   '1.18.0',
   '1.19.0',
@@ -53,7 +62,16 @@ const VERSIONS = [
   '1.23.2',
   '1.24.1',
   '1.24.3',
+  '1.25.0-dev.20260209-a3749f1353',   // pre-fix (last before PR #27249)
+  '1.25.0-dev.20260212-1a71a5f46e',   // post-fix (first after PR #27249)
+  '1.25.0-dev.20260303-e7e64dc112',   // post-fix
+  '1.26.0-dev.20260410-5e55544225',   // latest dev
 ];
+
+// Optionally filter via VERSIONS_ONLY=1.24.3,1.25.0-dev.20260212-1a71a5f46e
+const VERSIONS = process.env.VERSIONS_ONLY
+  ? process.env.VERSIONS_ONLY.split(',').map(v => v.trim())
+  : ALL_VERSIONS;
 
 // ─── synthetic input ──────────────────────────────────────────────────────
 
@@ -139,7 +157,7 @@ const TOLERANCE     = ${TOLERANCE};
 
 async function run() {
   let ort;
-  try { ort = await import('/ort.all.min.mjs'); }
+  try { ort = await import('/${ORT_MJS}'); }
   catch(e) {
     window.__result = { version: '${version}', error: 'import: ' + e.message };
     window.__done = true; return;
@@ -198,6 +216,7 @@ run().catch(e => {
 async function main() {
   console.log('='.repeat(62));
   console.log('  ort-web WebGPU bisect — Cornelius model (synthetic input)');
+  console.log(`  EP entrypoint: ${ORT_MJS}  (TEST_EP=${TEST_EP})`);
   console.log(`  Versions: ${VERSIONS.join('  ')}`);
   console.log(`  Tolerance: ${TOLERANCE}`);
   console.log('='.repeat(62) + '\n');
@@ -258,13 +277,17 @@ async function main() {
     const distFiles = readdirSync(distDir);
 
     // Only ESM builds have WebGPU; older versions shipped UMD ort.all.min.js
-    const mainMjs = distFiles.find(f => f === 'ort.all.min.mjs');
+    const mainMjs = distFiles.find(f => f === ORT_MJS)
+                 ?? distFiles.find(f => f === 'ort.all.min.mjs');
     if (!mainMjs) {
       const hasJs = distFiles.find(f => f === 'ort.all.min.js');
       console.log(`  SKIP: no ESM build (found: ${hasJs ?? 'nothing'}) — WebGPU not in this version`);
       results.push({ version, skip: 'no ESM / WebGPU EP' });
       try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
       continue;
+    }
+    if (mainMjs !== ORT_MJS) {
+      console.log(`  NOTE: ${ORT_MJS} not found — falling back to ${mainMjs}`);
     }
 
     // Build static file map: serve every .mjs + .wasm from dist/
@@ -276,8 +299,8 @@ async function main() {
       }
     }
     // canonical entry point name the page uses
-    if (!staticFiles['/ort.all.min.mjs']) {
-      staticFiles['/ort.all.min.mjs'] = staticFiles[`/${mainMjs}`];
+    if (!staticFiles[`/${ORT_MJS}`]) {
+      staticFiles[`/${ORT_MJS}`] = staticFiles[`/${mainMjs}`];
     }
 
     const hasJsep = distFiles.some(f => f.includes('jsep'));

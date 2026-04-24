@@ -41,10 +41,14 @@ ORT_VERSION = "1.24.3"
 
 ORT_TARBALL = f"https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-{ORT_VERSION}.tgz"
 
+# ort.webgpu.min.mjs uses the new WebGPU EP (not the legacy JSEP backend).
+# The legacy ort.all.min.mjs + jsep wasm silently returned wrong outputs for
+# all ort-web versions 1.20–1.24.3 due to a Conv bug in the JSEP backend.
+# The new EP requires the asyncify WASM for its fallback WASM execution path.
 ORT_FILES = [
-    "package/dist/ort.all.min.mjs",
-    "package/dist/ort-wasm-simd-threaded.jsep.mjs",
-    "package/dist/ort-wasm-simd-threaded.jsep.wasm",
+    "package/dist/ort.webgpu.min.mjs",
+    "package/dist/ort-wasm-simd-threaded.asyncify.mjs",
+    "package/dist/ort-wasm-simd-threaded.asyncify.wasm",
 ]
 
 

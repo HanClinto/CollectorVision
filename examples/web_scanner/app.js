@@ -1,4 +1,4 @@
-import * as ort from "./vendor/onnxruntime-web/ort.all.min.mjs";
+import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs";
 
 // Replaced by the deploy-pages CI workflow with the actual short commit SHA.
 const BUILD_ID = "__BUILD_ID__";
@@ -431,24 +431,11 @@ async function configureWebGpu(debugLog) {
 
   ort.env.webgpu.adapter = adapter;
 
-  // TODO: investigate Android corner collapse (GitHub issue #1).
-  //
-  // On several Android devices (Chrome 147, Qualcomm Adreno) the WebGPU EP
-  // produces corners clustered at x≈0.11 regardless of card position, while
-  // the same model on Node.js CPU gives correct corners.
-  //
-  // Hypothesis: a broken shader kernel for a specific op (grouped conv,
-  // depth-wise conv, or layer norm) in the ORT WebGPU EP on mobile GPUs.
-  //
-  // What has been ruled out:
-  //   - JS preprocessing bugs: JS-CPU matches Python exactly
-  //   - fp16 input precision: rounding inputs to fp16 before float32 inference
-  //     does not reproduce the collapse (corners unchanged to 4 decimal places)
-  //   - Full-model fp16: converting all weights+activations to fp16 also does
-  //     not reproduce the collapse — the model is numerically robust to fp16
-  //
-  // forceFp16=false is a low-cost mitigation attempt (no confirmed reproduction,
-  // needs device testing to verify whether it helps).
+  // Root cause resolved: the legacy JSEP backend (ort.all.min.mjs) silently
+  // produced all-zeros from the Conv operator across all tested ort-web
+  // versions 1.20–1.24.3.  Switching to the new WebGPU EP (ort.webgpu.min.mjs)
+  // fixed the issue on all tested versions including 1.24.3.
+  // See tests/js/bisect_webgpu_versions.mjs (TEST_EP=webgpu confirms PASS 1.24.3+).
   ort.env.webgpu.forceFp16 = false;
 
   debugLog.info(
@@ -1290,15 +1277,16 @@ class BrowserRuntime {
     // so ort-web will silently fall back to 1 thread there.  The cap of 4
     // avoids excessive memory use on high-core-count desktops.
     ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
-    // Both models run on WASM: WebGPU produces silently wrong outputs on
-    // some Android devices for both the detector and the embedder (verified
-    // across captures: same input, CPU/Python agree, WebGPU does not).
-    // See tests/js/test_webgpu_vs_wasm.mjs for a reproducibility harness.
+    // Use the new WebGPU EP (ort.webgpu.min.mjs) with WASM fallback.
+    // The legacy JSEP backend (ort.all.min.mjs) silently returned all-zeros
+    // on all tested versions (1.20–1.24.3) due to a WebGPU Conv bug.
+    // The new EP uses a separate WebGPU code path that is not affected.
+    // See tests/js/bisect_webgpu_versions.mjs — TEST_EP=webgpu passes 1.24.3+.
     this.detector = await ort.InferenceSession.create(detectorBuffer, {
-      executionProviders: ["wasm"],
+      executionProviders: ["webgpu", "wasm"],
     });
     this.embedder = await ort.InferenceSession.create(embedderBuffer, {
-      executionProviders: ["wasm"],
+      executionProviders: ["webgpu", "wasm"],
     });
 
     this.inputNames.detector = this.detector.inputNames[0];
