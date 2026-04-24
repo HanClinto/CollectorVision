@@ -41,10 +41,15 @@ ORT_VERSION = "1.24.3"
 
 ORT_TARBALL = f"https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-{ORT_VERSION}.tgz"
 
-# ort.webgpu.min.mjs uses the new WebGPU EP (not the legacy JSEP backend).
-# The legacy ort.all.min.mjs + jsep wasm silently returned wrong outputs for
-# all ort-web versions 1.20–1.24.3 due to a Conv bug in the JSEP backend.
-# The new EP requires the asyncify WASM for its fallback WASM execution path.
+# CRITICAL: use ort.webgpu.min.mjs (new WebGPU EP), NOT ort.all.min.mjs (legacy JSEP).
+# The legacy ort.all.min.mjs + ort-wasm-simd-threaded.jsep.wasm bundle uses the JSEP
+# backend which silently returns all-zeros for Conv ops on Android (all ort-web
+# versions 1.20-1.24.3).  The new EP fixes this but requires the asyncify WASM variant.
+#
+# Additionally, even the new WebGPU EP gives numerically wrong outputs for
+# cornelius.onnx (corner detector) on Android ARM GPUs (armv81, Chrome 147,
+# ort-web 1.24.3).  The scanner.worker.mjs therefore runs the detector on WASM only.
+# See ARCHITECTURE.md "Lessons Learned" section for the full history.
 ORT_FILES = [
     "package/dist/ort.webgpu.min.mjs",
     "package/dist/ort-wasm-simd-threaded.asyncify.mjs",

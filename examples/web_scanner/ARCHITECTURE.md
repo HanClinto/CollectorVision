@@ -21,7 +21,7 @@ Primary path only:
 ### 2. Detection
 
 - Load `cornelius.onnx` with `onnxruntime-web`.
-- Use the WebGPU execution provider only.
+- **Always run on WASM** — see Lessons Learned below.
 - Match Python preprocessing:
   - BGR/RGB handling
   - resize to model input
@@ -104,9 +104,11 @@ Hugging Face as the source used by the export step, not as a direct runtime
 dependency for GitHub Pages.
 
 Do the same for the browser runtimes:
-- `vendor/onnxruntime-web/ort.all.min.mjs`
-- `vendor/onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs`
-- `vendor/onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm`
+- `vendor/onnxruntime-web/ort.webgpu.min.mjs` — new WebGPU EP (not the legacy JSEP bundle)
+- `vendor/onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs` — asyncify WASM for WebGPU EP fallback
+- `vendor/onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm`
+
+> **Do NOT use** `ort.all.min.mjs` or `ort-wasm-simd-threaded.jsep.*` — see Lessons Learned.
 
 ## Caching Strategy
 
@@ -147,5 +149,49 @@ See:
 - no server lookup
 - no pHash
 - no Canny fallback
-- no non-WebGPU backend
 - no desktop-first layout
+
+---
+
+## Lessons Learned: onnxruntime-web Execution Providers
+
+### Do NOT use the legacy JSEP backend (`ort.all.min.mjs`)
+
+The legacy bundle (`ort.all.min.mjs` + `ort-wasm-simd-threaded.jsep.wasm`) uses
+the JSEP (JavaScript EP) backend for WebGPU.  It silently returns all-zeros for
+Conv operator outputs across **all ort-web versions 1.20–1.24.3** on Android
+(replicated on Chrome/Chromium on ARM, Adreno, and Mali GPUs).  The outputs look
+valid (non-NaN, non-Inf) so inference appears to succeed while producing completely
+wrong results.  Fixed by switching to the *new* WebGPU EP (see below).
+
+Commit: `aa0f88f fix(webgpu): switch to new WebGPU EP (ort.webgpu.min.mjs)`
+
+### Use `ort.webgpu.min.mjs` (new WebGPU EP) for the embedder
+
+The new EP (`ort.webgpu.min.mjs` + `ort-wasm-simd-threaded.asyncify.wasm`) fixes
+the JSEP Conv bug.  It works correctly for `milo.onnx` (embedder) on all tested
+devices and gives a significant speedup on desktop and high-end mobile GPUs.
+
+The new EP requires the **asyncify** WASM variant, not the jsep variant:
+```
+ort.webgpu.min.mjs                         ← new EP entry point
+ort-wasm-simd-threaded.asyncify.mjs/.wasm  ← required WASM fallback
+```
+
+### Always run `cornelius.onnx` (corner detector) on WASM
+
+Even with the new WebGPU EP, `cornelius.onnx` produces numerically wrong
+outputs on Android ARM GPU architectures (confirmed armv81 Chrome 147,
+ort-web 1.24.3).  The outputs are coherent (non-zero, convex quads that
+pass `isUsableQuad`) but point to an entirely wrong region of the frame.
+Wrong corners cascade silently through dewarp → embed → search with no
+error signal.
+
+This is distinct from the JSEP all-zeros bug; it is a model-specific
+numerical issue with the new WebGPU EP on ARM.
+
+`cornelius` is small enough that WASM completes comfortably within the
+900 ms scan interval.  Always use `executionProviders: ["wasm"]` for it.
+
+Commit: `c8defb1 fix: force corner detector (cornelius) to WASM-only`
+Diagnosed from: issue #9 capture bundle (build 7ed8f8f)

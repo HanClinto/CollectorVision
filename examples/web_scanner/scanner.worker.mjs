@@ -392,8 +392,11 @@ async function configureWebGpu() {
   });
 
   ort.env.webgpu.adapter = adapter;
-  // ort.webgpu.min.mjs (new WebGPU EP) — legacy JSEP backend silently returned
-  // all-zeros for Conv ops across ort-web 1.20–1.24.3; new EP is not affected.
+  // ort.webgpu.min.mjs (new WebGPU EP) — the legacy ort.all.min.mjs JSEP backend
+  // silently returned all-zeros for Conv ops on Android (ort-web 1.20–1.24.3).
+  // The new EP fixes that, but cornelius.onnx still produces numerically wrong
+  // (coherent but incorrect) corner outputs on Android ARM GPUs even with the new EP.
+  // See ARCHITECTURE.md “Lessons Learned” for the full history.
   ort.env.webgpu.forceFp16 = false;
 
   return true;
