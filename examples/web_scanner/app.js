@@ -431,9 +431,29 @@ async function configureWebGpu(debugLog) {
 
   ort.env.webgpu.adapter = adapter;
 
+  // TODO: investigate Android corner collapse (GitHub issue #1).
+  //
+  // On several Android devices (Chrome 147, Qualcomm Adreno) the WebGPU EP
+  // produces corners clustered at x≈0.11 regardless of card position, while
+  // the same model on Node.js CPU gives correct corners.
+  //
+  // Hypothesis: a broken shader kernel for a specific op (grouped conv,
+  // depth-wise conv, or layer norm) in the ORT WebGPU EP on mobile GPUs.
+  //
+  // What has been ruled out:
+  //   - JS preprocessing bugs: JS-CPU matches Python exactly
+  //   - fp16 input precision: rounding inputs to fp16 before float32 inference
+  //     does not reproduce the collapse (corners unchanged to 4 decimal places)
+  //   - Full-model fp16: converting all weights+activations to fp16 also does
+  //     not reproduce the collapse — the model is numerically robust to fp16
+  //
+  // forceFp16=false is a low-cost mitigation attempt (no confirmed reproduction,
+  // needs device testing to verify whether it helps).
+  ort.env.webgpu.forceFp16 = false;
+
   debugLog.info(
     "webgpu adapter ready",
-    `maxStorageBuffersPerShaderStage=${requestedStorageBuffers}`,
+    `maxStorageBuffersPerShaderStage=${requestedStorageBuffers}, fp16=disabled`,
   );
 }
 
@@ -750,7 +770,16 @@ function setupCaptureButton(camera, runtime) {
     btn.textContent = "\u2026";
 
     try {
-      const det = runtime._lastDetection ?? {};
+      // Freeze a snapshot of the current processCanvas, then run detection
+      // on it so that framePng, detectorInputPng, and orderedCorners are all
+      // derived from the exact same frame (no cross-tick timing race).
+      const snapshotCanvas = document.createElement("canvas");
+      snapshotCanvas.width = camera.processCanvas.width;
+      snapshotCanvas.height = camera.processCanvas.height;
+      snapshotCanvas.getContext("2d").drawImage(camera.processCanvas, 0, 0);
+
+      const det = await runtime.detect(snapshotCanvas);
+
       const logEntries = Array.from(
         document.querySelectorAll("#debug-log .debug-entry"),
       ).reverse().map((el) => ({
@@ -759,11 +788,22 @@ function setupCaptureButton(camera, runtime) {
         message: el.querySelector(".debug-entry__message")?.textContent ?? "",
       }));
 
-      // Encode the processCanvas as a base64 PNG data URL, then strip the
-      // "data:image/png;base64," prefix so the Python side has raw b64 bytes.
-      // toDataURL() is synchronous and works even for large canvases.
-      const dataUrl = camera.processCanvas.toDataURL("image/png");
+      // Full-resolution frame — what Python uses to re-run the pipeline.
+      const dataUrl = snapshotCanvas.toDataURL("image/png");
       const framePng = dataUrl.slice(dataUrl.indexOf(",") + 1);
+
+      // Raw RGBA pixel bytes from the 384×384 canvas that was fed to the
+      // detector model.  Stored as base64-encoded raw Uint8ClampedArray bytes
+      // (no PNG encoding, no color-space metadata) so Python can reconstruct
+      // the exact values with np.frombuffer(...).reshape(384, 384, 4).
+      // Compare with python-detector-input.npy from generate_manifests.py to
+      // identify any preprocessing divergence.
+      const detInputImageData = runtime.detectorScratchCanvas
+        .getContext("2d", { willReadFrequently: true })
+        .getImageData(0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
+      const detectorInputRgba = btoa(
+        String.fromCharCode(...new Uint8Array(detInputImageData.data.buffer))
+      );
 
       const systemInfo = collectSystemInfo(camera);
 
@@ -793,9 +833,16 @@ function setupCaptureButton(camera, runtime) {
         sharpness: det.sharpness ?? null,
         cardPresent: det.cardPresent ?? null,
         consoleLog: logEntries,
-        // Inline lossless PNG — base64 encoded, no data-URI prefix.
+        // Full-resolution lossless PNG of the frame that was detected.
+        // framePng, detectorInputRgba, and orderedCorners all come from the
+        // same frozen snapshot (no cross-tick timing race).
         // Python: cv2.imdecode(np.frombuffer(base64.b64decode(bundle["framePng"]), np.uint8), cv2.IMREAD_COLOR)
         framePng,
+        // Raw RGBA pixel bytes (Uint8ClampedArray) from the 384×384 canvas
+        // that was fed into the corner detector.
+        // Decode in Python: np.frombuffer(base64.b64decode(bundle["detectorInputRgba"]), np.uint8).reshape(384, 384, 4)
+        // Compare with python-detector-input.npy to find preprocessing divergence.
+        detectorInputRgba,
       };
 
       // Gzip-compress the JSON bundle using the built-in CompressionStream API

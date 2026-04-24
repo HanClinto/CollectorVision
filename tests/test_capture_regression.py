@@ -12,9 +12,9 @@ button in the web scanner) into ``tests/fixtures/captures/``, then run::
 
     python scripts/ingest_bug_reports.py <issue-number>
 
-to annotate each bundle with ``expectedCardId``, ``pythonCorners``, and
-``knownIssue`` metadata.  The only field required for a test to assert
-anything meaningful is ``expectedCardId``.
+to annotate each bundle with ``expectedCardId`` and generate per-pipeline
+manifests.  The only field required for a test to assert anything meaningful
+is ``expectedCardId``.
 
 What is asserted
 ----------------
@@ -23,11 +23,8 @@ What is asserted
   ``expectedCardId`` as the top-1 hit.  Skipped (with a warning) if
   ``expectedCardId`` is not set in the bundle.
 
-The bundle also stores ``orderedCorners`` (browser-reported at capture time),
-``pythonCorners`` (CPU reference), ``knownIssue`` (GitHub URL if a bug was
-active), and ``consoleLog``.  These are available for manual debugging but
-do not drive pass/fail status — a picture either identifies to the right card
-or it does not.
+Cross-pipeline comparison (corners, embeddings) is handled by
+``test_pipeline_consistency.py``, which reads pre-generated manifests.
 """
 from __future__ import annotations
 
@@ -104,8 +101,7 @@ class CaptureRegressionTests(unittest.TestCase):
         self.assertTrue(
             detection.card_present,
             f"{capture_path.name}: no card detected in frame "
-            f"(sharpness={detection.sharpness:.3f}). "
-            f"knownIssue={bundle.get('knownIssue')!r}",
+            f"(sharpness={detection.sharpness:.3f}).",
         )
 
         crop = detection.dewarp(bgr)
@@ -116,9 +112,7 @@ class CaptureRegressionTests(unittest.TestCase):
         self.assertEqual(
             top_id,
             expected_card_id,
-            f"{capture_path.name}: expected {expected_card_id!r}, got {top_id!r}. "
-            f"knownIssue={bundle.get('knownIssue')!r}  "
-            f"systemInfo={bundle.get('systemInfo', {}).get('userAgent', '?')!r}",
+            f"{capture_path.name}: expected {expected_card_id!r}, got {top_id!r}.",
         )
 
 

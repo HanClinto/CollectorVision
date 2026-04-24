@@ -18,3 +18,8 @@ media/
 examples/web_scanner/assets/
 examples/web_scanner/vendor/
 examples/web_scanner/bundle-metadata.json
+# Capture bundles and generated manifests live in GitHub issue attachments.
+# Download with: python scripts/ingest_bug_reports.py
+# The .gitkeep preserves the directory; everything else is local-only.
+tests/fixtures/captures/*
+!tests/fixtures/captures/.gitkeep

@@ -10,14 +10,14 @@
  * - Regressions in fillInputTensor (wrong channel order, wrong normalisation)
  * - Regressions in orderCorners (wrong TL/TR/BR/BL assignment)
  * - Regressions in model output parsing (reading wrong tensor index / shape)
- * - Drift between the JS and Python preprocessing pipelines
+ * - Drift between the JS-CPU and Python preprocessing pipelines
  *
  * What this does NOT catch
  * ------------------------
  * - WebGPU execution-provider bugs (e.g. the Android fp16 precision issue in
  *   GitHub issue #1).  Those require device testing or a Playwright+WebGPU
- *   setup.  The Python test_capture_regression.py suite carries the
- *   currently-failing browser-corners assertion for that bug.
+ *   setup.  The js-webgpu manifest (extracted at ingest time from the live
+ *   browser capture) is stored for reference in tests/fixtures/captures/.
  *
  * Usage
  * -----
@@ -25,15 +25,20 @@
  *   npm install
  *   npm test
  *
+ * This script writes js-cpu manifests and dewarp PNGs to tests/fixtures/captures/
+ * so that test_pipeline_consistency.py can compare across all pipelines.
+ *
  * Adding captures
  * ---------------
- * Drop .json.gz bundles into tests/fixtures/captures/ and re-run the ingest
- * script so each bundle has pythonCorners annotated:
+ * Drop .json.gz bundles into tests/fixtures/captures/ and run:
  *
  *   python scripts/ingest_bug_reports.py <issue-number>
+ *
+ * That generates the python and js-webgpu manifests, then re-run npm test here
+ * to generate the js-cpu manifest.
  */
 
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, writeFileSync } from 'fs';
 import { resolve, dirname, basename }            from 'path';
 import { fileURLToPath }                         from 'url';
 import { gunzipSync }                            from 'zlib';
@@ -44,13 +49,19 @@ const __dirname      = dirname(fileURLToPath(import.meta.url));
 const ROOT           = resolve(__dirname, '../..');
 const CAPTURES_DIR   = resolve(ROOT, 'tests/fixtures/captures');
 const CORNELIUS_PATH = resolve(ROOT, 'collector_vision/weights/cornelius.onnx');
+const MILO_PATH      = resolve(ROOT, 'collector_vision/weights/milo.onnx');
 
 // Must stay in sync with app.js constants.
 const DETECTOR_SIZE    = 384;
+const EMBEDDER_SIZE    = 448;
+const DEWARP_W         = 252;
+const DEWARP_H         = 352;
 const IMAGENET_MEAN    = [0.485, 0.456, 0.406];
 const IMAGENET_STD     = [0.229, 0.224, 0.225];
 const MIN_SHARPNESS    = 0.02;
-const CORNER_TOLERANCE = 0.15;   // normalised units; matches Python regression test
+const CORNER_TOLERANCE = 0.15;    // normalised units
+const EMBEDDING_MIN_DOT = 0.90;   // minimum cosine similarity between pipelines
+                                   // (PIL bilinear vs browser canvas drawImage give ~0.93)
 
 // ---------------------------------------------------------------------------
 // Minimal test runner (compatible with Node 16+)
@@ -135,12 +146,176 @@ function orderCorners(points) {
 function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
 
 // ---------------------------------------------------------------------------
-// ONNX detector session — loaded once, shared across all tests.
+// Dewarp helpers — verbatim port of the functions from app.js.
+// Any changes to these functions in app.js MUST be reflected here.
+// ---------------------------------------------------------------------------
+
+function solveLinearSystem(matrix, vector) {
+  const size = vector.length;
+  const a = matrix.map((row, index) => [...row, vector[index]]);
+
+  for (let col = 0; col < size; col += 1) {
+    let pivot = col;
+    for (let row = col + 1; row < size; row += 1) {
+      if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) {
+        pivot = row;
+      }
+    }
+    if (Math.abs(a[pivot][col]) < 1e-10) {
+      throw new Error('Could not solve dewarp transform.');
+    }
+    if (pivot !== col) {
+      [a[col], a[pivot]] = [a[pivot], a[col]];
+    }
+    const scale = a[col][col];
+    for (let k = col; k <= size; k += 1) {
+      a[col][k] /= scale;
+    }
+    for (let row = 0; row < size; row += 1) {
+      if (row === col) continue;
+      const factor = a[row][col];
+      for (let k = col; k <= size; k += 1) {
+        a[row][k] -= factor * a[col][k];
+      }
+    }
+  }
+  return a.map((row) => row[size]);
+}
+
+function computeHomography(srcPoints, dstPoints) {
+  const matrix = [];
+  const vector = [];
+  for (let i = 0; i < 4; i += 1) {
+    const [x, y] = srcPoints[i];
+    const [u, v] = dstPoints[i];
+    matrix.push([x, y, 1, 0, 0, 0, -u * x, -u * y]);
+    vector.push(u);
+    matrix.push([0, 0, 0, x, y, 1, -v * x, -v * y]);
+    vector.push(v);
+  }
+  const [h11, h12, h13, h21, h22, h23, h31, h32] = solveLinearSystem(matrix, vector);
+  return [h11, h12, h13, h21, h22, h23, h31, h32, 1];
+}
+
+function applyHomography(matrix, x, y) {
+  const denom = matrix[6] * x + matrix[7] * y + matrix[8];
+  return [
+    (matrix[0] * x + matrix[1] * y + matrix[2]) / denom,
+    (matrix[3] * x + matrix[4] * y + matrix[5]) / denom,
+  ];
+}
+
+function sampleBilinear(data, width, height, x, y, channel) {
+  const clampedX = Math.min(Math.max(x, 0), width - 1);
+  const clampedY = Math.min(Math.max(y, 0), height - 1);
+  const x0 = Math.floor(clampedX);
+  const y0 = Math.floor(clampedY);
+  const x1 = Math.min(x0 + 1, width - 1);
+  const y1 = Math.min(y0 + 1, height - 1);
+  const tx = clampedX - x0;
+  const ty = clampedY - y0;
+  const i00 = (y0 * width + x0) * 4 + channel;
+  const i10 = (y0 * width + x1) * 4 + channel;
+  const i01 = (y1 * width + x0) * 4 + channel;
+  const i11 = (y1 * width + x1) * 4 + channel;
+  const top    = data[i00] * (1 - tx) + data[i10] * tx;
+  const bottom = data[i01] * (1 - tx) + data[i11] * tx;
+  return top * (1 - ty) + bottom * ty;
+}
+
+function normalizeEmbedding(embedding) {
+  let norm = 0;
+  for (let i = 0; i < embedding.length; i += 1) {
+    norm += embedding[i] * embedding[i];
+  }
+  norm = Math.sqrt(norm);
+  if (norm > 1e-8) {
+    for (let i = 0; i < embedding.length; i += 1) {
+      embedding[i] /= norm;
+    }
+  }
+  return embedding;
+}
+
+/**
+ * Dewarp a full-resolution source canvas using normalised corners.
+ *
+ * @param {import('canvas').Canvas} srcCanvas  Full-resolution source image.
+ * @param {[number, number][]}       corners    Four [x_norm, y_norm] pairs,
+ *                                             TL, TR, BR, BL order.
+ * @returns {import('canvas').Canvas}  252×352 px dewarped canvas.
+ */
+function jsDeWarp(srcCanvas, corners) {
+  const width  = srcCanvas.width;
+  const height = srcCanvas.height;
+  const srcPts = corners.map(([x, y]) => [x * width, y * height]);
+  const dstPts = [
+    [0,          0         ],
+    [DEWARP_W-1, 0         ],
+    [DEWARP_W-1, DEWARP_H-1],
+    [0,          DEWARP_H-1],
+  ];
+  // Inverse homography: output pixel → source pixel.
+  const inverse = computeHomography(dstPts, srcPts);
+  const srcData = srcCanvas
+    .getContext('2d', { willReadFrequently: true })
+    .getImageData(0, 0, width, height);
+  const dstCanvas = createCanvas(DEWARP_W, DEWARP_H);
+  const dstCtx    = dstCanvas.getContext('2d');
+  const dstData   = dstCtx.createImageData(DEWARP_W, DEWARP_H);
+
+  for (let y = 0; y < DEWARP_H; y += 1) {
+    for (let x = 0; x < DEWARP_W; x += 1) {
+      const [sx, sy] = applyHomography(inverse, x, y);
+      const offset   = (y * DEWARP_W + x) * 4;
+      dstData.data[offset]     = sampleBilinear(srcData.data, width, height, sx, sy, 0);
+      dstData.data[offset + 1] = sampleBilinear(srcData.data, width, height, sx, sy, 1);
+      dstData.data[offset + 2] = sampleBilinear(srcData.data, width, height, sx, sy, 2);
+      dstData.data[offset + 3] = 255;
+    }
+  }
+  dstCtx.putImageData(dstData, 0, 0);
+  return dstCanvas;
+}
+
+// ---------------------------------------------------------------------------
+// ONNX sessions — loaded once, shared across all tests.
 // ---------------------------------------------------------------------------
 
 const detectorSession = await ort.InferenceSession.create(CORNELIUS_PATH, {
   executionProviders: ['cpu'],
 });
+
+const HAS_MILO = existsSync(MILO_PATH);
+const embedderSession = HAS_MILO
+  ? await ort.InferenceSession.create(MILO_PATH, { executionProviders: ['cpu'] })
+  : null;
+
+if (!HAS_MILO) {
+  console.warn(`  WARN  milo.onnx not found at ${MILO_PATH} — dewarp/embed tests will be skipped`);
+}
+
+/**
+ * Run the JS embedder on a 252×352 dewarp canvas.
+ * @param {import('canvas').Canvas} dewarpCanvas
+ * @returns {Promise<Float32Array>} L2-normalised embedding.
+ */
+async function jsEmbed(dewarpCanvas) {
+  // Scale the 252×352 dewarp up to 448×448 for the embedder, then normalise.
+  const scaledCanvas = createCanvas(EMBEDDER_SIZE, EMBEDDER_SIZE);
+  scaledCanvas.getContext('2d').drawImage(dewarpCanvas, 0, 0, EMBEDDER_SIZE, EMBEDDER_SIZE);
+  const { data } = scaledCanvas.getContext('2d').getImageData(0, 0, EMBEDDER_SIZE, EMBEDDER_SIZE);
+  const flat    = fillInputTensor(data, EMBEDDER_SIZE);
+  const feeds   = {
+    [embedderSession.inputNames[0]]: new ort.Tensor(
+      'float32', flat, [1, 3, EMBEDDER_SIZE, EMBEDDER_SIZE],
+    ),
+  };
+  const outputs = await embedderSession.run(feeds);
+  const emb     = Float32Array.from(outputs[embedderSession.outputNames[0]].data);
+  normalizeEmbedding(emb);
+  return emb;
+}
 
 /**
  * Run the JS detector pipeline on a PNG buffer.
@@ -186,6 +361,50 @@ async function runJsDetector(pngBuffer) {
   };
 }
 
+/**
+ * Run the full JS pipeline (detect → dewarp → embed) and write the
+ * ``js-cpu`` manifest + dewarp PNG to the captures directory.
+ *
+ * @param {Buffer} pngBuffer    Raw PNG of the capture frame.
+ * @param {string} captureId    Bare capture stem, e.g. ``cv_2026-04-24T16-43-41``.
+ * @returns {Promise<object>}   The manifest object.
+ */
+async function generateJsCpuManifest(pngBuffer, captureId) {
+  const img        = await loadImage(pngBuffer);
+  const fullCanvas = createCanvas(img.width, img.height);
+  fullCanvas.getContext('2d').drawImage(img, 0, 0);
+
+  const detection = await runJsDetector(pngBuffer);
+
+  const manifest = {
+    pipeline:      'js-cpu',
+    source:        'offline',
+    captureId,
+    cardPresent:   detection.cardPresent,
+    sharpness:     detection.sharpness,
+    corners:       detection.corners,
+    dewarpPng:     null,
+    embedding:     null,
+    topMatchId:    null,
+    topMatchScore: null,
+  };
+
+  if (detection.cardPresent && embedderSession) {
+    const dewarpCanvas = jsDeWarp(fullCanvas, detection.corners);
+
+    const dewarpPngPath = resolve(CAPTURES_DIR, `${captureId}.js-cpu.dewarp.png`);
+    writeFileSync(dewarpPngPath, dewarpCanvas.toBuffer('image/png'));
+    manifest.dewarpPng = `${captureId}.js-cpu.dewarp.png`;
+
+    const emb       = await jsEmbed(dewarpCanvas);
+    manifest.embedding = Array.from(emb);
+  }
+
+  const manifestPath = resolve(CAPTURES_DIR, `${captureId}.js-cpu.json`);
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  return manifest;
+}
+
 // ---------------------------------------------------------------------------
 // Discover captures
 // ---------------------------------------------------------------------------
@@ -216,51 +435,45 @@ for (const capturePath of captureFiles) {
 
   console.log(`\n[${name}]`);
 
-  // Cache the detection result across the two tests for this capture.
-  let detection = null;
+  // Run the full JS-CPU pipeline and write the manifest.
+  // All per-capture tests below read from this manifest.
+  const jsManifest = await generateJsCpuManifest(pngBuf, name);
 
-  // -------------------------------------------------------------------
+  // -----------------------------------------------------------------------
   // (1) JS detector must find a card
-  // -------------------------------------------------------------------
-  await test('JS detector finds card (sharpness > threshold)', async () => {
-    detection = await runJsDetector(pngBuf);
-    if (!detection.cardPresent) {
+  // -----------------------------------------------------------------------
+  await test('JS detector finds card (sharpness > threshold)', () => {
+    if (!jsManifest.cardPresent) {
       throw new Error(
-        `Card not detected. sharpness=${detection.sharpness?.toFixed(3)}, ` +
+        `Card not detected. sharpness=${jsManifest.sharpness?.toFixed(3)}, ` +
         `threshold=${MIN_SHARPNESS}`,
       );
     }
-    if ((detection.sharpness ?? 0) <= MIN_SHARPNESS) {
+    if ((jsManifest.sharpness ?? 0) <= MIN_SHARPNESS) {
       throw new Error(
-        `Sharpness ${detection.sharpness?.toFixed(3)} not above MIN_SHARPNESS=${MIN_SHARPNESS}`,
+        `Sharpness ${jsManifest.sharpness?.toFixed(3)} not above MIN_SHARPNESS=${MIN_SHARPNESS}`,
       );
     }
   });
 
-  // -------------------------------------------------------------------
-  // (2) JS corners must agree with Python's known-good corners.
+  // -----------------------------------------------------------------------
+  // (2) JS corners must agree with the Python manifest.
   //
-  //     pythonCorners are written into the bundle by ingest_bug_reports.py
-  //     (annotate_python_results).  They represent the correct CPU output
-  //     that both Python and Node.js (CPU) should agree on.
-  //
-  //     If this test fails it means fillInputTensor, orderCorners, or the
-  //     model output-parsing code in app.js has diverged from what Python
-  //     expects — a genuine JS regression.
-  // -------------------------------------------------------------------
-  await test('JS corners agree with Python reference corners', () => {
-    if (!bundle.pythonCorners) {
-      return 'skip'; // run ingest_bug_reports.py to annotate
+  //     Both the Python and JS-CPU pipelines run on the same frame with the
+  //     same model via CPU execution.  Significant disagreement indicates a
+  //     regression in fillInputTensor, orderCorners, or output parsing.
+  // -----------------------------------------------------------------------
+  await test('JS corners agree with python manifest', () => {
+    const pyManifestPath = resolve(CAPTURES_DIR, `${name}.python.json`);
+    if (!existsSync(pyManifestPath)) {
+      return 'skip'; // run: python scripts/generate_manifests.py
     }
-    if (!detection?.cardPresent) {
-      return 'skip'; // card not detected in previous test
-    }
+    const pyManifest = JSON.parse(readFileSync(pyManifestPath, 'utf-8'));
+    if (!pyManifest.corners) return 'skip';
+    if (!jsManifest.cardPresent) return 'skip';
 
-    const jsPts = [...detection.corners]
-      .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    const pyPts = bundle.pythonCorners
-      .map((c) => [c.x, c.y])
-      .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const jsPts = [...jsManifest.corners].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const pyPts = [...pyManifest.corners].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 
     const deltas   = jsPts.flatMap(([x, y], i) => [
       Math.abs(x - pyPts[i][0]),
@@ -271,11 +484,36 @@ for (const capturePath of captureFiles) {
     if (maxDelta >= CORNER_TOLERANCE) {
       const fmt = (pts) => pts.map((p) => p.map((v) => v.toFixed(4)).join(',')).join('  ');
       throw new Error(
-        `JS corners differ from Python reference by ${maxDelta.toFixed(3)} ` +
+        `JS corners differ from Python manifest by ${maxDelta.toFixed(3)} ` +
         `(tolerance ${CORNER_TOLERANCE}).\n` +
         `  Possible regression in fillInputTensor, orderCorners, or output parsing.\n` +
         `  JS :    ${fmt(jsPts)}\n` +
         `  Python: ${fmt(pyPts)}`,
+      );
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // (3) JS embedding must agree with the Python manifest.
+  //
+  //     Embedding dot product > EMBEDDING_MIN_DOT confirms that small
+  //     differences in bilinear dewarp don't materially affect the
+  //     embedding space.  Failure indicates a preprocessing regression.
+  // -----------------------------------------------------------------------
+  await test('JS embedding agrees with python manifest', async () => {
+    const pyManifestPath = resolve(CAPTURES_DIR, `${name}.python.json`);
+    if (!existsSync(pyManifestPath)) return 'skip';
+    const pyManifest = JSON.parse(readFileSync(pyManifestPath, 'utf-8'));
+    if (!pyManifest.embedding || !jsManifest.embedding) return 'skip';
+
+    const dot = jsManifest.embedding.reduce(
+      (s, v, i) => s + v * pyManifest.embedding[i],
+      0,
+    );
+    if (dot < EMBEDDING_MIN_DOT) {
+      throw new Error(
+        `Embedding dot product ${dot.toFixed(4)} < minimum ${EMBEDDING_MIN_DOT}.\n` +
+        `  JS and Python preprocessing pipelines have diverged.`,
       );
     }
   });
