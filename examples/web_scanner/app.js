@@ -801,9 +801,13 @@ function setupCaptureButton(camera, runtime) {
       const detInputImageData = runtime.detectorScratchCanvas
         .getContext("2d", { willReadFrequently: true })
         .getImageData(0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
-      const detectorInputRgba = btoa(
-        String.fromCharCode(...new Uint8Array(detInputImageData.data.buffer))
-      );
+      // Avoid spreading 589 824 bytes as call arguments (stack overflow on mobile).
+      const detInputBytes = new Uint8Array(detInputImageData.data.buffer);
+      let detInputBinary = "";
+      for (let i = 0; i < detInputBytes.length; i++) {
+        detInputBinary += String.fromCharCode(detInputBytes[i]);
+      }
+      const detectorInputRgba = btoa(detInputBinary);
 
       const systemInfo = collectSystemInfo(camera);
 
