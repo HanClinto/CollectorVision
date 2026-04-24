@@ -993,6 +993,14 @@ class BrowserRuntime {
     this.dewarpCanvas.width = DEWARP_W;
     this.dewarpCanvas.height = DEWARP_H;
     this.dewarpCtx = this.dewarpCanvas.getContext("2d", { willReadFrequently: true });
+    // Reusable canvas for letterboxing frames before detection.
+    // Letterboxing preserves the source aspect ratio inside the square model
+    // input, preventing portrait frames (e.g. Android 720×1280) from being
+    // squashed in a way that distorts card geometry and confuses the detector.
+    this.letterboxCanvas = document.createElement("canvas");
+    this.letterboxCanvas.width = DETECTOR_SIZE;
+    this.letterboxCanvas.height = DETECTOR_SIZE;
+    this.letterboxCtx = this.letterboxCanvas.getContext("2d", { willReadFrequently: true });
   }
 
   async load(onStage) {
@@ -1038,7 +1046,21 @@ class BrowserRuntime {
   }
 
   async detect(frameCanvas) {
-    const input = fillInputTensor(frameCanvas, DETECTOR_SIZE);
+    // Letterbox the frame into the square detector input, preserving the
+    // source aspect ratio.  Squashing a 720×1280 portrait frame into 384×384
+    // compresses the height 3× more than the width, making the card appear
+    // wide and flat and producing wrong corner predictions.
+    const vw = frameCanvas.width;
+    const vh = frameCanvas.height;
+    const lbScale = DETECTOR_SIZE / Math.max(vw, vh);
+    const scaledW = Math.round(vw * lbScale);
+    const scaledH = Math.round(vh * lbScale);
+    const padX = Math.round((DETECTOR_SIZE - scaledW) / 2);
+    const padY = Math.round((DETECTOR_SIZE - scaledH) / 2);
+    this.letterboxCtx.clearRect(0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
+    this.letterboxCtx.drawImage(frameCanvas, padX, padY, scaledW, scaledH);
+
+    const input = fillInputTensor(this.letterboxCanvas, DETECTOR_SIZE);
     const outputs = await this.detector.run({
       [this.inputNames.detector]: new ort.Tensor("float32", input, [1, 3, DETECTOR_SIZE, DETECTOR_SIZE]),
     });
@@ -1048,11 +1070,13 @@ class BrowserRuntime {
       ? outputs[this.detector.outputNames[2]].data[0]
       : null;
 
+    // Un-letterbox: map corners from [0,1] of the padded DETECTOR_SIZE square
+    // back to [0,1] of the original frame.
     const points = [];
     for (let i = 0; i < 8; i += 2) {
       points.push([
-        Math.min(Math.max(cornersRaw[i], 0), 1),
-        Math.min(Math.max(cornersRaw[i + 1], 0), 1),
+        Math.min(Math.max((cornersRaw[i] * DETECTOR_SIZE - padX) / scaledW, 0), 1),
+        Math.min(Math.max((cornersRaw[i + 1] * DETECTOR_SIZE - padY) / scaledH, 0), 1),
       ]);
     }
 
