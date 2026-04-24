@@ -760,10 +760,18 @@ class CameraSurface {
       return;
     }
     const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
-    this.preview.width = Math.round(width * dpr);
-    this.preview.height = Math.round(height * dpr);
-    this.canvas.width = Math.round(width * dpr);
-    this.canvas.height = Math.round(height * dpr);
+    const nextPreviewWidth = Math.round(width * dpr);
+    const nextPreviewHeight = Math.round(height * dpr);
+    const nextOverlayWidth = Math.round(width * dpr);
+    const nextOverlayHeight = Math.round(height * dpr);
+    if (this.preview.width !== nextPreviewWidth || this.preview.height !== nextPreviewHeight) {
+      this.preview.width = nextPreviewWidth;
+      this.preview.height = nextPreviewHeight;
+    }
+    if (this.canvas.width !== nextOverlayWidth || this.canvas.height !== nextOverlayHeight) {
+      this.canvas.width = nextOverlayWidth;
+      this.canvas.height = nextOverlayHeight;
+    }
   }
 
   coverCrop() {

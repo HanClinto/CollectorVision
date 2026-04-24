@@ -247,7 +247,7 @@ h2 {
 }
 
 .page[data-camera-mode="expanded"] .camera-placeholder {
-  min-height: clamp(20rem, 50svh, 34rem);
+  min-height: min(clamp(18rem, 45svh, 28rem), calc(min(27rem, 100vw) * 0.95));
 }
 
 .camera-video,
