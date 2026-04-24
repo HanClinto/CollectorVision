@@ -95,17 +95,26 @@ See:
 
 ## Local Test Loop
 
-Refresh the scanner bundle:
+The generated `assets/` and `vendor/` folders are not tracked in git anymore.
+For local development, regenerate them first.
+
+Fast path:
 
 ```bash
-./.venv/bin/python scripts/export_web_scanner_assets.py
+./scripts/run_web_scanner_local.sh
 ```
 
-Serve it locally:
+This will:
+
+- rebuild the local scanner bundle
+- serve `examples/web_scanner` on `http://localhost:8040`
+
+Manual path:
 
 ```bash
+uv run python scripts/export_web_scanner_assets.py
 cd examples/web_scanner
-python -m http.server 8040
+uv run python -m http.server 8040
 ```
 
 Open `http://localhost:8040`.
