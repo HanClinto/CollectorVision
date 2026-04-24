@@ -1,21 +1,13 @@
-import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs";
-
 // Replaced by the deploy-pages CI workflow with the actual short commit SHA.
 const BUILD_ID = "__BUILD_ID__";
 
 const GITHUB_REPO = "HanClinto/CollectorVision";
 
+// DETECTOR_SIZE is kept here for the capture-bundle debug export.
 const DETECTOR_SIZE = 384;
-const EMBEDDER_SIZE = 448;
-const DEWARP_W = 252;
-const DEWARP_H = 352;
-const MIN_SHARPNESS = 0.02;
 const MIN_MATCH_SCORE = 0.70;
 const PREVIEW_ASPECT = 16 / 9;
 const SCAN_INTERVAL_MS = 900;
-
-const IMAGENET_MEAN = [0.485, 0.456, 0.406];
-const IMAGENET_STD = [0.229, 0.224, 0.225];
 
 const SOUND_PATHS = {
   scanConfirmed: "./sounds/scan.wav",
@@ -265,96 +257,6 @@ async function writeCachedAsset(key, value) {
   });
 }
 
-async function fetchWithProgress(url, responseType, onProgress) {
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
-  }
-
-  const total = Number.parseInt(response.headers.get("content-length") ?? "0", 10) || 0;
-  if (!response.body || total === 0) {
-    const payload = responseType === "json" ? await response.json() : await response.arrayBuffer();
-    onProgress?.(1, total || 1, total || 1);
-    return payload;
-  }
-
-  const reader = response.body.getReader();
-  const chunks = [];
-  let loaded = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    chunks.push(value);
-    loaded += value.length;
-    onProgress?.(loaded / total, loaded, total);
-  }
-
-  const blob = new Blob(chunks);
-  if (responseType === "json") {
-    return JSON.parse(await blob.text());
-  }
-  return await blob.arrayBuffer();
-}
-
-async function fetchJsonCached(url, version, onProgress) {
-  const key = `${version}:${url}:json`;
-  const cached = await readCachedAsset(key);
-  if (cached) {
-    onProgress?.(1, 1, 1, true);
-    return cached;
-  }
-  const json = await fetchWithProgress(url, "json", (ratio, loaded, total) => {
-    onProgress?.(ratio, loaded, total, false);
-  });
-  await writeCachedAsset(key, json);
-  return json;
-}
-
-async function fetchBufferCached(url, version, onProgress) {
-  const key = `${version}:${url}:buffer`;
-  const cached = await readCachedAsset(key);
-  if (cached) {
-    onProgress?.(1, cached.byteLength ?? 1, cached.byteLength ?? 1, true);
-    return cached;
-  }
-  const buffer = await fetchWithProgress(url, "buffer", (ratio, loaded, total) => {
-    onProgress?.(ratio, loaded, total, false);
-  });
-  await writeCachedAsset(key, buffer);
-  return buffer;
-}
-
-function float16ToFloat32(value) {
-  const sign = (value & 0x8000) >> 15;
-  const exponent = (value & 0x7c00) >> 10;
-  const fraction = value & 0x03ff;
-
-  if (exponent === 0) {
-    if (fraction === 0) {
-      return sign ? -0 : 0;
-    }
-    return (sign ? -1 : 1) * 2 ** (-14) * (fraction / 1024);
-  }
-
-  if (exponent === 0x1f) {
-    return fraction ? Number.NaN : (sign ? -Infinity : Infinity);
-  }
-
-  return (sign ? -1 : 1) * 2 ** (exponent - 15) * (1 + fraction / 1024);
-}
-
-function decodeFloat16Buffer(buffer) {
-  const source = new Uint16Array(buffer);
-  const out = new Float32Array(source.length);
-  for (let i = 0; i < source.length; i += 1) {
-    out[i] = float16ToFloat32(source[i]);
-  }
-  return out;
-}
-
 function createAudioBus() {
   const cache = new Map();
 
@@ -399,260 +301,25 @@ function createAudioBus() {
   };
 }
 
-/**
- * Attempts to configure the WebGPU adapter for ort-web.
- * Returns true if WebGPU was configured, false if unavailable.
- * Never throws — a false return means ort-web will fall back to WASM.
- */
-async function configureWebGpu(debugLog) {
-  if (!("gpu" in navigator)) {
-    debugLog.info("webgpu unavailable", "navigator.gpu absent — WASM fallback");
-    return false;
-  }
-
-  const adapter = await navigator.gpu.requestAdapter({
-    powerPreference: "high-performance",
-  });
-  if (!adapter) {
-    debugLog.info("webgpu unavailable", "requestAdapter() returned null — WASM fallback");
-    return false;
-  }
-
-  const requestedStorageBuffers = Math.min(
-    10,
-    adapter.limits.maxStorageBuffersPerShaderStage ?? 8,
-  );
-  const originalRequestDevice = adapter.requestDevice.bind(adapter);
-  Object.defineProperty(adapter, "requestDevice", {
-    configurable: true,
-    value: async (descriptor = {}) => originalRequestDevice({
-      ...descriptor,
-      requiredLimits: {
-        ...(descriptor.requiredLimits ?? {}),
-        maxStorageBuffersPerShaderStage: requestedStorageBuffers,
-      },
-    }),
-  });
-
-  ort.env.webgpu.adapter = adapter;
-
-  // ort.webgpu.min.mjs (new WebGPU EP) is used — the legacy ort.all.min.mjs
-  // JSEP backend silently returned all-zeros across ort-web 1.20–1.24.3.
-  ort.env.webgpu.forceFp16 = false;
-
-  debugLog.info(
-    "webgpu adapter ready",
-    `maxStorageBuffersPerShaderStage=${requestedStorageBuffers}, fp16=disabled`,
-  );
-  return true;
-}
-
-function prepareDewarp() {
-  return Promise.resolve(true);
-}
-
-function sigmoid(x) {
-  return 1 / (1 + Math.exp(-x));
-}
-
-function orderCorners(points) {
-  const cx = points.reduce((sum, [x]) => sum + x, 0) / points.length;
-  const cy = points.reduce((sum, [, y]) => sum + y, 0) / points.length;
-  const sorted = [...points].sort(
-    ([ax, ay], [bx, by]) => Math.atan2(ay - cy, ax - cx) - Math.atan2(by - cy, bx - cx),
-  );
-  let start = 0;
-  let best = Infinity;
-  for (let i = 0; i < sorted.length; i += 1) {
-    const score = sorted[i][0] + sorted[i][1];
-    if (score < best) {
-      best = score;
-      start = i;
-    }
-  }
-  const ordered = [
-    sorted[start],
-    sorted[(start + 1) % 4],
-    sorted[(start + 2) % 4],
-    sorted[(start + 3) % 4],
-  ];
-  const signedArea = ordered.reduce((sum, [x1, y1], i) => {
-    const [x2, y2] = ordered[(i + 1) % ordered.length];
-    return sum + (x1 * y2 - x2 * y1);
-  }, 0);
-  if (signedArea < 0) {
-    return [ordered[0], ordered[3], ordered[2], ordered[1]];
-  }
-  return ordered;
-}
-
-function quadArea(corners) {
-  let area = 0;
-  for (let i = 0; i < corners.length; i += 1) {
-    const [x1, y1] = corners[i];
-    const [x2, y2] = corners[(i + 1) % corners.length];
-    area += x1 * y2 - x2 * y1;
-  }
-  return Math.abs(area) * 0.5;
-}
-
-function isUsableQuad(corners) {
-  if (!corners || corners.length !== 4) {
-    return false;
-  }
-  const area = quadArea(corners);
-  if (!Number.isFinite(area) || area < 0.01) {
-    return false;
-  }
-  for (let i = 0; i < corners.length; i += 1) {
-    for (let j = i + 1; j < corners.length; j += 1) {
-      const dx = corners[i][0] - corners[j][0];
-      const dy = corners[i][1] - corners[j][1];
-      if ((dx * dx + dy * dy) < 0.0004) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
-function solveLinearSystem(matrix, vector) {
-  const size = vector.length;
-  const a = matrix.map((row, index) => [...row, vector[index]]);
-
-  for (let col = 0; col < size; col += 1) {
-    let pivot = col;
-    for (let row = col + 1; row < size; row += 1) {
-      if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) {
-        pivot = row;
-      }
-    }
-    if (Math.abs(a[pivot][col]) < 1e-10) {
-      throw new Error("Could not solve dewarp transform.");
-    }
-    if (pivot !== col) {
-      [a[col], a[pivot]] = [a[pivot], a[col]];
-    }
-    const scale = a[col][col];
-    for (let k = col; k <= size; k += 1) {
-      a[col][k] /= scale;
-    }
-    for (let row = 0; row < size; row += 1) {
-      if (row === col) {
-        continue;
-      }
-      const factor = a[row][col];
-      for (let k = col; k <= size; k += 1) {
-        a[row][k] -= factor * a[col][k];
-      }
-    }
-  }
-
-  return a.map((row) => row[size]);
-}
-
-function computeHomography(srcPoints, dstPoints) {
-  const matrix = [];
-  const vector = [];
-
-  for (let i = 0; i < 4; i += 1) {
-    const [x, y] = srcPoints[i];
-    const [u, v] = dstPoints[i];
-    matrix.push([x, y, 1, 0, 0, 0, -u * x, -u * y]);
-    vector.push(u);
-    matrix.push([0, 0, 0, x, y, 1, -v * x, -v * y]);
-    vector.push(v);
-  }
-
-  const [h11, h12, h13, h21, h22, h23, h31, h32] = solveLinearSystem(matrix, vector);
-  return [h11, h12, h13, h21, h22, h23, h31, h32, 1];
-}
-
-function applyHomography(matrix, x, y) {
-  const denom = matrix[6] * x + matrix[7] * y + matrix[8];
-  return [
-    (matrix[0] * x + matrix[1] * y + matrix[2]) / denom,
-    (matrix[3] * x + matrix[4] * y + matrix[5]) / denom,
-  ];
-}
-
-function sampleBilinear(data, width, height, x, y, channel) {
-  const clampedX = Math.min(Math.max(x, 0), width - 1);
-  const clampedY = Math.min(Math.max(y, 0), height - 1);
-  const x0 = Math.floor(clampedX);
-  const y0 = Math.floor(clampedY);
-  const x1 = Math.min(x0 + 1, width - 1);
-  const y1 = Math.min(y0 + 1, height - 1);
-  const tx = clampedX - x0;
-  const ty = clampedY - y0;
-
-  const i00 = (y0 * width + x0) * 4 + channel;
-  const i10 = (y0 * width + x1) * 4 + channel;
-  const i01 = (y1 * width + x0) * 4 + channel;
-  const i11 = (y1 * width + x1) * 4 + channel;
-
-  const top = data[i00] * (1 - tx) + data[i10] * tx;
-  const bottom = data[i01] * (1 - tx) + data[i11] * tx;
-  return top * (1 - ty) + bottom * ty;
-}
-
-function normalizeEmbedding(embedding) {
-  let norm = 0;
-  for (let i = 0; i < embedding.length; i += 1) {
-    norm += embedding[i] * embedding[i];
-  }
-  norm = Math.sqrt(norm);
-  if (norm > 1e-8) {
-    for (let i = 0; i < embedding.length; i += 1) {
-      embedding[i] /= norm;
-    }
-  }
-  return embedding;
-}
-
-function fillInputTensor(canvas, size) {
-  const scratch = document.createElement("canvas");
-  scratch.width = size;
-  scratch.height = size;
-  const ctx = scratch.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(canvas, 0, 0, size, size);
-  const { data } = ctx.getImageData(0, 0, size, size);
-  const tensor = new Float32Array(1 * 3 * size * size);
-  const plane = size * size;
-
-  for (let i = 0; i < size * size; i += 1) {
-    const r = data[i * 4] / 255;
-    const g = data[i * 4 + 1] / 255;
-    const b = data[i * 4 + 2] / 255;
-    tensor[i] = (r - IMAGENET_MEAN[0]) / IMAGENET_STD[0];
-    tensor[plane + i] = (g - IMAGENET_MEAN[1]) / IMAGENET_STD[1];
-    tensor[plane * 2 + i] = (b - IMAGENET_MEAN[2]) / IMAGENET_STD[2];
-  }
-
-  return tensor;
-}
-
-function updateCropPreview(cropCanvas) {
+function updateCropPreview(cropBitmap) {
   const wrapper = document.getElementById("crop-preview");
   const target = document.getElementById("crop-canvas");
   if (!wrapper || !target) {
     return;
   }
-  // Draw 1:1 — target canvas is sized to DEWARP_W×DEWARP_H so this shows
-  // exactly what the embedder receives, at full resolution.
   const ctx = target.getContext("2d");
-  ctx.drawImage(cropCanvas, 0, 0);
+  ctx.drawImage(cropBitmap, 0, 0);
   wrapper.hidden = false;
 }
 
-function updateDetectorPreview(scratchCanvas) {
+function updateDetectorPreview(detectorBitmap) {
   const wrapper = document.getElementById("detector-preview");
   const target = document.getElementById("detector-canvas");
   if (!wrapper || !target) {
     return;
   }
   const ctx = target.getContext("2d");
-  ctx.drawImage(scratchCanvas, 0, 0);
+  ctx.drawImage(detectorBitmap, 0, 0);
   wrapper.hidden = false;
 }
 
@@ -739,10 +406,11 @@ function buildIssueUrl(captureId, systemInfo) {
   return `https://github.com/${GITHUB_REPO}/issues/new?${params}`;
 }
 
-// Downloads the current processCanvas as a PNG and a JSON sidecar.
-// The pair can be dropped into tests/fixtures/captures/ and picked up
-// automatically by the Python regression test suite.
-function setupCaptureButton(camera, runtime) {
+// captureState is an object maintained by createScannerLoop:
+//   { lastResult, lastDetectorBitmap, lastCropBitmap }
+// lastDetectorBitmap / lastCropBitmap are ImageBitmaps transferred from the
+// scanner worker and may be null until the first successful detection.
+function setupCaptureButton(camera, captureState) {
   const btn = document.getElementById("capture-frame");
   if (!btn) {
     return;
@@ -770,7 +438,8 @@ function setupCaptureButton(camera, runtime) {
       snapshotCanvas.height = camera.processCanvas.height;
       snapshotCanvas.getContext("2d").drawImage(camera.processCanvas, 0, 0);
 
-      const det = runtime._lastDetection ?? {};
+      // Use the last result received from the scanner worker.
+      const det = captureState.lastResult ?? {};
 
       const logEntries = Array.from(
         document.querySelectorAll("#debug-log .debug-entry"),
@@ -784,22 +453,27 @@ function setupCaptureButton(camera, runtime) {
       const dataUrl = snapshotCanvas.toDataURL("image/png");
       const framePng = dataUrl.slice(dataUrl.indexOf(",") + 1);
 
-      // Raw RGBA pixel bytes from the 384×384 canvas that was fed to the
-      // detector model.  Stored as base64-encoded raw Uint8ClampedArray bytes
+      // Raw RGBA pixel bytes from the 384×384 detector input bitmap transferred
+      // from the scanner worker.  Stored as base64-encoded Uint8ClampedArray
       // (no PNG encoding, no color-space metadata) so Python can reconstruct
-      // the exact values with np.frombuffer(...).reshape(384, 384, 4).
-      // Compare with python-detector-input.npy from generate_manifests.py to
-      // identify any preprocessing divergence.
-      const detInputImageData = runtime.detectorScratchCanvas
-        .getContext("2d", { willReadFrequently: true })
-        .getImageData(0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
-      // Avoid spreading 589 824 bytes as call arguments (stack overflow on mobile).
-      const detInputBytes = new Uint8Array(detInputImageData.data.buffer);
-      let detInputBinary = "";
-      for (let i = 0; i < detInputBytes.length; i++) {
-        detInputBinary += String.fromCharCode(detInputBytes[i]);
+      // exact values with np.frombuffer(...).reshape(384, 384, 4).
+      let detectorInputRgba = null;
+      if (captureState.lastDetectorBitmap) {
+        const detScratch = document.createElement("canvas");
+        detScratch.width = DETECTOR_SIZE;
+        detScratch.height = DETECTOR_SIZE;
+        detScratch.getContext("2d", { willReadFrequently: true })
+          .drawImage(captureState.lastDetectorBitmap, 0, 0);
+        const detInputImageData = detScratch.getContext("2d", { willReadFrequently: true })
+          .getImageData(0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
+        // Avoid spreading 589 824 bytes as call arguments (stack overflow on mobile).
+        const detInputBytes = new Uint8Array(detInputImageData.data.buffer);
+        let detInputBinary = "";
+        for (let i = 0; i < detInputBytes.length; i++) {
+          detInputBinary += String.fromCharCode(detInputBytes[i]);
+        }
+        detectorInputRgba = btoa(detInputBinary);
       }
-      const detectorInputRgba = btoa(detInputBinary);
 
       const systemInfo = collectSystemInfo(camera);
 
@@ -816,15 +490,15 @@ function setupCaptureButton(camera, runtime) {
           width: camera.video.videoWidth,
           height: camera.video.videoHeight,
         },
-        // processCanvas pixel dimensions — what captureFrame() passes to detect().
+        // processCanvas pixel dimensions — what the worker receives as a bitmap.
         processCanvas: {
           width: camera.processCanvas.width,
           height: camera.processCanvas.height,
         },
         devicePixelRatio: window.devicePixelRatio || 1,
         detectorSize: DETECTOR_SIZE,
-        detectorInput: runtime._lastDetectorInput ?? null,
-        rawCorners: runtime._lastRawCorners ?? null,
+        detectorInput: det.detectorInput ?? null,
+        rawCorners: det.rawCorners ?? null,
         orderedCorners: det.corners ? det.corners.map(([x, y]) => ({ x, y })) : null,
         sharpness: det.sharpness ?? null,
         cardPresent: det.cardPresent ?? null,
@@ -1241,195 +915,6 @@ class CameraSurface {
   }
 }
 
-class BrowserRuntime {
-  constructor(manifest) {
-    this.manifest = manifest;
-    this.detector = null;
-    this.embedder = null;
-    this.inputNames = {};
-    this.embeddings = null;
-    this.cardIds = null;
-    this.dewarpCanvas = document.createElement("canvas");
-    this.dewarpCanvas.width = DEWARP_W;
-    this.dewarpCanvas.height = DEWARP_H;
-    this.dewarpCtx = this.dewarpCanvas.getContext("2d", { willReadFrequently: true });
-    // Reusable 384×384 canvas that holds exactly what fillInputTensor fed the
-    // detector.  Exposed as a debug preview so we can see what the model sees.
-    this.detectorScratchCanvas = document.createElement("canvas");
-    this.detectorScratchCanvas.width = DETECTOR_SIZE;
-    this.detectorScratchCanvas.height = DETECTOR_SIZE;
-    this.detectorScratchCtx = this.detectorScratchCanvas.getContext("2d", { willReadFrequently: true });
-  }
-
-  async load(onStage) {
-    const version = this.manifest.version;
-    const detectorBuffer = await fetchBufferCached(
-      this.urlFor(this.manifest.models.cornelius),
-      version,
-      (ratio, loaded, total, cached) => onStage?.("detector", ratio, loaded, total, cached),
-    );
-    const embedderBuffer = await fetchBufferCached(
-      this.urlFor(this.manifest.models.milo),
-      version,
-      (ratio, loaded, total, cached) => onStage?.("embedder", ratio, loaded, total, cached),
-    );
-
-    // Use as many threads as the device has cores, capped at 4.
-    // NOTE: multi-threaded WASM requires SharedArrayBuffer, which in turn
-    // requires COOP/COEP response headers.  GitHub Pages does not set these,
-    // so ort-web will silently fall back to 1 thread there.  The cap of 4
-    // avoids excessive memory use on high-core-count desktops.
-    ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
-    // Use the new WebGPU EP (ort.webgpu.min.mjs) with WASM fallback.
-    // The legacy JSEP backend (ort.all.min.mjs) silently returned all-zeros
-    // for Conv ops across ort-web 1.20–1.24.3; new EP is not affected.
-    this.detector = await ort.InferenceSession.create(detectorBuffer, {
-      executionProviders: ["webgpu", "wasm"],
-    });
-    this.embedder = await ort.InferenceSession.create(embedderBuffer, {
-      executionProviders: ["webgpu", "wasm"],
-    });
-
-    this.inputNames.detector = this.detector.inputNames[0];
-    this.inputNames.embedder = this.embedder.inputNames[0];
-
-    const embeddingBuffer = await fetchBufferCached(
-      this.urlFor(this.manifest.catalog.embeddings),
-      version,
-      (ratio, loaded, total, cached) => onStage?.("catalog", ratio * 0.92, loaded, total, cached),
-    );
-    const ids = await fetchJsonCached(
-      this.urlFor(this.manifest.catalog.card_ids),
-      version,
-      (ratio, loaded, total, cached) => onStage?.("catalog", 0.92 + ratio * 0.08, loaded, total, cached),
-    );
-    this.embeddings = decodeFloat16Buffer(embeddingBuffer);
-    this.cardIds = ids;
-  }
-
-  urlFor(path) {
-    return `./assets/${path}`;
-  }
-
-  async detect(frameCanvas) {
-    const vw = frameCanvas.width;
-    const vh = frameCanvas.height;
-
-    // Squash to DETECTOR_SIZE×DETECTOR_SIZE, matching Python _preprocess exactly.
-    // Keep a copy of what we fed the model for the debug preview.
-    this.detectorScratchCtx.drawImage(frameCanvas, 0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
-    this._lastDetectorInput = `${vw}×${vh} → squash ${DETECTOR_SIZE}×${DETECTOR_SIZE}`;
-
-    const input = fillInputTensor(frameCanvas, DETECTOR_SIZE);
-    const outputs = await this.detector.run({
-      [this.inputNames.detector]: new ort.Tensor("float32", input, [1, 3, DETECTOR_SIZE, DETECTOR_SIZE]),
-    });
-    const cornersRaw = Array.from(outputs[this.detector.outputNames[0]].data).slice(0, 8);
-    const presenceLogit = outputs[this.detector.outputNames[1]].data[0];
-    const sharpness = this.detector.outputNames[2]
-      ? outputs[this.detector.outputNames[2]].data[0]
-      : null;
-
-    const points = [];
-    for (let i = 0; i < 8; i += 2) {
-      points.push([
-        Math.min(Math.max(cornersRaw[i], 0), 1),
-        Math.min(Math.max(cornersRaw[i + 1], 0), 1),
-      ]);
-    }
-
-    this._lastRawCorners = points.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("  ");
-
-    const result = {
-      corners: orderCorners(points),
-      sharpness,
-      confidence: sharpness ?? sigmoid(presenceLogit),
-      cardPresent: (sharpness ?? sigmoid(presenceLogit)) >= MIN_SHARPNESS,
-    };
-    this._lastDetection = result;
-    return result;
-  }
-
-  dewarp(frameCanvas, corners) {
-    const width = frameCanvas.width;
-    const height = frameCanvas.height;
-    const srcPts = [
-      corners[0][0] * width, corners[0][1] * height,
-      corners[1][0] * width, corners[1][1] * height,
-      corners[2][0] * width, corners[2][1] * height,
-      corners[3][0] * width, corners[3][1] * height,
-    ];
-    const dstPts = [
-      0, 0,
-      DEWARP_W - 1, 0,
-      DEWARP_W - 1, DEWARP_H - 1,
-      0, DEWARP_H - 1,
-    ];
-    const sourcePoints = [
-      [srcPts[0], srcPts[1]],
-      [srcPts[2], srcPts[3]],
-      [srcPts[4], srcPts[5]],
-      [srcPts[6], srcPts[7]],
-    ];
-    const targetPoints = [
-      [dstPts[0], dstPts[1]],
-      [dstPts[2], dstPts[3]],
-      [dstPts[4], dstPts[5]],
-      [dstPts[6], dstPts[7]],
-    ];
-    const inverse = computeHomography(targetPoints, sourcePoints);
-    const srcData = frameCanvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, width, height);
-    const dstData = this.dewarpCtx.createImageData(DEWARP_W, DEWARP_H);
-
-    for (let y = 0; y < DEWARP_H; y += 1) {
-      for (let x = 0; x < DEWARP_W; x += 1) {
-        const [sx, sy] = applyHomography(inverse, x, y);
-        const offset = (y * DEWARP_W + x) * 4;
-        dstData.data[offset] = sampleBilinear(srcData.data, width, height, sx, sy, 0);
-        dstData.data[offset + 1] = sampleBilinear(srcData.data, width, height, sx, sy, 1);
-        dstData.data[offset + 2] = sampleBilinear(srcData.data, width, height, sx, sy, 2);
-        dstData.data[offset + 3] = 255;
-      }
-    }
-
-    this.dewarpCtx.putImageData(dstData, 0, 0);
-
-    return this.dewarpCanvas;
-  }
-
-  async embed(cropCanvas) {
-    const input = fillInputTensor(cropCanvas, EMBEDDER_SIZE);
-    const outputs = await this.embedder.run({
-      [this.inputNames.embedder]: new ort.Tensor("float32", input, [1, 3, EMBEDDER_SIZE, EMBEDDER_SIZE]),
-    });
-    return normalizeEmbedding(Float32Array.from(outputs[this.embedder.outputNames[0]].data));
-  }
-
-  search(query) {
-    const dims = this.manifest.catalog.dims;
-    const rows = this.manifest.catalog.rows;
-    let bestScore = -Infinity;
-    let bestIndex = -1;
-
-    for (let row = 0; row < rows; row += 1) {
-      const offset = row * dims;
-      let score = 0;
-      for (let col = 0; col < dims; col += 1) {
-        score += this.embeddings[offset + col] * query[col];
-      }
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = row;
-      }
-    }
-
-    return {
-      score: bestScore,
-      cardId: this.cardIds[bestIndex],
-    };
-  }
-}
-
 function renderScanList(scans) {
   const list = document.getElementById("scan-list");
   const count = document.getElementById("scan-count");
@@ -1476,21 +961,6 @@ function renderScanList(scans) {
   total.textContent = `$${totalValue.toFixed(2)}`;
 }
 
-async function fetchScryfallCard(cardId, cache) {
-  if (cache.has(cardId)) {
-    return cache.get(cardId);
-  }
-  const response = await fetch(`https://api.scryfall.com/cards/${cardId}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) {
-    throw new Error(`Scryfall lookup failed for ${cardId}: HTTP ${response.status}`);
-  }
-  const data = await response.json();
-  cache.set(cardId, data);
-  return data;
-}
-
 function ensureScanRecord(scans, cardId) {
   let scan = scans.find((entry) => entry.cardId === cardId);
   if (!scan) {
@@ -1505,20 +975,6 @@ function ensureScanRecord(scans, cardId) {
     scans.unshift(scan);
   }
   return scan;
-}
-
-async function loadImageToCanvas(url) {
-  const image = new Image();
-  image.decoding = "async";
-  image.src = url;
-  await image.decode();
-
-  const canvas = document.createElement("canvas");
-  canvas.width = image.naturalWidth;
-  canvas.height = image.naturalHeight;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(image, 0, 0);
-  return canvas;
 }
 
 function setupSettingsSheet() {
@@ -1580,69 +1036,88 @@ function setupActions(scans) {
   });
 }
 
-function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog, diag) {
+// createScannerLoop wires together the scanner and enricher workers with the
+// camera surface, scan bucket, audio bus, and UI.  All heavy computation
+// happens inside the workers; this function only handles message routing and
+// DOM updates.
+//
+// captureState is a shared object updated on every result message:
+//   { lastResult, lastDetectorBitmap, lastCropBitmap }
+function createScannerLoop(
+  camera, scannerWorker, enricherWorker, scans, audioBus, manifest, debugLog, diag, captureState,
+) {
   const bucket = new ScanBucket();
-  const scryfallCache = new Map();
   let timer = null;
-  let busy = false;
+  let workerBusy = false;
 
-  async function enrich(scan) {
-    debugLog.info("fetching scryfall metadata", scan.cardId);
-    const data = await fetchScryfallCard(scan.cardId, scryfallCache);
-    scan.name = data.name;
-    scan.setCode = data.set;
-    scan.setName = data.set_name;
-    scan.priceUsd = data.prices?.usd ?? null;
-    renderScanList(scans);
-    await audioBus.playPriceTier(scan.priceUsd);
-    debugLog.info("scryfall metadata ready", data.name, data.set, data.prices?.usd ?? "n/a");
-  }
-
-  async function processFrame(frame, useBucket = true) {
-    const detection = await runtime.detect(frame);
-    diag.set("diag-detector-input", runtime._lastDetectorInput ?? "—");
-    diag.set("diag-raw-corners", runtime._lastRawCorners ?? "—");
-    diag.set("diag-sharpness", `${detection.sharpness?.toFixed(3) ?? "—"} (card ${detection.cardPresent ? "yes" : "no"})`);
-    if (!detection.cardPresent) {
-      camera.drawCorners(null);
-      if (useBucket) {
-        bucket.push(null);
+  // Enricher results arrive here on the main thread.
+  enricherWorker.addEventListener("message", async ({ data }) => {
+    if (data.type === "enriched") {
+      const scan = scans.find((s) => s.cardId === data.cardId);
+      if (scan) {
+        scan.name = data.name;
+        scan.setCode = data.set;
+        scan.setName = data.setName;
+        scan.priceUsd = data.priceUsd;
+        renderScanList(scans);
+        await audioBus.playPriceTier(data.priceUsd);
+        debugLog.info("scryfall metadata ready", data.name, data.set, data.priceUsd ?? "n/a");
       }
+    } else if (data.type === "enrichError") {
+      debugLog.warn("scryfall enrich failed", data.cardId, data.message);
+    }
+  });
+
+  // Scanner results arrive here.  The worker has already done detect/dewarp/
+  // embed/search; this handler only does UI + bucket + confirm logic.
+  scannerWorker.addEventListener("message", async ({ data }) => {
+    if (data.type !== "result") {
+      return;
+    }
+
+    workerBusy = false;
+
+    // Cache state for the capture button and update debug previews.
+    captureState.lastResult = data;
+    if (data.detectorBitmap) {
+      captureState.lastDetectorBitmap = data.detectorBitmap;
+      updateDetectorPreview(data.detectorBitmap);
+    }
+    if (data.cropBitmap) {
+      captureState.lastCropBitmap = data.cropBitmap;
+      updateCropPreview(data.cropBitmap);
+    }
+
+    diag.set("diag-detector-input", data.detectorInput ?? "—");
+    diag.set("diag-raw-corners", data.rawCorners ?? "—");
+    diag.set("diag-sharpness", `${data.sharpness?.toFixed(3) ?? "—"} (card ${data.cardPresent ? "yes" : "no"})`);
+
+    if (!data.cardPresent) {
+      camera.drawCorners(null);
+      bucket.push(null);
       setText("camera-badge", "No card");
       return;
     }
 
-    if (!isUsableQuad(detection.corners)) {
-      camera.drawCorners(detection.corners, "invalid");
-      if (useBucket) {
-        bucket.push(null);
-      }
+    if (!data.cornersValid) {
+      camera.drawCorners(data.corners, "invalid");
+      bucket.push(null);
       setText("camera-badge", "Bad corners");
-      debugLog.warn("skipping invalid corner quad", detection.corners);
+      debugLog.warn("skipping invalid corner quad", data.corners);
       return;
     }
 
-    camera.drawCorners(detection.corners);
-    diag.set("diag-corners", detection.corners.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("  "));
-    updateDetectorPreview(runtime.detectorScratchCanvas);
-    const crop = runtime.dewarp(frame, detection.corners);
-    updateCropPreview(crop);
-    const embedding = await runtime.embed(crop);
-    const best = runtime.search(embedding);
+    camera.drawCorners(data.corners);
+    diag.set("diag-corners", data.corners.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("  "));
 
-    if (!Number.isFinite(best.score) || best.score < MIN_MATCH_SCORE) {
-      if (useBucket) {
-        bucket.push(null);
-      }
-      setText("camera-badge", `Low match ${best.score.toFixed(2)}`);
-      debugLog.info("rejecting low-confidence match", best.cardId, `score=${best.score.toFixed(4)}`);
+    if (!Number.isFinite(data.score) || data.score < MIN_MATCH_SCORE) {
+      bucket.push(null);
+      setText("camera-badge", `Low match ${data.score?.toFixed(2) ?? "—"}`);
+      debugLog.info("rejecting low-confidence match", data.cardId, `score=${data.score?.toFixed(4)}`);
       return;
     }
 
-    const confirmed = useBucket
-      ? bucket.push({ cardId: best.cardId, score: best.score })
-      : { cardId: best.cardId, score: best.score };
-
+    const confirmed = bucket.push({ cardId: data.cardId, score: data.score });
     if (!confirmed) {
       return;
     }
@@ -1655,9 +1130,9 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog,
     camera.flashConfirmed();
     await audioBus.playScanConfirmed();
     if (scan.name === scan.cardId) {
-      enrich(scan).catch((error) => console.warn("scryfall enrich failed", error));
+      enricherWorker.postMessage({ type: "enrich", cardId: confirmed.cardId });
     }
-  }
+  });
 
   return {
     start() {
@@ -1665,28 +1140,25 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog,
         return;
       }
       setText("camera-badge", "Scanning");
-      timer = setInterval(() => {
-        if (busy || !camera.stream) {
+      timer = setInterval(async () => {
+        if (workerBusy || !camera.stream) {
           return;
         }
-        busy = true;
-        const frame = camera.captureFrame();
-        processFrame(frame, true)
-          .catch((error) => {
-            debugLog.error("scan tick failed", error);
-            setText("camera-badge", error?.message || "Scan error");
-          })
-          .finally(() => {
-            busy = false;
-          });
+        workerBusy = true;
+        try {
+          const bitmap = await createImageBitmap(camera.processCanvas);
+          scannerWorker.postMessage({ type: "frame", bitmap }, [bitmap]);
+        } catch (error) {
+          workerBusy = false;
+          debugLog.error("scan tick failed", error);
+          setText("camera-badge", error?.message || "Scan error");
+        }
       }, SCAN_INTERVAL_MS);
     },
-    async runSample() {
+    runSample() {
       debugLog.info("running bundled sample frame");
-      const sampleFrame = await loadImageToCanvas(`./assets/${manifest.sample_frame}`);
       setText("camera-badge", "Running sample");
-      await processFrame(sampleFrame, false);
-      setText("camera-badge", "Sample ready");
+      scannerWorker.postMessage({ type: "sample", url: `./assets/${manifest.sample_frame}` });
     },
   };
 }
@@ -1745,65 +1217,92 @@ async function boot() {
   loadingScreen.start("Preparing scanner runtime");
   camera.setLoading("Loading scanner");
 
-  const webgpuReady = await configureWebGpu(debugLog);
-  const inferenceMode = webgpuReady ? "WebGPU" : "WASM";
-  setText("webgpu-status", webgpuReady ? "Available" : "WASM fallback");
-  loadingScreen.step("webgpu", "done", inferenceMode);
-  loadingScreen.progress(8, `Inference: ${inferenceMode}`);
-  debugLog.info("inference configured", inferenceMode);
-
+  // Load the manifest on the main thread first — it drives both the loading
+  // screen text and the worker init message.
   const manifest = await loadManifest();
   renderManifestContract(manifest);
   loadingScreen.step("manifest", "done", `v${manifest.version}`);
   loadingScreen.progress(14, "Manifest loaded");
   debugLog.info("manifest loaded", manifest.version);
 
-  loadingScreen.step("dewarp", "active", "Ready");
-  loadingScreen.progress(18, "Preparing dewarp");
-  await prepareDewarp();
-  setText("models-status", "Loading models");
-  loadingScreen.step("dewarp", "done", "Ready");
-  loadingScreen.progress(24, "Dewarp ready");
-  debugLog.info("dewarp ready");
+  // Create two workers.  The scanner worker does all GPU/CPU inference;
+  // the enricher worker handles Scryfall price lookups independently.
+  const scannerWorker = new Worker(
+    new URL("./scanner.worker.mjs", import.meta.url),
+    { type: "module" },
+  );
+  const enricherWorker = new Worker(
+    new URL("./enricher.worker.mjs", import.meta.url),
+    { type: "module" },
+  );
 
-  const runtime = new BrowserRuntime(manifest);
+  // Wire up init-phase progress messages before posting 'init'.
+  const scannerReady = new Promise((resolve, reject) => {
+    function onInitMessage({ data }) {
+      if (data.type === "progress") {
+        if (data.stage === "webgpu") {
+          const mode = data.inferenceMode;
+          setText("webgpu-status", mode === "WebGPU" ? "Available" : "WASM fallback");
+          loadingScreen.step("webgpu", "done", mode);
+          loadingScreen.progress(20, `Inference: ${mode}`);
+          debugLog.info("inference configured", mode);
+        } else if (data.stage === "dewarp") {
+          loadingScreen.step("dewarp", "done", "Ready");
+          loadingScreen.progress(24, "Dewarp ready");
+          debugLog.info("dewarp ready");
+        } else {
+          const ranges = { detector: [24, 44], embedder: [44, 60], catalog: [60, 96] };
+          const [start, end] = ranges[data.stage] ?? [0, 0];
+          const percent = start + (end - start) * data.ratio;
+          const note = data.cached ? "Cached" : `${formatBytes(data.loaded)} / ${formatBytes(data.total)}`;
+          const label = {
+            detector: "Loading corner detector",
+            embedder: "Loading embedder",
+            catalog: "Loading card catalog",
+          }[data.stage];
+          setPhase(data.stage, percent, label, note, data.ratio >= 1 ? "done" : "active");
+        }
+      } else if (data.type === "ready") {
+        scannerWorker.removeEventListener("message", onInitMessage);
+        resolve(data.inferenceMode);
+      } else if (data.type === "error") {
+        scannerWorker.removeEventListener("message", onInitMessage);
+        reject(new Error(data.message));
+      }
+    }
+    scannerWorker.addEventListener("message", onInitMessage);
+  });
+
+  loadingScreen.step("webgpu", "active", "Configuring");
+  loadingScreen.step("dewarp", "active", "Queued");
   loadingScreen.step("detector", "active", "Queued");
   loadingScreen.step("embedder", "active", "Queued");
   loadingScreen.step("catalog", "active", "Queued");
-  await runtime.load((stage, ratio, loaded, total, cached) => {
-    const ranges = {
-      detector: [24, 44],
-      embedder: [44, 60],
-      catalog: [60, 96],
-    };
-    const [start, end] = ranges[stage];
-    const percent = start + (end - start) * ratio;
-    const note = cached ? "Cached" : `${formatBytes(loaded)} / ${formatBytes(total)}`;
-    const label = {
-      detector: "Loading corner detector",
-      embedder: "Loading embedder",
-      catalog: "Loading card catalog",
-    }[stage];
-    setPhase(stage, percent, label, note, ratio >= 1 ? "done" : "active");
-  });
+  setText("models-status", "Loading models");
+
+  scannerWorker.postMessage({ type: "init", manifest });
+  await scannerReady;
+
   setText("models-status", "Models ready");
   setText("catalog-status", `${manifest.catalog.rows} cards ready`);
   loadingScreen.progress(100, "Scanner ready");
   debugLog.info("models and catalog ready", `${manifest.catalog.rows} rows`);
 
-  const loop = createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog, diag);
+  // captureState is updated by the scanner result handler inside createScannerLoop.
+  const captureState = { lastResult: null, lastDetectorBitmap: null, lastCropBitmap: null };
+
+  const loop = createScannerLoop(
+    camera, scannerWorker, enricherWorker, scans, audioBus, manifest, debugLog, diag, captureState,
+  );
   camera.bind(async () => {
     debugLog.info("starting scan loop");
     loop.start();
   });
   camera.setReady();
   document.getElementById("run-sample").addEventListener("click", () => {
-    loop.runSample().catch((error) => {
-      debugLog.error("sample run failed", error);
-      setText("camera-badge", "Sample failed");
-    });
+    loop.runSample();
   });
-  setupCaptureButton(camera, runtime);
+  setupCaptureButton(camera, captureState);
   loadingScreen.finish();
 }
 
