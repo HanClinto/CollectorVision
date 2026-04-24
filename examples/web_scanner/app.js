@@ -675,8 +675,31 @@ class ScanBucket {
   }
 }
 
+// Writes live geometry values into the Settings sheet so they are readable on
+// mobile (open Settings → Sensor & Layout).  Silently ignores unknown IDs so
+// it is safe to call before the DOM is fully built.
+function createDiagnostics() {
+  const IDS = [
+    "diag-video", "diag-video-aspect", "diag-source-crop",
+    "diag-process-canvas", "diag-display-canvas", "diag-dpr",
+    "diag-corners", "diag-sharpness",
+  ];
+  const els = {};
+  for (const id of IDS) {
+    els[id] = document.getElementById(id);
+  }
+  return {
+    set(id, value) {
+      const el = els[id];
+      if (el) {
+        el.textContent = value;
+      }
+    },
+  };
+}
+
 class CameraSurface {
-  constructor(debugLog) {
+  constructor(debugLog, diag) {
     this.page = document.querySelector(".page");
     this.video = document.getElementById("camera-video");
     this.preview = document.getElementById("camera-preview");
@@ -688,6 +711,7 @@ class CameraSurface {
     this.badge = document.getElementById("camera-badge");
     this.startButton = document.getElementById("camera-start");
     this.debugLog = debugLog;
+    this.diag = diag;
     this.stream = null;
     this.frameCanvas = document.createElement("canvas");
     this.frameCtx = this.frameCanvas.getContext("2d", { willReadFrequently: true });
@@ -791,6 +815,23 @@ class CameraSurface {
       this.processCanvas.width = nextProcessWidth;
       this.processCanvas.height = nextProcessHeight;
     }
+
+    const vw = this.video.videoWidth;
+    const vh = this.video.videoHeight;
+    if (vw && vh) {
+      this.diag.set("diag-video", `${vw} × ${vh}`);
+      this.diag.set("diag-video-aspect", `${(vw / vh).toFixed(3)} (frame ${PREVIEW_ASPECT.toFixed(3)})`);
+    }
+    this.diag.set("diag-dpr", String(dpr));
+    this.diag.set("diag-process-canvas", `${nextProcessWidth} × ${nextProcessHeight}`);
+    this.diag.set("diag-display-canvas", `${nextDisplayWidth} × ${nextDisplayHeight}`);
+    this.debugLog.info(
+      "resize",
+      `video=${vw}×${vh}`,
+      `process=${nextProcessWidth}×${nextProcessHeight}`,
+      `display=${nextDisplayWidth}×${nextDisplayHeight}`,
+      `dpr=${dpr}`,
+    );
   }
 
   sourceCrop() {
@@ -831,6 +872,7 @@ class CameraSurface {
     }
     this.resize();
     const { sx, sy, sw, sh } = this.sourceCrop();
+    this.diag.set("diag-source-crop", `${Math.round(sx)},${Math.round(sy)} → ${Math.round(sw)}×${Math.round(sh)}`);
     const processWidth = this.processCanvas.width;
     const processHeight = this.processCanvas.height;
     if (processWidth && processHeight) {
@@ -1231,7 +1273,7 @@ function setupActions(scans) {
   });
 }
 
-function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog) {
+function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog, diag) {
   const bucket = new ScanBucket();
   const scryfallCache = new Map();
   let timer = null;
@@ -1251,6 +1293,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog)
 
   async function processFrame(frame, useBucket = true) {
     const detection = await runtime.detect(frame);
+    diag.set("diag-sharpness", `${detection.sharpness?.toFixed(3) ?? "—"} (card ${detection.cardPresent ? "yes" : "no"})`);
     if (!detection.cardPresent) {
       camera.drawCorners(null);
       if (useBucket) {
@@ -1271,6 +1314,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog)
     }
 
     camera.drawCorners(detection.corners);
+    diag.set("diag-corners", detection.corners.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("  "));
     const crop = runtime.dewarp(frame, detection.corners);
     updateCropPreview(crop);
     const embedding = await runtime.embed(crop);
@@ -1370,8 +1414,9 @@ async function boot() {
   const scans = [];
   const audioBus = createAudioBus();
   const debugLog = createDebugLog();
+  const diag = createDiagnostics();
   const loadingScreen = createLoadingScreen();
-  const camera = new CameraSurface(debugLog);
+  const camera = new CameraSurface(debugLog, diag);
 
   function setPhase(id, percent, text, note, state = "active") {
     loadingScreen.progress(percent, text);
@@ -1436,7 +1481,7 @@ async function boot() {
   loadingScreen.progress(100, "Scanner ready");
   debugLog.info("models and catalog ready", `${manifest.catalog.rows} rows`);
 
-  const loop = createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog);
+  const loop = createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog, diag);
   camera.bind(async () => {
     debugLog.info("starting scan loop");
     loop.start();
