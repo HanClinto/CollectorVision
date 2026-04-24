@@ -993,14 +993,15 @@ class BrowserRuntime {
     this.dewarpCanvas.width = DEWARP_W;
     this.dewarpCanvas.height = DEWARP_H;
     this.dewarpCtx = this.dewarpCanvas.getContext("2d", { willReadFrequently: true });
-    // Reusable canvas for letterboxing frames before detection.
-    // Letterboxing preserves the source aspect ratio inside the square model
-    // input, preventing portrait frames (e.g. Android 720×1280) from being
-    // squashed in a way that distorts card geometry and confuses the detector.
-    this.letterboxCanvas = document.createElement("canvas");
-    this.letterboxCanvas.width = DETECTOR_SIZE;
-    this.letterboxCanvas.height = DETECTOR_SIZE;
-    this.letterboxCtx = this.letterboxCanvas.getContext("2d", { willReadFrequently: true });
+    // Reusable scratch canvas for preparing frames before detection.
+    // We center-crop the frame to the largest inscribed square so the model
+    // always sees a full-resolution square with no wasted padding pixels.
+    // A portrait 720×1280 frame letterboxed to 216×384 wastes 44% of the
+    // model's resolution; a center crop to 720×720 uses all 384×384.
+    this.detectorInputCanvas = document.createElement("canvas");
+    this.detectorInputCanvas.width = DETECTOR_SIZE;
+    this.detectorInputCanvas.height = DETECTOR_SIZE;
+    this.detectorInputCtx = this.detectorInputCanvas.getContext("2d", { willReadFrequently: true });
   }
 
   async load(onStage) {
@@ -1046,21 +1047,23 @@ class BrowserRuntime {
   }
 
   async detect(frameCanvas) {
-    // Letterbox the frame into the square detector input, preserving the
-    // source aspect ratio.  Squashing a 720×1280 portrait frame into 384×384
-    // compresses the height 3× more than the width, making the card appear
-    // wide and flat and producing wrong corner predictions.
+    // Center-crop the frame to the largest inscribed square, then scale to
+    // DETECTOR_SIZE×DETECTOR_SIZE.  This is strictly better than letterboxing
+    // for portrait cameras: a 720×1280 frame letterboxed to 384×384 only uses
+    // 216 of the 384 horizontal pixels; a center crop uses all 384.
+    // Edge case: landscape 1280×720 → scale fills width, tiny vertical crop.
     const vw = frameCanvas.width;
     const vh = frameCanvas.height;
-    const lbScale = DETECTOR_SIZE / Math.max(vw, vh);
-    const scaledW = Math.round(vw * lbScale);
-    const scaledH = Math.round(vh * lbScale);
+    // Scale so the short edge fills DETECTOR_SIZE exactly (overshoots on long edge).
+    const cropScale = DETECTOR_SIZE / Math.min(vw, vh);
+    const scaledW = Math.round(vw * cropScale);
+    const scaledH = Math.round(vh * cropScale);
+    // Negative pad = draw offset that clips the overflow off each edge.
     const padX = Math.round((DETECTOR_SIZE - scaledW) / 2);
     const padY = Math.round((DETECTOR_SIZE - scaledH) / 2);
-    this.letterboxCtx.clearRect(0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
-    this.letterboxCtx.drawImage(frameCanvas, padX, padY, scaledW, scaledH);
+    this.detectorInputCtx.drawImage(frameCanvas, padX, padY, scaledW, scaledH);
 
-    const input = fillInputTensor(this.letterboxCanvas, DETECTOR_SIZE);
+    const input = fillInputTensor(this.detectorInputCanvas, DETECTOR_SIZE);
     const outputs = await this.detector.run({
       [this.inputNames.detector]: new ort.Tensor("float32", input, [1, 3, DETECTOR_SIZE, DETECTOR_SIZE]),
     });
@@ -1070,8 +1073,8 @@ class BrowserRuntime {
       ? outputs[this.detector.outputNames[2]].data[0]
       : null;
 
-    // Un-letterbox: map corners from [0,1] of the padded DETECTOR_SIZE square
-    // back to [0,1] of the original frame.
+    // Map corners from [0,1] of the square detector input back to [0,1] of
+    // the original frame, reversing the center-crop transform.
     const points = [];
     for (let i = 0; i < 8; i += 2) {
       points.push([
