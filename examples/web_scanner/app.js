@@ -821,7 +821,7 @@ class CameraSurface {
     setTimeout(() => this.canvas.classList.remove("confirmed-flash"), 400);
   }
 
-  drawCorners(corners) {
+  drawCorners(corners, variant = "valid") {
     this.clearOverlay();
     if (!corners || corners.length !== 4) {
       return;
@@ -836,11 +836,14 @@ class CameraSurface {
       this.ctx.lineTo(pts[i][0], pts[i][1]);
     }
     this.ctx.closePath();
-    this.ctx.strokeStyle = "rgba(0, 230, 120, 0.92)";
+    const stroke = variant === "invalid"
+      ? "rgba(255, 190, 40, 0.94)"
+      : "rgba(0, 230, 120, 0.92)";
+    this.ctx.strokeStyle = stroke;
     this.ctx.lineWidth = Math.max(3, Math.round((window.devicePixelRatio || 1) * 2));
     this.ctx.stroke();
 
-    this.ctx.fillStyle = "rgba(0, 230, 120, 0.92)";
+    this.ctx.fillStyle = stroke;
     for (const [x, y] of pts) {
       this.ctx.beginPath();
       this.ctx.arc(x, y, Math.max(5, (window.devicePixelRatio || 1) * 4), 0, Math.PI * 2);
@@ -1195,14 +1198,22 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog)
 
   async function processFrame(frame, useBucket = true) {
     const detection = await runtime.detect(frame);
-    if (!detection.cardPresent || !isUsableQuad(detection.corners)) {
+    if (!detection.cardPresent) {
       camera.drawCorners(null);
       if (useBucket) {
         bucket.push(null);
       }
-      if (detection.cardPresent && !isUsableQuad(detection.corners)) {
-        debugLog.warn("skipping invalid corner quad", detection.corners);
+      setText("camera-badge", "No card");
+      return;
+    }
+
+    if (!isUsableQuad(detection.corners)) {
+      camera.drawCorners(detection.corners, "invalid");
+      if (useBucket) {
+        bucket.push(null);
       }
+      setText("camera-badge", "Bad corners");
+      debugLog.warn("skipping invalid corner quad", detection.corners);
       return;
     }
 
@@ -1216,6 +1227,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog)
       if (useBucket) {
         bucket.push(null);
       }
+      setText("camera-badge", `Low match ${best.score.toFixed(2)}`);
       debugLog.info("rejecting low-confidence match", best.cardId, `score=${best.score.toFixed(4)}`);
       return;
     }
@@ -1232,6 +1244,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog)
     scan.count += 1;
     renderScanList(scans);
     debugLog.info("confirmed scan", confirmed.cardId, `score=${confirmed.score.toFixed(4)}`);
+    setText("camera-badge", `Match ${confirmed.score.toFixed(2)}`);
     camera.flashConfirmed();
     await audioBus.playScanConfirmed();
     if (scan.name === scan.cardId) {
