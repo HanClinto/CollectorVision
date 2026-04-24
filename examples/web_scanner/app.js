@@ -1,6 +1,7 @@
 import * as ort from "./vendor/onnxruntime-web/ort.all.min.mjs";
 
-const BUILD_ID = "2026-04-24-3";
+// Replaced by the deploy-pages CI workflow with the actual short commit SHA.
+const BUILD_ID = "__BUILD_ID__";
 
 const DETECTOR_SIZE = 384;
 const EMBEDDER_SIZE = 448;
@@ -216,9 +217,13 @@ function renderManifestContract(manifest) {
 }
 
 function renderBuildId() {
-  const el = document.getElementById("loading-build");
-  if (el) {
-    el.textContent = `build ${BUILD_ID}`;
+  const loading = document.getElementById("loading-build");
+  if (loading) {
+    loading.textContent = `build ${BUILD_ID}`;
+  }
+  const settings = document.getElementById("settings-build");
+  if (settings) {
+    settings.textContent = BUILD_ID;
   }
 }
 

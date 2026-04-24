@@ -31,6 +31,12 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      - name: Stamp build ID
+        run: |
+          SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
+          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/app.js
+          echo "Stamped build ID: ${SHORT_SHA}"
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
