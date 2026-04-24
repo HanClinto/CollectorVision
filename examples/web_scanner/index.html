@@ -4,9 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CollectorVision Web Scanner</title>
-    <!-- Cache-bust: redirect to ?v=<BUILD_ID> so browsers always load the
-         latest deployed version without a manual hard-reload.  The redirect
-         only fires once per build (URL already includes the correct ?v=). -->
+    <!-- Cache-bust: if ?v= is absent or doesn't match the stamped BUILD_ID,
+         redirect to ?v=__BUILD_ID__.  This breaks caching loops: if this
+         index.html is itself stale, the canary check in app.js catches the
+         mismatch and redirects to ?v=<live build ID>, which is a URL the
+         browser has never cached, forcing a fresh fetch from the origin. -->
     <script>
       (function () {
         var buildId = "__BUILD_ID__";

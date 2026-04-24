@@ -1224,6 +1224,23 @@ async function boot() {
   loadingScreen.start("Preparing scanner runtime");
   camera.setLoading("Loading scanner");
 
+  // Canary check: fetch build.json fresh from the server (bypassing all
+  // caches) and compare its buildId to ours.  If they differ, this page is
+  // stale — redirect to ?v=<live build ID> which the browser has never cached,
+  // forcing a fresh index.html fetch and picking up all updated sub-resources.
+  try {
+    const canary = await fetch(`./build.json?_=${Date.now()}`, { cache: "no-store" })
+      .then((r) => r.json());
+    if (canary.buildId && canary.buildId !== BUILD_ID) {
+      const params = new URLSearchParams(location.search);
+      params.set("v", canary.buildId);
+      location.replace(location.pathname + "?" + params.toString() + location.hash);
+      return; // halt boot — the redirect is in flight
+    }
+  } catch {
+    // Network failure (offline, etc.) — proceed with whatever we have.
+  }
+
   // Load the manifest on the main thread first — it drives both the loading
   // screen text and the worker init message.
   const manifest = await loadManifest();
