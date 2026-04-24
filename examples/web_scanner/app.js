@@ -633,6 +633,17 @@ function updateCropPreview(cropCanvas) {
   wrapper.hidden = false;
 }
 
+function updateDetectorPreview(scratchCanvas) {
+  const wrapper = document.getElementById("detector-preview");
+  const target = document.getElementById("detector-canvas");
+  if (!wrapper || !target) {
+    return;
+  }
+  const ctx = target.getContext("2d");
+  ctx.drawImage(scratchCanvas, 0, 0);
+  wrapper.hidden = false;
+}
+
 class ScanBucket {
   constructor(fillAt = 2, cooldownMs = 3500) {
     this.fillAt = fillAt;
@@ -1000,12 +1011,12 @@ class BrowserRuntime {
     this.dewarpCanvas.width = DEWARP_W;
     this.dewarpCanvas.height = DEWARP_H;
     this.dewarpCtx = this.dewarpCanvas.getContext("2d", { willReadFrequently: true });
-    // Reusable canvas for rotating portrait frames to landscape before detection.
-    // The Cornelius model was trained exclusively on landscape captures; feeding
-    // it a portrait frame squashed to 384×384 compresses the height 3× more
-    // than the width, producing completely wrong corner predictions.
-    this.rotatedCanvas = document.createElement("canvas");
-    this.rotatedCtx = this.rotatedCanvas.getContext("2d");
+    // Reusable 384×384 canvas that holds exactly what fillInputTensor fed the
+    // detector.  Exposed as a debug preview so we can see what the model sees.
+    this.detectorScratchCanvas = document.createElement("canvas");
+    this.detectorScratchCanvas.width = DETECTOR_SIZE;
+    this.detectorScratchCanvas.height = DETECTOR_SIZE;
+    this.detectorScratchCtx = this.detectorScratchCanvas.getContext("2d", { willReadFrequently: true });
   }
 
   async load(onStage) {
@@ -1053,29 +1064,13 @@ class BrowserRuntime {
   async detect(frameCanvas) {
     const vw = frameCanvas.width;
     const vh = frameCanvas.height;
-    const isPortrait = vh > vw;
 
-    // The Cornelius model was trained on landscape-format images. Squashing a
-    // portrait 720×1280 frame to 384×384 compresses height 3.3× more than
-    // width, making the card look like a wide flat sliver that the model has
-    // never seen.  Rotating portrait frames 90° CW before detection gives the
-    // model 1280×720 → 384×384, identical to the desktop landscape path.
-    // After inference we un-rotate the corners back to original portrait space.
-    let detectorInput;
-    if (isPortrait) {
-      this.rotatedCanvas.width = vh;   // new width  = original height
-      this.rotatedCanvas.height = vw;  // new height = original width
-      this.rotatedCtx.save();
-      this.rotatedCtx.translate(vh, 0);
-      this.rotatedCtx.rotate(Math.PI / 2);
-      this.rotatedCtx.drawImage(frameCanvas, 0, 0);
-      this.rotatedCtx.restore();
-      detectorInput = this.rotatedCanvas;
-    } else {
-      detectorInput = frameCanvas;
-    }
+    // Squash to DETECTOR_SIZE×DETECTOR_SIZE, matching Python _preprocess exactly.
+    // Keep a copy of what we fed the model for the debug preview.
+    this.detectorScratchCtx.drawImage(frameCanvas, 0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
+    this._lastDetectorInput = `${vw}×${vh} → squash ${DETECTOR_SIZE}×${DETECTOR_SIZE}`;
 
-    const input = fillInputTensor(detectorInput, DETECTOR_SIZE);
+    const input = fillInputTensor(frameCanvas, DETECTOR_SIZE);
     const outputs = await this.detector.run({
       [this.inputNames.detector]: new ort.Tensor("float32", input, [1, 3, DETECTOR_SIZE, DETECTOR_SIZE]),
     });
@@ -1087,21 +1082,12 @@ class BrowserRuntime {
 
     const points = [];
     for (let i = 0; i < 8; i += 2) {
-      let cx = Math.min(Math.max(cornersRaw[i], 0), 1);
-      let cy = Math.min(Math.max(cornersRaw[i + 1], 0), 1);
-      if (isPortrait) {
-        // Un-rotate 90° CW: landscape (cx, cy) → portrait (cy, 1−cx)
-        // Derivation: CW rotation maps portrait (px,py) → landscape (H-py, px).
-        // Inverse: px_portrait = cy_landscape, py_portrait = 1 - cx_landscape.
-        [cx, cy] = [cy, 1 - cx];
-      }
-      points.push([cx, cy]);
+      points.push([
+        Math.min(Math.max(cornersRaw[i], 0), 1),
+        Math.min(Math.max(cornersRaw[i + 1], 0), 1),
+      ]);
     }
 
-    // Expose raw (pre-orderCorners) values and detector input size to diag.
-    this._lastDetectorInput = isPortrait
-      ? `rotated ${vh}×${vw}`
-      : `direct ${vw}×${vh}`;
     this._lastRawCorners = points.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("  ");
 
     return {
@@ -1386,6 +1372,7 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog,
 
     camera.drawCorners(detection.corners);
     diag.set("diag-corners", detection.corners.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("  "));
+    updateDetectorPreview(runtime.detectorScratchCanvas);
     const crop = runtime.dewarp(frame, detection.corners);
     updateCropPreview(crop);
     const embedding = await runtime.embed(crop);

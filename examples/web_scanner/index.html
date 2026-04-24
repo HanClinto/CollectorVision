@@ -155,8 +155,13 @@
         </header>
 
         <div class="crop-preview" id="crop-preview" hidden>
-          <p class="section-kicker">Last aligned crop</p>
+          <p class="section-kicker">Last aligned crop (embedder input)</p>
           <canvas class="crop-canvas" id="crop-canvas" width="252" height="352"></canvas>
+        </div>
+
+        <div class="crop-preview" id="detector-preview" hidden>
+          <p class="section-kicker">Detector input (384×384 squash)</p>
+          <canvas class="crop-canvas" id="detector-canvas" width="384" height="384"></canvas>
         </div>
 
         <ul class="debug-log" id="debug-log"></ul>
