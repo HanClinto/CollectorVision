@@ -11,10 +11,25 @@ by the **Capture** button in the debug dock.  The bundle contains:
   pixels, ready to decode with ``cv2.imdecode()``.
 * ``processCanvas``  — recorded pixel dimensions for cross-checking.
 * ``orderedCorners`` / ``sharpness`` — browser-reported detection results.
+* ``expectedCardId`` — Scryfall UUID identifying the correct card (``null``
+  until a developer fills it in via ``ingest_bug_reports.py``).
 * ``consoleLog``     — full runtime log at the time of capture.
 
 Tests are generated dynamically: one test method per ``.json.gz`` file so
 pytest reports pass/fail per capture independently.
+
+What is asserted
+----------------
+All captures:
+  * frame decodes correctly and dimensions match ``processCanvas``
+  * Python detector finds ``card_present=True`` with ``sharpness >= 0.02``
+  * Browser-vs-Python corner agreement within 0.15 normalised units
+    (skipped when ``expectedCardId`` is set, because the capture may exist
+    precisely because the browser was reporting wrong corners)
+
+Captures with ``expectedCardId`` set:
+  * the full Python pipeline (detect → dewarp → embed → search) returns
+    the expected Scryfall ID as the top-1 hit
 
 Usage
 -----
@@ -54,6 +69,7 @@ class CaptureRegressionTests(unittest.TestCase):
     """
 
     detector = None
+    catalog = None
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -61,6 +77,7 @@ class CaptureRegressionTests(unittest.TestCase):
             return
         import collector_vision as cvg  # noqa: PLC0415
         cls.detector = cvg.NeuralCornerDetector()
+        cls.catalog = cvg.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
 
     def _run_capture(self, capture_path: Path) -> None:
         if self.detector is None:
@@ -68,6 +85,8 @@ class CaptureRegressionTests(unittest.TestCase):
 
         with gzip.open(capture_path, "rb") as fh:
             bundle: dict = json.load(fh)
+
+        expected_card_id: str | None = bundle.get("expectedCardId") or None
 
         # Decode the inline base64 PNG back to a BGR numpy array.
         png_bytes = base64.b64decode(bundle["framePng"])
@@ -111,7 +130,14 @@ class CaptureRegressionTests(unittest.TestCase):
             f"{capture_path.name}: sharpness {detection.sharpness:.3f} below threshold",
         )
 
-        if bundle.get("orderedCorners") and detection.corners is not None:
+        # Browser-vs-Python corner agreement.
+        # Skipped when expectedCardId is set: the capture may exist precisely
+        # because the browser was reporting wrong corners (the Android bug).
+        if (
+            bundle.get("orderedCorners")
+            and detection.corners is not None
+            and not expected_card_id
+        ):
             browser_corners = sorted(
                 [c["x"], c["y"]] for c in bundle["orderedCorners"]
             )
@@ -124,6 +150,22 @@ class CaptureRegressionTests(unittest.TestCase):
                 0.15,
                 f"{capture_path.name}: corners differ by {max_delta:.3f} "
                 f"(browser={browser_corners}, python={python_corners})",
+            )
+
+        # Full-pipeline identity check when expectedCardId is populated.
+        if expected_card_id:
+            self.assertIsNotNone(
+                self.catalog,
+                "catalog not loaded — cannot run identity check",
+            )
+            crop = detection.dewarp(bgr)
+            emb = self.catalog.embedder.embed(crop)
+            hits = self.catalog.search(emb, top_k=1)
+            _, top_id = hits[0]
+            self.assertEqual(
+                top_id,
+                expected_card_id,
+                f"{capture_path.name}: expected {expected_card_id!r}, got {top_id!r}",
             )
 
 
