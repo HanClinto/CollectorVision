@@ -10,7 +10,7 @@ const EMBEDDER_SIZE = 448;
 const DEWARP_W = 252;
 const DEWARP_H = 352;
 const MIN_SHARPNESS = 0.02;
-const MIN_MATCH_SCORE = 0.75;
+const MIN_MATCH_SCORE = 0.70;
 const PREVIEW_ASPECT = 16 / 9;
 const SCAN_INTERVAL_MS = 900;
 
@@ -1284,10 +1284,16 @@ class BrowserRuntime {
       (ratio, loaded, total, cached) => onStage?.("embedder", ratio, loaded, total, cached),
     );
 
-    ort.env.wasm.numThreads = 1;
+    // Use as many threads as the device has cores, capped at 4.
+    // NOTE: multi-threaded WASM requires SharedArrayBuffer, which in turn
+    // requires COOP/COEP response headers.  GitHub Pages does not set these,
+    // so ort-web will silently fall back to 1 thread there.  The cap of 4
+    // avoids excessive memory use on high-core-count desktops.
+    ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
     // Both models run on WASM: WebGPU produces silently wrong outputs on
     // some Android devices for both the detector and the embedder (verified
     // across captures: same input, CPU/Python agree, WebGPU does not).
+    // See tests/js/test_webgpu_vs_wasm.mjs for a reproducibility harness.
     this.detector = await ort.InferenceSession.create(detectorBuffer, {
       executionProviders: ["wasm"],
     });
