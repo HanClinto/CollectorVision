@@ -684,10 +684,40 @@ function createDiagnostics() {
     "diag-process-canvas", "diag-display-canvas", "diag-dpr",
     "diag-corners", "diag-sharpness",
   ];
+  const LABELS = {
+    "diag-video": "videoSensor",
+    "diag-video-aspect": "videoAspect",
+    "diag-source-crop": "sourceCrop",
+    "diag-process-canvas": "processCanvas",
+    "diag-display-canvas": "displayCanvas",
+    "diag-dpr": "devicePixelRatio",
+    "diag-corners": "lastCorners",
+    "diag-sharpness": "lastSharpness",
+  };
   const els = {};
   for (const id of IDS) {
     els[id] = document.getElementById(id);
   }
+
+  const copyBtn = document.getElementById("copy-diag");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      const data = {};
+      for (const id of IDS) {
+        data[LABELS[id]] = els[id]?.textContent ?? "—";
+      }
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+        const prev = copyBtn.textContent;
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = prev; }, 1500);
+      } catch {
+        copyBtn.textContent = "Failed";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+      }
+    });
+  }
+
   return {
     set(id, value) {
       const el = els[id];
