@@ -6,7 +6,7 @@ Primary path only:
 - mobile-first UI
 - WebGPU required
 - Cornelius via `onnxruntime-web`
-- dewarp via `opencv.js`
+- dewarp via local JS perspective warp
 - Milo via `onnxruntime-web`
 - local gallery search in JS
 - live metadata enrichment from Scryfall
@@ -34,7 +34,7 @@ Pipeline:
 
 1. `getUserMedia()` captures a frame from the back camera.
 2. Cornelius predicts normalized card corners.
-3. `opencv.js` dewarps to the canonical `252x352` crop.
+3. Local JS dewarp warps into the canonical `252x352` crop.
 4. Milo emits a `128`-d embedding.
 5. Browser code runs cosine search against a local embedding gallery.
 6. The winning `card_id` is enriched with static metadata and optional live
@@ -44,15 +44,14 @@ Pipeline:
 
 Runtime pieces:
 - vendored `onnxruntime-web`
-- vendored `opencv.js`
 - `IndexedDB` for cached ONNX + catalog assets
 - `fetch()` for live Scryfall lookup
 - plain ES modules and static files for GitHub Pages
 
 The browser runtime should read only local `./assets/...` files. Treat Hugging
 Face as a publish-time sync source, not a live browser dependency. The same
-goes for the browser runtimes: `onnxruntime-web` and `opencv.js` should ship
-with the app instead of loading from a CDN.
+goes for the browser runtime files: ship them with the app instead of loading
+from a CDN.
 
 ## Asset Contract
 
@@ -79,6 +78,20 @@ Cache these in browser storage after first launch:
 - card ID table
 
 Use `IndexedDB` with a manifest version to invalidate old assets cleanly.
+
+## Deploy Model
+
+The intended long-term deploy shape is:
+
+- app source stays on `main`
+- generated scanner assets are published as a GitHub release bundle
+- normal Pages deploys fetch that prepared bundle from GitHub
+- the HF catalog is only consulted by a separate asset refresh workflow
+
+See:
+
+- [ASSET_DEPLOY_PLAN.md](./ASSET_DEPLOY_PLAN.md)
+- [assets.bundle.json](./assets.bundle.json)
 
 ## Local Test Loop
 
