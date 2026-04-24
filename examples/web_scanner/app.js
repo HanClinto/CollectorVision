@@ -1234,14 +1234,10 @@ async function boot() {
 
   // Create two workers.  The scanner worker does all GPU/CPU inference;
   // the enricher worker handles Scryfall price lookups independently.
-  const scannerWorker = new Worker(
-    new URL("./scanner.worker.mjs", import.meta.url),
-    { type: "module" },
-  );
-  const enricherWorker = new Worker(
-    new URL("./enricher.worker.mjs", import.meta.url),
-    { type: "module" },
-  );
+  const scannerWorkerUrl = new URL(`./scanner.worker.mjs?v=${BUILD_ID}`, import.meta.url);
+  const scannerWorker = new Worker(scannerWorkerUrl, { type: "module" });
+  const enricherWorkerUrl = new URL(`./enricher.worker.mjs?v=${BUILD_ID}`, import.meta.url);
+  const enricherWorker = new Worker(enricherWorkerUrl, { type: "module" });
 
   // Wire up init-phase progress messages before posting 'init'.
   const scannerReady = new Promise((resolve, reject) => {
