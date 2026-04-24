@@ -1,6 +1,6 @@
 import * as ort from "./vendor/onnxruntime-web/ort.all.min.mjs";
 
-const BUILD_ID = "2026-04-24-2";
+const BUILD_ID = "2026-04-24-3";
 
 const DETECTOR_SIZE = 384;
 const EMBEDDER_SIZE = 448;
