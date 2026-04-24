@@ -30,7 +30,7 @@ const NOTES = [
   "The scanner now uses the real ONNX weights and the real MTG gallery bundle.",
   "The browser app reads local ./assets files; Hugging Face is a publish-time sync step.",
   "Models and catalog files are cached in IndexedDB after first download.",
-  "WebGPU is required. The app does not fall back to WASM-only inference.",
+  "WebGPU is used when available; falls back to WASM-only inference automatically.",
   "Scryfall enrichment runs after confirmation so the recognition loop stays local.",
   "Settings include a bundled sample-frame smoke test for local bring-up.",
   "scan.wav fires on confirm; price-tier sounds fire after Scryfall returns.",
@@ -38,7 +38,7 @@ const NOTES = [
 ];
 
 const LOADING_STEPS = [
-  { id: "webgpu", label: "Checking WebGPU" },
+  { id: "webgpu", label: "Configuring inference" },
   { id: "manifest", label: "Loading manifest" },
   { id: "dewarp", label: "Preparing dewarp" },
   { id: "detector", label: "Loading corner detector" },
@@ -399,18 +399,23 @@ function createAudioBus() {
   };
 }
 
-function assertWebGpu() {
-  if (!("gpu" in navigator)) {
-    throw new Error("WebGPU is required for this scanner.");
-  }
-}
-
+/**
+ * Attempts to configure the WebGPU adapter for ort-web.
+ * Returns true if WebGPU was configured, false if unavailable.
+ * Never throws — a false return means ort-web will fall back to WASM.
+ */
 async function configureWebGpu(debugLog) {
+  if (!("gpu" in navigator)) {
+    debugLog.info("webgpu unavailable", "navigator.gpu absent — WASM fallback");
+    return false;
+  }
+
   const adapter = await navigator.gpu.requestAdapter({
     powerPreference: "high-performance",
   });
   if (!adapter) {
-    throw new Error("Failed to get a WebGPU adapter.");
+    debugLog.info("webgpu unavailable", "requestAdapter() returned null — WASM fallback");
+    return false;
   }
 
   const requestedStorageBuffers = Math.min(
@@ -442,6 +447,7 @@ async function configureWebGpu(debugLog) {
     "webgpu adapter ready",
     `maxStorageBuffersPerShaderStage=${requestedStorageBuffers}, fp16=disabled`,
   );
+  return true;
 }
 
 function prepareDewarp() {
@@ -1744,12 +1750,12 @@ async function boot() {
   loadingScreen.start("Preparing scanner runtime");
   camera.setLoading("Loading scanner");
 
-  assertWebGpu();
-  await configureWebGpu(debugLog);
-  setText("webgpu-status", "Available");
-  loadingScreen.step("webgpu", "done", "Available");
-  loadingScreen.progress(8, "WebGPU available");
-  debugLog.info("webgpu available");
+  const webgpuReady = await configureWebGpu(debugLog);
+  const inferenceMode = webgpuReady ? "WebGPU" : "WASM";
+  setText("webgpu-status", webgpuReady ? "Available" : "WASM fallback");
+  loadingScreen.step("webgpu", "done", inferenceMode);
+  loadingScreen.progress(8, `Inference: ${inferenceMode}`);
+  debugLog.info("inference configured", inferenceMode);
 
   const manifest = await loadManifest();
   renderManifestContract(manifest);
