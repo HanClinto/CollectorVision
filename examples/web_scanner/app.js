@@ -1,5 +1,7 @@
 import * as ort from "./vendor/onnxruntime-web/ort.all.min.mjs";
 
+const BUILD_ID = "2026-04-24-1";
+
 const DETECTOR_SIZE = 384;
 const EMBEDDER_SIZE = 448;
 const DEWARP_W = 252;
@@ -210,6 +212,13 @@ function renderNotes() {
 function renderManifestContract(manifest) {
   const el = document.getElementById("asset-contract");
   el.textContent = JSON.stringify(manifest, null, 2);
+}
+
+function renderBuildId() {
+  const el = document.getElementById("loading-build");
+  if (el) {
+    el.textContent = `build ${BUILD_ID}`;
+  }
 }
 
 function openAssetDb() {
@@ -1335,6 +1344,7 @@ async function boot() {
   }
 
   renderNotes();
+  renderBuildId();
   renderScanList(scans);
   setupSettingsSheet();
   setupViewToggle();

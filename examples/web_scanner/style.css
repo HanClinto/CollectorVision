@@ -70,6 +70,14 @@ body[data-loading="true"] .loading-screen {
   line-height: 1.5;
 }
 
+.loading-screen__build {
+  margin: 0.35rem 0 0;
+  color: rgba(247, 242, 232, 0.46);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .loading-screen__bar {
   height: 0.7rem;
   margin-top: 1rem;
