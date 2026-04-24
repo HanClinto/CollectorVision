@@ -5,6 +5,7 @@ const EMBEDDER_SIZE = 448;
 const DEWARP_W = 252;
 const DEWARP_H = 352;
 const MIN_SHARPNESS = 0.02;
+const MIN_MATCH_SCORE = 0.75;
 const SCAN_INTERVAL_MS = 900;
 
 const IMAGENET_MEAN = [0.485, 0.456, 0.406];
@@ -1210,6 +1211,14 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog)
     updateCropPreview(crop);
     const embedding = await runtime.embed(crop);
     const best = runtime.search(embedding);
+
+    if (!Number.isFinite(best.score) || best.score < MIN_MATCH_SCORE) {
+      if (useBucket) {
+        bucket.push(null);
+      }
+      debugLog.info("rejecting low-confidence match", best.cardId, `score=${best.score.toFixed(4)}`);
+      return;
+    }
 
     const confirmed = useBucket
       ? bucket.push({ cardId: best.cardId, score: best.score })
