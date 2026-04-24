@@ -1,6 +1,6 @@
 import * as ort from "./vendor/onnxruntime-web/ort.all.min.mjs";
 
-const BUILD_ID = "2026-04-24-1";
+const BUILD_ID = "2026-04-24-2";
 
 const DETECTOR_SIZE = 384;
 const EMBEDDER_SIZE = 448;
@@ -8,6 +8,7 @@ const DEWARP_W = 252;
 const DEWARP_H = 352;
 const MIN_SHARPNESS = 0.02;
 const MIN_MATCH_SCORE = 0.75;
+const PREVIEW_ASPECT = 16 / 9;
 const SCAN_INTERVAL_MS = 900;
 
 const IMAGENET_MEAN = [0.485, 0.456, 0.406];
@@ -680,6 +681,8 @@ class CameraSurface {
     this.video = document.getElementById("camera-video");
     this.preview = document.getElementById("camera-preview");
     this.previewCtx = this.preview.getContext("2d");
+    this.processCanvas = document.createElement("canvas");
+    this.processCtx = this.processCanvas.getContext("2d", { willReadFrequently: true });
     this.canvas = document.getElementById("camera-overlay");
     this.ctx = this.canvas.getContext("2d");
     this.badge = document.getElementById("camera-badge");
@@ -769,49 +772,56 @@ class CameraSurface {
       return;
     }
     const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
-    const nextPreviewWidth = Math.round(width * dpr);
-    const nextPreviewHeight = Math.round(height * dpr);
-    const nextOverlayWidth = Math.round(width * dpr);
-    const nextOverlayHeight = Math.round(height * dpr);
-    if (this.preview.width !== nextPreviewWidth || this.preview.height !== nextPreviewHeight) {
-      this.preview.width = nextPreviewWidth;
-      this.preview.height = nextPreviewHeight;
+    const nextDisplayWidth = Math.round(width * dpr);
+    const nextDisplayHeight = Math.round(height * dpr);
+    const nextProcessWidth = Math.round(Math.max(width, height * PREVIEW_ASPECT) * dpr);
+    const nextProcessHeight = Math.round(nextProcessWidth / PREVIEW_ASPECT);
+    if (this.preview.width !== nextDisplayWidth || this.preview.height !== nextDisplayHeight) {
+      this.preview.width = nextDisplayWidth;
+      this.preview.height = nextDisplayHeight;
     }
-    if (this.canvas.width !== nextOverlayWidth || this.canvas.height !== nextOverlayHeight) {
-      this.canvas.width = nextOverlayWidth;
-      this.canvas.height = nextOverlayHeight;
+    if (this.canvas.width !== nextDisplayWidth || this.canvas.height !== nextDisplayHeight) {
+      this.canvas.width = nextDisplayWidth;
+      this.canvas.height = nextDisplayHeight;
+    }
+    if (
+      this.processCanvas.width !== nextProcessWidth
+      || this.processCanvas.height !== nextProcessHeight
+    ) {
+      this.processCanvas.width = nextProcessWidth;
+      this.processCanvas.height = nextProcessHeight;
     }
   }
 
-  coverCrop() {
+  sourceCrop() {
     const vw = this.video.videoWidth;
     const vh = this.video.videoHeight;
-    const cssW = this.preview.clientWidth || this.canvas.clientWidth || this.video.clientWidth || vw;
-    const cssH = this.preview.clientHeight || this.canvas.clientHeight || this.video.clientHeight || vh;
-    const scale = Math.max(cssW / vw, cssH / vh);
-    const scaledW = vw * scale;
-    const scaledH = vh * scale;
-    const cropX = (scaledW - cssW) / 2;
-    const cropY = (scaledH - cssH) / 2;
-    // sw/sh are the source region in native video pixels.  Use them as the
-    // destination size too so captureFrame operates at full camera resolution
-    // rather than the (much smaller) CSS layout dimensions.
-    const sw = cssW / scale;
-    const sh = cssH / scale;
+    const videoAspect = vw / vh;
+    let sx = 0;
+    let sy = 0;
+    let sw = vw;
+    let sh = vh;
+
+    if (videoAspect > PREVIEW_ASPECT) {
+      sw = vh * PREVIEW_ASPECT;
+      sx = (vw - sw) / 2;
+    } else {
+      sh = vw / PREVIEW_ASPECT;
+      sy = (vh - sh) / 2;
+    }
+
     return {
-      sx: cropX / scale,
-      sy: cropY / scale,
+      sx,
+      sy,
       sw,
       sh,
-      dw: Math.round(sw),
-      dh: Math.round(sh),
     };
   }
 
   captureFrame() {
-    this.frameCanvas.width = this.preview.width;
-    this.frameCanvas.height = this.preview.height;
-    this.frameCtx.drawImage(this.preview, 0, 0);
+    this.frameCanvas.width = this.processCanvas.width;
+    this.frameCanvas.height = this.processCanvas.height;
+    this.frameCtx.drawImage(this.processCanvas, 0, 0);
     return this.frameCanvas;
   }
 
@@ -820,11 +830,29 @@ class CameraSurface {
       return;
     }
     this.resize();
-    const { sx, sy, sw, sh } = this.coverCrop();
-    const width = this.preview.width;
-    const height = this.preview.height;
-    if (width && height) {
-      this.previewCtx.drawImage(this.video, sx, sy, sw, sh, 0, 0, width, height);
+    const { sx, sy, sw, sh } = this.sourceCrop();
+    const processWidth = this.processCanvas.width;
+    const processHeight = this.processCanvas.height;
+    if (processWidth && processHeight) {
+      this.processCtx.drawImage(this.video, sx, sy, sw, sh, 0, 0, processWidth, processHeight);
+    }
+
+    const displayWidth = this.preview.width;
+    const displayHeight = this.preview.height;
+    if (displayWidth && displayHeight && processWidth && processHeight) {
+      const scale = Math.max(displayWidth / processWidth, displayHeight / processHeight);
+      const drawWidth = processWidth * scale;
+      const drawHeight = processHeight * scale;
+      const offsetX = (displayWidth - drawWidth) / 2;
+      const offsetY = (displayHeight - drawHeight) / 2;
+      this.previewCtx.clearRect(0, 0, displayWidth, displayHeight);
+      this.previewCtx.drawImage(
+        this.processCanvas,
+        offsetX,
+        offsetY,
+        drawWidth,
+        drawHeight,
+      );
     }
     this._previewFrame = requestAnimationFrame(() => this.renderPreview());
   }
@@ -845,7 +873,15 @@ class CameraSurface {
     }
     const width = this.canvas.width;
     const height = this.canvas.height;
-    const pts = corners.map(([x, y]) => [x * width, y * height]);
+    const processWidth = this.processCanvas.width;
+    const processHeight = this.processCanvas.height;
+    const scale = Math.max(width / processWidth, height / processHeight);
+    const offsetX = (processWidth * scale - width) / 2;
+    const offsetY = (processHeight * scale - height) / 2;
+    const pts = corners.map(([x, y]) => [
+      x * processWidth * scale - offsetX,
+      y * processHeight * scale - offsetY,
+    ]);
 
     this.ctx.beginPath();
     this.ctx.moveTo(pts[0][0], pts[0][1]);
