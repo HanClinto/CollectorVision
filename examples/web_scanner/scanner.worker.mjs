@@ -611,7 +611,7 @@ let runtime = null;
 let frameCanvas = null;
 let frameCtx = null;
 
-async function processFrame(bitmap) {
+async function processFrame(bitmap, captureRequested = false) {
   if (!frameCanvas || frameCanvas.width !== bitmap.width || frameCanvas.height !== bitmap.height) {
     frameCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     frameCtx = frameCanvas.getContext("2d", { willReadFrequently: true });
@@ -619,11 +619,22 @@ async function processFrame(bitmap) {
   frameCtx.drawImage(bitmap, 0, 0);
   bitmap.close();
 
+  // Snapshot the frame for the capture bundle (zero-copy, worker → main).
+  let captureFrameBitmap = null;
+  if (captureRequested) {
+    const snap = new OffscreenCanvas(frameCanvas.width, frameCanvas.height);
+    snap.getContext("2d").drawImage(frameCanvas, 0, 0);
+    captureFrameBitmap = snap.transferToImageBitmap();
+  }
+
   const detection = await runtime.detect(frameCanvas);
 
   if (!detection.cardPresent) {
+    const transfer0 = captureFrameBitmap ? [captureFrameBitmap] : [];
     self.postMessage({
       type: "result",
+      captureRequested,
+      captureFrameBitmap,
       cardPresent: false,
       cornersValid: false,
       corners: detection.corners,
@@ -635,7 +646,7 @@ async function processFrame(bitmap) {
       detectorInput: runtime._lastDetectorInput,
       detectorBitmap: null,
       cropBitmap: null,
-    });
+    }, transfer0);
     return;
   }
 
@@ -646,8 +657,12 @@ async function processFrame(bitmap) {
   const cornersValid = isUsableQuad(detection.corners);
 
   if (!cornersValid) {
+    const transfer1 = [detectorBitmap];
+    if (captureFrameBitmap) transfer1.push(captureFrameBitmap);
     self.postMessage({
       type: "result",
+      captureRequested,
+      captureFrameBitmap,
       cardPresent: true,
       cornersValid: false,
       corners: detection.corners,
@@ -659,7 +674,7 @@ async function processFrame(bitmap) {
       detectorInput: runtime._lastDetectorInput,
       detectorBitmap,
       cropBitmap: null,
-    }, [detectorBitmap]);
+    }, transfer1);
     return;
   }
 
@@ -670,8 +685,12 @@ async function processFrame(bitmap) {
   // Transfer the dewarp canvas bitmap (zero-copy) then it gets a fresh blank.
   const cropBitmap = cropCanvas.transferToImageBitmap();
 
+  const transfer2 = [detectorBitmap, cropBitmap];
+  if (captureFrameBitmap) transfer2.push(captureFrameBitmap);
   self.postMessage({
     type: "result",
+    captureRequested,
+    captureFrameBitmap,
     cardPresent: true,
     cornersValid: true,
     corners: detection.corners,
@@ -683,7 +702,7 @@ async function processFrame(bitmap) {
     detectorInput: runtime._lastDetectorInput,
     detectorBitmap,
     cropBitmap,
-  }, [detectorBitmap, cropBitmap]);
+  }, transfer2);
 }
 
 // ---------------------------------------------------------------------------
@@ -706,7 +725,7 @@ self.onmessage = async ({ data }) => {
       self.postMessage({ type: "ready", inferenceMode });
 
     } else if (data.type === "frame") {
-      await processFrame(data.bitmap);
+      await processFrame(data.bitmap, data.captureRequested ?? false);
 
     } else if (data.type === "sample") {
       const response = await fetch(data.url);

@@ -416,7 +416,7 @@ function setupCaptureButton(camera, captureState) {
     return;
   }
 
-  btn.addEventListener("click", async () => {
+  btn.addEventListener("click", () => {
     if (!camera.stream) {
       btn.textContent = "No stream";
       setTimeout(() => { btn.textContent = "Capture"; }, 1500);
@@ -427,136 +427,134 @@ function setupCaptureButton(camera, captureState) {
     const captureId = `cv_${ts}`;
     btn.textContent = "\u2026";
 
-    try {
-      // Snapshot the current processCanvas for the PNG.  Do NOT call
-      // runtime.detect() here — the scan loop's setInterval is also calling
-      // it concurrently on the same InferenceSession, and two overlapping
-      // await session.run() calls on one session produce corrupt outputs.
-      // Instead, reuse the most recent detection result from the scan loop.
-      const snapshotCanvas = document.createElement("canvas");
-      snapshotCanvas.width = camera.processCanvas.width;
-      snapshotCanvas.height = camera.processCanvas.height;
-      snapshotCanvas.getContext("2d").drawImage(camera.processCanvas, 0, 0);
-
-      // Use the last result received from the scanner worker.
-      const det = captureState.lastResult ?? {};
-
-      const logEntries = Array.from(
-        document.querySelectorAll("#debug-log .debug-entry"),
-      ).reverse().map((el) => ({
-        level: el.dataset.level,
-        meta: el.querySelector(".debug-entry__meta")?.textContent ?? "",
-        message: el.querySelector(".debug-entry__message")?.textContent ?? "",
-      }));
-
-      // Full-resolution frame — what Python uses to re-run the pipeline.
-      const dataUrl = snapshotCanvas.toDataURL("image/png");
-      const framePng = dataUrl.slice(dataUrl.indexOf(",") + 1);
-
-      // Raw RGBA pixel bytes from the 384×384 detector input bitmap transferred
-      // from the scanner worker.  Stored as base64-encoded Uint8ClampedArray
-      // (no PNG encoding, no color-space metadata) so Python can reconstruct
-      // exact values with np.frombuffer(...).reshape(384, 384, 4).
-      let detectorInputRgba = null;
-      if (captureState.lastDetectorBitmap) {
-        const detScratch = document.createElement("canvas");
-        detScratch.width = DETECTOR_SIZE;
-        detScratch.height = DETECTOR_SIZE;
-        detScratch.getContext("2d", { willReadFrequently: true })
-          .drawImage(captureState.lastDetectorBitmap, 0, 0);
-        const detInputImageData = detScratch.getContext("2d", { willReadFrequently: true })
-          .getImageData(0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
-        // Avoid spreading 589 824 bytes as call arguments (stack overflow on mobile).
-        const detInputBytes = new Uint8Array(detInputImageData.data.buffer);
-        let detInputBinary = "";
-        for (let i = 0; i < detInputBytes.length; i++) {
-          detInputBinary += String.fromCharCode(detInputBytes[i]);
-        }
-        detectorInputRgba = btoa(detInputBinary);
-      }
-
-      const systemInfo = collectSystemInfo(camera);
-
-      const bundle = {
-        captureId,
-        buildId: BUILD_ID,
-        timestamp: new Date().toISOString(),
-        // Expected Scryfall card ID — null until manually identified by a developer.
-        // Set this field when filing a regression capture so the test suite can
-        // assert the correct identity once the bug is fixed.
-        expectedCardId: null,
-        systemInfo,
-        videoSensor: {
-          width: camera.video.videoWidth,
-          height: camera.video.videoHeight,
-        },
-        // processCanvas pixel dimensions — what the worker receives as a bitmap.
-        processCanvas: {
-          width: camera.processCanvas.width,
-          height: camera.processCanvas.height,
-        },
-        devicePixelRatio: window.devicePixelRatio || 1,
-        detectorSize: DETECTOR_SIZE,
-        detectorInput: det.detectorInput ?? null,
-        rawCorners: det.rawCorners ?? null,
-        orderedCorners: det.corners ? det.corners.map(([x, y]) => ({ x, y })) : null,
-        sharpness: det.sharpness ?? null,
-        cardPresent: det.cardPresent ?? null,
-        consoleLog: logEntries,
-        // Full-resolution lossless PNG of the frame that was detected.
+    // Register the callback before setting the flag to avoid a race on fast
+    // hardware where the worker result arrives before onCapture is set.
+    captureState.onCapture = async (data) => {
+      try {
+        // Draw the captured frame bitmap to a canvas for PNG encoding.
         // framePng, detectorInputRgba, and orderedCorners all come from the
-        // same frozen snapshot (no cross-tick timing race).
-        // Python: cv2.imdecode(np.frombuffer(base64.b64decode(bundle["framePng"]), np.uint8), cv2.IMREAD_COLOR)
-        framePng,
-        // Raw RGBA pixel bytes (Uint8ClampedArray) from the 384×384 canvas
-        // that was fed into the corner detector.
-        // Decode in Python: np.frombuffer(base64.b64decode(bundle["detectorInputRgba"]), np.uint8).reshape(384, 384, 4)
-        // Compare with python-detector-input.npy to find preprocessing divergence.
-        detectorInputRgba,
-      };
+        // same atomic pipeline run (no cross-tick timing race).
+        const frameBitmap = data.captureFrameBitmap;
+        const snapshotCanvas = document.createElement("canvas");
+        snapshotCanvas.width = frameBitmap.width;
+        snapshotCanvas.height = frameBitmap.height;
+        snapshotCanvas.getContext("2d").drawImage(frameBitmap, 0, 0);
+        frameBitmap.close();
 
-      // Gzip-compress the JSON bundle using the built-in CompressionStream API
-      // (Chrome 80+, all modern Android browsers) and download as a single file.
-      const jsonBytes = new TextEncoder().encode(JSON.stringify(bundle));
-      const cs = new CompressionStream("gzip");
-      const writer = cs.writable.getWriter();
-      writer.write(jsonBytes);
-      writer.close();
+        const logEntries = Array.from(
+          document.querySelectorAll("#debug-log .debug-entry"),
+        ).reverse().map((el) => ({
+          level: el.dataset.level,
+          meta: el.querySelector(".debug-entry__meta")?.textContent ?? "",
+          message: el.querySelector(".debug-entry__message")?.textContent ?? "",
+        }));
 
-      const chunks = [];
-      const reader = cs.readable.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
+        // Full-resolution frame — what Python uses to re-run the pipeline.
+        const dataUrl = snapshotCanvas.toDataURL("image/png");
+        const framePng = dataUrl.slice(dataUrl.indexOf(",") + 1);
+
+        // Raw RGBA pixel bytes from the 384×384 detector input bitmap transferred
+        // from the scanner worker.  Stored as base64-encoded Uint8ClampedArray
+        // (no PNG encoding, no color-space metadata) so Python can reconstruct
+        // exact values with np.frombuffer(...).reshape(384, 384, 4).
+        let detectorInputRgba = null;
+        if (data.detectorBitmap) {
+          const detScratch = document.createElement("canvas");
+          detScratch.width = DETECTOR_SIZE;
+          detScratch.height = DETECTOR_SIZE;
+          detScratch.getContext("2d", { willReadFrequently: true })
+            .drawImage(data.detectorBitmap, 0, 0);
+          const detInputImageData = detScratch.getContext("2d", { willReadFrequently: true })
+            .getImageData(0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
+          // Avoid spreading 589 824 bytes as call arguments (stack overflow on mobile).
+          const detInputBytes = new Uint8Array(detInputImageData.data.buffer);
+          let detInputBinary = "";
+          for (let i = 0; i < detInputBytes.length; i++) {
+            detInputBinary += String.fromCharCode(detInputBytes[i]);
+          }
+          detectorInputRgba = btoa(detInputBinary);
         }
-        chunks.push(value);
+
+        const systemInfo = collectSystemInfo(camera);
+
+        const bundle = {
+          captureId,
+          buildId: BUILD_ID,
+          timestamp: new Date().toISOString(),
+          // Expected Scryfall card ID — null until manually identified by a developer.
+          // Set this field when filing a regression capture so the test suite can
+          // assert the correct identity once the bug is fixed.
+          expectedCardId: null,
+          systemInfo,
+          videoSensor: {
+            width: camera.video.videoWidth,
+            height: camera.video.videoHeight,
+          },
+          // processCanvas pixel dimensions — what the worker receives as a bitmap.
+          processCanvas: {
+            width: snapshotCanvas.width,
+            height: snapshotCanvas.height,
+          },
+          devicePixelRatio: window.devicePixelRatio || 1,
+          detectorSize: DETECTOR_SIZE,
+          detectorInput: data.detectorInput ?? null,
+          rawCorners: data.rawCorners ?? null,
+          orderedCorners: data.corners ? data.corners.map(([x, y]) => ({ x, y })) : null,
+          sharpness: data.sharpness ?? null,
+          cardPresent: data.cardPresent ?? null,
+          consoleLog: logEntries,
+          // Python: cv2.imdecode(np.frombuffer(base64.b64decode(bundle["framePng"]), np.uint8), cv2.IMREAD_COLOR)
+          framePng,
+          // Decode in Python: np.frombuffer(base64.b64decode(bundle["detectorInputRgba"]), np.uint8).reshape(384, 384, 4)
+          // Compare with python-detector-input.npy to find preprocessing divergence.
+          detectorInputRgba,
+        };
+
+        // Gzip-compress the JSON bundle using the built-in CompressionStream API
+        // (Chrome 80+, all modern Android browsers) and download as a single file.
+        const jsonBytes = new TextEncoder().encode(JSON.stringify(bundle));
+        const cs = new CompressionStream("gzip");
+        const writer = cs.writable.getWriter();
+        writer.write(jsonBytes);
+        writer.close();
+
+        const chunks = [];
+        const reader = cs.readable.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          chunks.push(value);
+        }
+
+        const compressed = new Blob(chunks, { type: "application/gzip" });
+        const url = URL.createObjectURL(compressed);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${captureId}.json.gz`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+        // Reveal the Report link with a pre-populated GitHub issue URL.
+        const reportLink = document.getElementById("report-issue");
+        if (reportLink) {
+          reportLink.href = buildIssueUrl(captureId, systemInfo);
+          reportLink.hidden = false;
+        }
+
+        btn.textContent = "Saved!";
+        setTimeout(() => { btn.textContent = "Capture"; }, 2000);
+      } catch (err) {
+        btn.textContent = "Error";
+        console.error("capture failed", err);
+        setTimeout(() => { btn.textContent = "Capture"; }, 2000);
       }
+    };
 
-      const compressed = new Blob(chunks, { type: "application/gzip" });
-      const url = URL.createObjectURL(compressed);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${captureId}.json.gz`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-
-      // Reveal the Report link with a pre-populated GitHub issue URL.
-      const reportLink = document.getElementById("report-issue");
-      if (reportLink) {
-        reportLink.href = buildIssueUrl(captureId, systemInfo);
-        reportLink.hidden = false;
-      }
-
-      btn.textContent = "Saved!";
-      setTimeout(() => { btn.textContent = "Capture"; }, 2000);
-    } catch (err) {
-      btn.textContent = "Error";
-      console.error("capture failed", err);
-      setTimeout(() => { btn.textContent = "Capture"; }, 2000);
-    }
+    captureState.pendingCapture = true;
   });
 }
 
@@ -1077,6 +1075,13 @@ function createScannerLoop(
 
     workerBusy = false;
 
+    // Dispatch pending capture callback before any early returns.
+    if (data.captureRequested && captureState.onCapture) {
+      const cb = captureState.onCapture;
+      captureState.onCapture = null;
+      cb(data).catch((err) => console.warn("capture callback failed", err));
+    }
+
     // Cache state for the capture button and update debug previews.
     captureState.lastResult = data;
     if (data.detectorBitmap) {
@@ -1146,8 +1151,10 @@ function createScannerLoop(
         }
         workerBusy = true;
         try {
+          const captureRequested = captureState.pendingCapture;
+          if (captureRequested) captureState.pendingCapture = false;
           const bitmap = await createImageBitmap(camera.processCanvas);
-          scannerWorker.postMessage({ type: "frame", bitmap }, [bitmap]);
+          scannerWorker.postMessage({ type: "frame", bitmap, captureRequested }, [bitmap]);
         } catch (error) {
           workerBusy = false;
           debugLog.error("scan tick failed", error);
@@ -1289,7 +1296,7 @@ async function boot() {
   debugLog.info("models and catalog ready", `${manifest.catalog.rows} rows`);
 
   // captureState is updated by the scanner result handler inside createScannerLoop.
-  const captureState = { lastResult: null, lastDetectorBitmap: null, lastCropBitmap: null };
+  const captureState = { lastResult: null, lastDetectorBitmap: null, lastCropBitmap: null, pendingCapture: false, onCapture: null };
 
   const loop = createScannerLoop(
     camera, scannerWorker, enricherWorker, scans, audioBus, manifest, debugLog, diag, captureState,
