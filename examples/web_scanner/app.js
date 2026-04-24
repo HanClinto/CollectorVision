@@ -687,7 +687,7 @@ function createDiagnostics() {
   const IDS = [
     "diag-video", "diag-video-aspect", "diag-source-crop",
     "diag-process-canvas", "diag-display-canvas", "diag-dpr",
-    "diag-corners", "diag-sharpness",
+    "diag-detector-input", "diag-raw-corners", "diag-corners", "diag-sharpness",
   ];
   const LABELS = {
     "diag-video": "videoSensor",
@@ -696,6 +696,8 @@ function createDiagnostics() {
     "diag-process-canvas": "processCanvas",
     "diag-display-canvas": "displayCanvas",
     "diag-dpr": "devicePixelRatio",
+    "diag-detector-input": "detectorInput",
+    "diag-raw-corners": "rawCorners",
     "diag-corners": "lastCorners",
     "diag-sharpness": "lastSharpness",
   };
@@ -998,6 +1000,12 @@ class BrowserRuntime {
     this.dewarpCanvas.width = DEWARP_W;
     this.dewarpCanvas.height = DEWARP_H;
     this.dewarpCtx = this.dewarpCanvas.getContext("2d", { willReadFrequently: true });
+    // Reusable canvas for rotating portrait frames to landscape before detection.
+    // The Cornelius model was trained exclusively on landscape captures; feeding
+    // it a portrait frame squashed to 384×384 compresses the height 3× more
+    // than the width, producing completely wrong corner predictions.
+    this.rotatedCanvas = document.createElement("canvas");
+    this.rotatedCtx = this.rotatedCanvas.getContext("2d");
   }
 
   async load(onStage) {
@@ -1043,12 +1051,31 @@ class BrowserRuntime {
   }
 
   async detect(frameCanvas) {
-    // Squash the full frame to DETECTOR_SIZE×DETECTOR_SIZE, matching the Python
-    // _preprocess function exactly (cv2.resize to a square with no padding).
-    // The model was trained on squashed inputs so this is the correct path
-    // regardless of the frame's aspect ratio.  Cropping or letterboxing gives
-    // the model an input distribution it has never seen.
-    const input = fillInputTensor(frameCanvas, DETECTOR_SIZE);
+    const vw = frameCanvas.width;
+    const vh = frameCanvas.height;
+    const isPortrait = vh > vw;
+
+    // The Cornelius model was trained on landscape-format images. Squashing a
+    // portrait 720×1280 frame to 384×384 compresses height 3.3× more than
+    // width, making the card look like a wide flat sliver that the model has
+    // never seen.  Rotating portrait frames 90° CW before detection gives the
+    // model 1280×720 → 384×384, identical to the desktop landscape path.
+    // After inference we un-rotate the corners back to original portrait space.
+    let detectorInput;
+    if (isPortrait) {
+      this.rotatedCanvas.width = vh;   // new width  = original height
+      this.rotatedCanvas.height = vw;  // new height = original width
+      this.rotatedCtx.save();
+      this.rotatedCtx.translate(vh, 0);
+      this.rotatedCtx.rotate(Math.PI / 2);
+      this.rotatedCtx.drawImage(frameCanvas, 0, 0);
+      this.rotatedCtx.restore();
+      detectorInput = this.rotatedCanvas;
+    } else {
+      detectorInput = frameCanvas;
+    }
+
+    const input = fillInputTensor(detectorInput, DETECTOR_SIZE);
     const outputs = await this.detector.run({
       [this.inputNames.detector]: new ort.Tensor("float32", input, [1, 3, DETECTOR_SIZE, DETECTOR_SIZE]),
     });
@@ -1058,14 +1085,24 @@ class BrowserRuntime {
       ? outputs[this.detector.outputNames[2]].data[0]
       : null;
 
-    // Corners are already in [0,1] of the full frame — no un-mapping needed.
     const points = [];
     for (let i = 0; i < 8; i += 2) {
-      points.push([
-        Math.min(Math.max(cornersRaw[i], 0), 1),
-        Math.min(Math.max(cornersRaw[i + 1], 0), 1),
-      ]);
+      let cx = Math.min(Math.max(cornersRaw[i], 0), 1);
+      let cy = Math.min(Math.max(cornersRaw[i + 1], 0), 1);
+      if (isPortrait) {
+        // Un-rotate 90° CW: landscape (cx, cy) → portrait (cy, 1−cx)
+        // Derivation: CW rotation maps portrait (px,py) → landscape (H-py, px).
+        // Inverse: px_portrait = cy_landscape, py_portrait = 1 - cx_landscape.
+        [cx, cy] = [cy, 1 - cx];
+      }
+      points.push([cx, cy]);
     }
+
+    // Expose raw (pre-orderCorners) values and detector input size to diag.
+    this._lastDetectorInput = isPortrait
+      ? `rotated ${vh}×${vw}`
+      : `direct ${vw}×${vh}`;
+    this._lastRawCorners = points.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("  ");
 
     return {
       corners: orderCorners(points),
@@ -1325,6 +1362,8 @@ function createScannerLoop(camera, runtime, scans, audioBus, manifest, debugLog,
 
   async function processFrame(frame, useBucket = true) {
     const detection = await runtime.detect(frame);
+    diag.set("diag-detector-input", runtime._lastDetectorInput ?? "—");
+    diag.set("diag-raw-corners", runtime._lastRawCorners ?? "—");
     diag.set("diag-sharpness", `${detection.sharpness?.toFixed(3) ?? "—"} (card ${detection.cardPresent ? "yes" : "no"})`);
     if (!detection.cardPresent) {
       camera.drawCorners(null);
