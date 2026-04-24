@@ -1,0 +1,17 @@
+{
+  "name": "collectorvision-js-tests",
+  "version": "1.0.0",
+  "description": "Node.js regression tests for the CollectorVision JS detector pipeline",
+  "type": "module",
+  "engines": {
+    "node": ">=16"
+  },
+  "private": true,
+  "scripts": {
+    "test": "node test_pipeline.mjs"
+  },
+  "dependencies": {
+    "canvas": "^2.11.2",
+    "onnxruntime-node": "^1.17.0"
+  }
+}

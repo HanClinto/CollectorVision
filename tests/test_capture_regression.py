@@ -130,14 +130,31 @@ class CaptureRegressionTests(unittest.TestCase):
             f"{capture_path.name}: sharpness {detection.sharpness:.3f} below threshold",
         )
 
+        # Python-corner determinism: if the bundle was annotated with known-good
+        # Python corners (by ingest_bug_reports.py), assert that re-running the
+        # detector now produces the same result.  This catches model or
+        # preprocessing regressions in the Python library itself.
+        if bundle.get("pythonCorners") and detection.corners is not None:
+            stored = sorted([c["x"], c["y"]] for c in bundle["pythonCorners"])
+            fresh  = sorted(detection.corners.tolist())
+            drift  = float(
+                np.abs(np.array(stored) - np.array(fresh)).max()
+            )
+            self.assertLess(
+                drift,
+                0.05,
+                f"{capture_path.name}: Python corner drift {drift:.3f} — "
+                f"model output changed since capture was annotated "
+                f"(stored={stored}, now={fresh})",
+            )
+
         # Browser-vs-Python corner agreement.
-        # Skipped when expectedCardId is set: the capture may exist precisely
-        # because the browser was reporting wrong corners (the Android bug).
-        if (
-            bundle.get("orderedCorners")
-            and detection.corners is not None
-            and not expected_card_id
-        ):
+        # For bug-report captures taken with a broken browser (e.g. the Android
+        # WebGPU corner detection bug in issue #1), this assertion will FAIL —
+        # that is intentional.  It documents the observed browser misbehaviour
+        # and provides a regression marker: the test will pass again once the
+        # bug is fixed AND a new capture is ingested from the fixed device.
+        if bundle.get("orderedCorners") and detection.corners is not None:
             browser_corners = sorted(
                 [c["x"], c["y"]] for c in bundle["orderedCorners"]
             )
@@ -148,7 +165,8 @@ class CaptureRegressionTests(unittest.TestCase):
             self.assertLess(
                 max_delta,
                 0.15,
-                f"{capture_path.name}: corners differ by {max_delta:.3f} "
+                f"{capture_path.name}: browser corners differ from Python by "
+                f"{max_delta:.3f} — browser may be reporting wrong corners "
                 f"(browser={browser_corners}, python={python_corners})",
             )
 

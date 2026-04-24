@@ -178,6 +178,55 @@ def patch_expected_card_id(path: Path, expected_card_id: str) -> None:
     print(f"    → patched expectedCardId = {expected_card_id!r}")
 
 
+def annotate_python_results(path: Path) -> None:
+    """Run the Python detector on the capture frame and store results in the bundle.
+
+    Stores ``pythonCorners``, ``pythonSharpness``, and ``pythonCardPresent``
+    so the JS Node.js regression tests can use them as the authoritative
+    reference (Python CPU results are known-correct).
+    """
+    try:
+        import base64  # noqa: PLC0415
+
+        import cv2  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
+        import collector_vision as cvg  # noqa: PLC0415
+    except ImportError as exc:
+        print(f"    → cannot annotate (missing dep: {exc}) — skipping")
+        return
+
+    with gzip.open(path, "rb") as fh:
+        bundle = json.load(fh)
+
+    png_bytes = base64.b64decode(bundle["framePng"])
+    bgr = cv2.imdecode(np.frombuffer(png_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if bgr is None:
+        print("    → cannot annotate: failed to decode framePng")
+        return
+
+    detector = cvg.NeuralCornerDetector()
+    result = detector.detect(bgr)
+
+    bundle["pythonCorners"] = (
+        [{"x": float(x), "y": float(y)} for x, y in result.corners]
+        if result.corners is not None
+        else None
+    )
+    bundle["pythonSharpness"] = (
+        float(result.sharpness) if result.sharpness is not None else None
+    )
+    bundle["pythonCardPresent"] = bool(result.card_present)
+
+    with gzip.open(path, "wb") as fh:
+        fh.write(json.dumps(bundle).encode())
+
+    sharpness_str = f"{result.sharpness:.4f}" if result.sharpness is not None else "n/a"
+    print(
+        f"    → annotated pythonCorners ({len(bundle['pythonCorners'] or [])} pts), "
+        f"sharpness={sharpness_str}, present={result.card_present}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main ingestion logic
 # ---------------------------------------------------------------------------
@@ -224,6 +273,8 @@ def ingest_issue(issue: dict, dry_run: bool = False) -> None:
     elif expected_raw:
         # User gave a card name but no UUID — store the raw name string.
         patch_expected_card_id(dest, expected_raw)
+
+    annotate_python_results(dest)
 
 
 def main() -> None:
