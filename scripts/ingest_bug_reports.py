@@ -178,6 +178,29 @@ def patch_expected_card_id(path: Path, expected_card_id: str) -> None:
     print(f"    → patched expectedCardId = {expected_card_id!r}")
 
 
+def patch_known_issue(path: Path, issue_url: str | None) -> None:
+    """Set or clear the ``knownIssue`` field in the bundle.
+
+    ``knownIssue`` is the GitHub issue URL for bug-report captures, or ``None``
+    for clean captures.  The regression test suite uses this field to decide
+    whether browser corners should match Python (None → they should match) or
+    whether they are expected to differ (set → assert they're still wrong,
+    fire a canary if the bug is unexpectedly fixed).
+    """
+    with gzip.open(path, "rb") as fh:
+        bundle = json.load(fh)
+    current = bundle.get("knownIssue")
+    if current == issue_url:
+        return  # already correct — no-op
+    bundle["knownIssue"] = issue_url
+    with gzip.open(path, "wb") as fh:
+        fh.write(json.dumps(bundle).encode())
+    if issue_url:
+        print(f"    → set knownIssue = {issue_url!r}")
+    else:
+        print(f"    → cleared knownIssue (was {current!r})")
+
+
 def annotate_python_results(path: Path) -> None:
     """Run the Python detector on the capture frame and store results in the bundle.
 
@@ -235,6 +258,7 @@ def ingest_issue(issue: dict, dry_run: bool = False) -> None:
     number = issue["number"]
     title = issue["title"]
     body = issue.get("body") or ""
+    state = issue.get("state", "open")
 
     attachment_url = find_attachment_url(body)
     if not attachment_url:
@@ -247,9 +271,18 @@ def ingest_issue(issue: dict, dry_run: bool = False) -> None:
     expected_raw = find_expected_card(body)
     expected_sfid = extract_sfid(expected_raw) if expected_raw else None
 
-    print(f"  #{number} {title!r}")
+    # A bug-report issue (labelled "bug") gets a knownIssue URL.
+    # Closed issues get knownIssue cleared (the bug was fixed; a new clean
+    # capture should be ingested to confirm).
+    issue_url = f"https://github.com/{REPO}/issues/{number}"
+    labels = {lbl["name"] for lbl in issue.get("labels", [])}
+    is_bug = "bug" in labels
+    known_issue_value = issue_url if (is_bug and state == "open") else None
+
+    print(f"  #{number} {title!r}  [{state}]")
     print(f"    attachment : {filename}")
     print(f"    expected   : {expected_raw!r}  (sfid={expected_sfid})")
+    print(f"    knownIssue : {known_issue_value!r}")
 
     if dry_run:
         if dest.exists():
@@ -267,6 +300,8 @@ def ingest_issue(issue: dict, dry_run: bool = False) -> None:
         data = _download_bytes(attachment_url)
         dest.write_bytes(data)
         print(f"{len(data):,} bytes → {dest}")
+
+    patch_known_issue(dest, known_issue_value)
 
     if expected_sfid:
         patch_expected_card_id(dest, expected_sfid)

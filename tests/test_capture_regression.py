@@ -1,41 +1,57 @@
 """Regression tests for captured browser frames.
 
+Captures are **permanent historical records** — they should never need to be
+deleted to keep the test suite green.  Each capture exercises a specific device
+/ browser combination and may include evidence of a known bug.
+
 Drop capture bundles from the web-scanner debug dock into::
 
     tests/fixtures/captures/
 
 Each capture is a **single gzip-compressed JSON file** (``*.json.gz``) produced
-by the **Capture** button in the debug dock.  The bundle contains:
+by the **Capture** button in the debug dock.  Key fields:
 
-* ``framePng``       — base64-encoded lossless PNG of the ``processCanvas``
-  pixels, ready to decode with ``cv2.imdecode()``.
-* ``processCanvas``  — recorded pixel dimensions for cross-checking.
-* ``orderedCorners`` / ``sharpness`` — browser-reported detection results.
-* ``expectedCardId`` — Scryfall UUID identifying the correct card (``null``
-  until a developer fills it in via ``ingest_bug_reports.py``).
-* ``consoleLog``     — full runtime log at the time of capture.
-
-Tests are generated dynamically: one test method per ``.json.gz`` file so
-pytest reports pass/fail per capture independently.
+* ``framePng``       — base64-encoded lossless PNG of the ``processCanvas``.
+* ``processCanvas``  — recorded pixel dimensions.
+* ``orderedCorners`` — browser-reported corners **at the time of capture**
+  (may be wrong if taken during a browser bug).
+* ``expectedCardId`` — Scryfall UUID of the correct card (set by the ingest
+  script from the GitHub issue).
+* ``pythonCorners``  — Python CPU reference corners (set by ingest script).
+* ``knownIssue``     — GitHub issue URL if this capture documents a live bug,
+  or ``null`` if it is a clean healthy capture.
+* ``consoleLog``     — full runtime log at capture time.
 
 What is asserted
 ----------------
-All captures:
-  * frame decodes correctly and dimensions match ``processCanvas``
-  * Python detector finds ``card_present=True`` with ``sharpness >= 0.02``
-  * Browser-vs-Python corner agreement within 0.15 normalised units
-    (skipped when ``expectedCardId`` is set, because the capture may exist
-    precisely because the browser was reporting wrong corners)
+**All captures:**
+  * Frame decodes and dimensions match ``processCanvas``.
+  * Python detector finds ``card_present=True`` with ``sharpness >= 0.02``.
+  * Python corners have not drifted from the stored ``pythonCorners`` reference
+    (catches regressions in the Python library/model).
+  * Full-pipeline identity (detect → dewarp → embed → search) returns
+    ``expectedCardId`` as the top-1 hit when that field is set.
 
-Captures with ``expectedCardId`` set:
-  * the full Python pipeline (detect → dewarp → embed → search) returns
-    the expected Scryfall ID as the top-1 hit
+**Clean captures** (``knownIssue`` is null/absent):
+  * Browser corners agree with Python within 0.15 normalised units.
+    Failure here means a regression was introduced in the browser pipeline.
+
+**Bug-report captures** (``knownIssue`` is set):
+  * Browser corners are asserted to **disagree** with Python (canary).
+    If they suddenly agree, the bug has been fixed; the test fails with a
+    "bug appears fixed" message — update the bundle and ingest a clean capture.
+
+This design means:
+  * Old bug captures never cause test failures just by existing.
+  * If the underlying bug is silently fixed the canary fires, so we know.
+  * Adding a clean post-fix capture to the suite is the way to confirm a fix.
 
 Usage
 -----
-1. On the device, open the debug dock and tap **Capture**.
-2. One file downloads: ``cv_…_capture.json.gz``.
-3. Copy it into ``tests/fixtures/captures/``.
+1. On the device, open Settings → tap **⬇ Download Debug Bundle**.
+2. Share the ``.json.gz`` file and file a GitHub issue via **↗ Open GitHub Issue**.
+3. Run ``python scripts/ingest_bug_reports.py <issue-number>`` to download and
+   annotate locally.
 4. Run::
 
        python -m pytest tests/test_capture_regression.py -v
@@ -149,11 +165,17 @@ class CaptureRegressionTests(unittest.TestCase):
             )
 
         # Browser-vs-Python corner agreement.
-        # For bug-report captures taken with a broken browser (e.g. the Android
-        # WebGPU corner detection bug in issue #1), this assertion will FAIL —
-        # that is intentional.  It documents the observed browser misbehaviour
-        # and provides a regression marker: the test will pass again once the
-        # bug is fixed AND a new capture is ingested from the fixed device.
+        #
+        # The logic depends on whether this capture documents a known bug:
+        #
+        #   knownIssue = None  → clean capture; assert browser ≈ python.
+        #     Failure means a regression was introduced in the browser pipeline.
+        #
+        #   knownIssue = str   → bug-report capture; assert browser ≠ python
+        #     (i.e. the bug is still present as documented).  If the assertion
+        #     unexpectedly passes, the bug has been silently fixed and the test
+        #     fails with a "bug appears fixed" message — ingest a new clean
+        #     capture to confirm and clear the knownIssue field.
         if bundle.get("orderedCorners") and detection.corners is not None:
             browser_corners = sorted(
                 [c["x"], c["y"]] for c in bundle["orderedCorners"]
@@ -162,13 +184,28 @@ class CaptureRegressionTests(unittest.TestCase):
             max_delta = float(
                 np.abs(np.array(browser_corners) - np.array(python_corners)).max()
             )
-            self.assertLess(
-                max_delta,
-                0.15,
-                f"{capture_path.name}: browser corners differ from Python by "
-                f"{max_delta:.3f} — browser may be reporting wrong corners "
-                f"(browser={browser_corners}, python={python_corners})",
-            )
+            known_issue: str | None = bundle.get("knownIssue") or None
+            if known_issue:
+                # Canary: assert the browser is STILL producing wrong corners.
+                # If it suddenly agrees with Python, the bug may be fixed.
+                self.assertGreaterEqual(
+                    max_delta,
+                    0.15,
+                    f"{capture_path.name}: browser corners unexpectedly agree with "
+                    f"Python (delta={max_delta:.3f}) — the bug documented in "
+                    f"'{known_issue}' may now be fixed!\n"
+                    f"If so: clear the 'knownIssue' field in the bundle and "
+                    f"ingest a new clean capture to confirm.",
+                )
+            else:
+                # Normal health check: browser should match Python.
+                self.assertLess(
+                    max_delta,
+                    0.15,
+                    f"{capture_path.name}: browser corners differ from Python by "
+                    f"{max_delta:.3f} — possible regression in the browser pipeline "
+                    f"(browser={browser_corners}, python={python_corners})",
+                )
 
         # Full-pipeline identity check when expectedCardId is populated.
         if expected_card_id:
