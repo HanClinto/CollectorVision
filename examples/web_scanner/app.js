@@ -653,7 +653,7 @@ function setupCaptureButton(camera, runtime) {
     return;
   }
 
-  btn.addEventListener("click", () => {
+  btn.addEventListener("click", async () => {
     if (!camera.stream) {
       btn.textContent = "No stream";
       setTimeout(() => { btn.textContent = "Capture"; }, 1500);
@@ -664,64 +664,83 @@ function setupCaptureButton(camera, runtime) {
     const captureId = `cv_${ts}`;
     btn.textContent = "\u2026";
 
-    function downloadBlob(blob, filename) {
-      const url = URL.createObjectURL(blob);
+    try {
+      const det = runtime._lastDetection ?? {};
+      const logEntries = Array.from(
+        document.querySelectorAll("#debug-log .debug-entry"),
+      ).reverse().map((el) => ({
+        level: el.dataset.level,
+        meta: el.querySelector(".debug-entry__meta")?.textContent ?? "",
+        message: el.querySelector(".debug-entry__message")?.textContent ?? "",
+      }));
+
+      // Encode the processCanvas as a base64 PNG data URL, then strip the
+      // "data:image/png;base64," prefix so the Python side has raw b64 bytes.
+      // toDataURL() is synchronous and works even for large canvases.
+      const dataUrl = camera.processCanvas.toDataURL("image/png");
+      const framePng = dataUrl.slice(dataUrl.indexOf(",") + 1);
+
+      const bundle = {
+        captureId,
+        buildId: BUILD_ID,
+        timestamp: new Date().toISOString(),
+        videoSensor: {
+          width: camera.video.videoWidth,
+          height: camera.video.videoHeight,
+        },
+        // processCanvas pixel dimensions — what captureFrame() passes to detect().
+        processCanvas: {
+          width: camera.processCanvas.width,
+          height: camera.processCanvas.height,
+        },
+        devicePixelRatio: window.devicePixelRatio || 1,
+        detectorSize: DETECTOR_SIZE,
+        detectorInput: runtime._lastDetectorInput ?? null,
+        rawCorners: runtime._lastRawCorners ?? null,
+        orderedCorners: det.corners ? det.corners.map(([x, y]) => ({ x, y })) : null,
+        sharpness: det.sharpness ?? null,
+        cardPresent: det.cardPresent ?? null,
+        consoleLog: logEntries,
+        // Inline lossless PNG — base64 encoded, no data-URI prefix.
+        // Python: cv2.imdecode(np.frombuffer(base64.b64decode(bundle["framePng"]), np.uint8), cv2.IMREAD_COLOR)
+        framePng,
+      };
+
+      // Gzip-compress the JSON bundle using the built-in CompressionStream API
+      // (Chrome 80+, all modern Android browsers) and download as a single file.
+      const jsonBytes = new TextEncoder().encode(JSON.stringify(bundle));
+      const cs = new CompressionStream("gzip");
+      const writer = cs.writable.getWriter();
+      writer.write(jsonBytes);
+      writer.close();
+
+      const chunks = [];
+      const reader = cs.readable.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        chunks.push(value);
+      }
+
+      const compressed = new Blob(chunks, { type: "application/gzip" });
+      const url = URL.createObjectURL(compressed);
       const a = document.createElement("a");
       a.href = url;
-      a.download = filename;
+      a.download = `${captureId}.json.gz`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+      btn.textContent = "Saved!";
+      setTimeout(() => { btn.textContent = "Capture"; }, 2000);
+    } catch (err) {
+      btn.textContent = "Error";
+      console.error("capture failed", err);
+      setTimeout(() => { btn.textContent = "Capture"; }, 2000);
     }
-
-    const det = runtime._lastDetection ?? {};
-    const logEntries = Array.from(
-      document.querySelectorAll("#debug-log .debug-entry"),
-    ).reverse().map((el) => ({
-      level: el.dataset.level,
-      meta: el.querySelector(".debug-entry__meta")?.textContent ?? "",
-      message: el.querySelector(".debug-entry__message")?.textContent ?? "",
-    }));
-    const meta = {
-      captureId,
-      buildId: BUILD_ID,
-      timestamp: new Date().toISOString(),
-      // Video sensor dimensions (before any DPR scaling).
-      videoSensor: {
-        width: camera.video.videoWidth,
-        height: camera.video.videoHeight,
-      },
-      // processCanvas is what captureFrame() copies and passes to detect().
-      // Its pixel dimensions match the native frame at full DPR resolution.
-      processCanvas: {
-        width: camera.processCanvas.width,
-        height: camera.processCanvas.height,
-      },
-      devicePixelRatio: window.devicePixelRatio || 1,
-      detectorSize: DETECTOR_SIZE,
-      detectorInput: runtime._lastDetectorInput ?? null,
-      rawCorners: runtime._lastRawCorners ?? null,
-      orderedCorners: det.corners ? det.corners.map(([x, y]) => ({ x, y })) : null,
-      sharpness: det.sharpness ?? null,
-      cardPresent: det.cardPresent ?? null,
-      consoleLog: logEntries,
-    };
-
-    // 1. Download the raw frame PNG (RGBA, lossless — cv2.imread() reads as BGR).
-    camera.processCanvas.toBlob((blob) => {
-      downloadBlob(blob, `${captureId}_frame.png`);
-      // 2. Download the JSON sidecar with a small delay so browsers don't block both.
-      setTimeout(() => {
-        const metaBlob = new Blob(
-          [JSON.stringify(meta, null, 2)],
-          { type: "application/json" },
-        );
-        downloadBlob(metaBlob, `${captureId}_meta.json`);
-        btn.textContent = "Saved!";
-        setTimeout(() => { btn.textContent = "Capture"; }, 2000);
-      }, 300);
-    }, "image/png");
   });
 }
 
