@@ -19,6 +19,7 @@ Usage
     python scripts/eval_pipeline_accuracy.py <image_dir> --catalog ./my_catalog.npz
     python scripts/eval_pipeline_accuracy.py <image_dir> --catalog hf://... --min-sharpness 0.01
 """
+
 import argparse
 import re
 import sys
@@ -30,9 +31,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-UUID_RE = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I
-)
+UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
 def extract_uuid(filename: str) -> str | None:
@@ -45,8 +44,9 @@ def _load_image(img_path: Path) -> tuple[Path, np.ndarray | None]:
     return img_path, bgr
 
 
-def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int,
-        load_workers: int) -> None:
+def run(
+    image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int, load_workers: int
+) -> None:
     import collector_vision as cvg
 
     images = sorted(image_dir.glob("*.jpg")) + sorted(image_dir.glob("*.png"))
@@ -134,7 +134,7 @@ def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int,
     ms_per_img = 1000 * t_infer / max(n_in_catalog, 1)
 
     # Summary
-    print(f"\n{'─'*50}")
+    print(f"\n{'─' * 50}")
     print(f"Dataset:          {image_dir.name}")
     print(f"Total images:     {n_total}")
     print(f"Detected:         {n_detected}/{n_total}  ({pct(n_detected, n_total)})")
@@ -142,10 +142,16 @@ def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int,
     print(f"Edition top-1:    {top1_exact}/{n_in_catalog}  ({pct(top1_exact, n_in_catalog)})")
     print(f"Edition top-{top_k}:    {topk_exact}/{n_in_catalog}  ({pct(topk_exact, n_in_catalog)})")
     if has_oracle:
-        print(f"Card top-1:       {oracle1_exact}/{n_in_catalog}  ({pct(oracle1_exact, n_in_catalog)})")
-        print(f"Card top-{top_k}:       {oraclek_exact}/{n_in_catalog}  ({pct(oraclek_exact, n_in_catalog)})")
-    print(f"Timing:           {total_time:.1f}s total  "
-          f"(load {t_load:.1f}s + infer {t_infer:.1f}s,  {ms_per_img:.0f}ms/img)")
+        print(
+            f"Card top-1:       {oracle1_exact}/{n_in_catalog}  ({pct(oracle1_exact, n_in_catalog)})"
+        )
+        print(
+            f"Card top-{top_k}:       {oraclek_exact}/{n_in_catalog}  ({pct(oraclek_exact, n_in_catalog)})"
+        )
+    print(
+        f"Timing:           {total_time:.1f}s total  "
+        f"(load {t_load:.1f}s + infer {t_infer:.1f}s,  {ms_per_img:.0f}ms/img)"
+    )
 
     if misses_by_card:
         total_missed = sum(misses_by_card.values())
@@ -158,19 +164,23 @@ def run(image_dir: Path, catalog_source: str, min_sharpness: float, top_k: int,
 
 
 def pct(n: int, d: int) -> str:
-    return f"{100*n/d:.1f}%" if d else "n/a"
+    return f"{100 * n / d:.1f}%" if d else "n/a"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("image_dir", type=Path)
-    parser.add_argument("--catalog", required=True,
-                        help="hf://user/repo/key or path to .npz")
+    parser.add_argument("--catalog", required=True, help="hf://user/repo/key or path to .npz")
     parser.add_argument("--min-sharpness", type=float, default=0.02)
     parser.add_argument("--top-k", type=int, default=3)
-    parser.add_argument("--load-workers", type=int, default=8,
-                        help="Threads for parallel image loading (default: 8)")
+    parser.add_argument(
+        "--load-workers",
+        type=int,
+        default=8,
+        help="Threads for parallel image loading (default: 8)",
+    )
     args = parser.parse_args()
 
     run(args.image_dir, args.catalog, args.min_sharpness, args.top_k, args.load_workers)

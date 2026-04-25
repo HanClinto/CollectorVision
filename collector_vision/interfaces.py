@@ -7,6 +7,7 @@ satisfy them, and users can supply their own.
 To bypass detection entirely, either crop the image yourself or construct
 a DetectionResult with your own corners and call dewarp() on it.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -30,7 +31,7 @@ class CornerDetector(Protocol):
     ``card_present`` should be False and ``corners`` may be None or arbitrary.
     """
 
-    def detect(self, image: np.ndarray) -> "DetectionResult": ...
+    def detect(self, image: np.ndarray) -> DetectionResult: ...
 
 
 class DetectionResult:
@@ -40,7 +41,7 @@ class DetectionResult:
 
     def __init__(
         self,
-        corners: np.ndarray | None,     # (4, 2) float32, normalised [0, 1]
+        corners: np.ndarray | None,  # (4, 2) float32, normalised [0, 1]
         card_present: bool = True,
         confidence: float = 1.0,
         sharpness: float | None = None,

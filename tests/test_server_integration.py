@@ -4,6 +4,7 @@ Uses FastAPI's TestClient — no real HTTP server needed.  Exercises the full
 pipeline (detect → dewarp → embed → search) with the real catalog and sample
 image, keeping the example and its integration test synonymous.
 """
+
 import base64
 import sys
 from pathlib import Path
@@ -15,7 +16,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 pytestmark = pytest.mark.hf
 
-ROOT   = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg"
 
 sys.path.insert(0, str(ROOT / "examples" / "server"))
@@ -50,6 +51,7 @@ def sample_bytes():
 # /health  /
 # ---------------------------------------------------------------------------
 
+
 def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
@@ -66,6 +68,7 @@ def test_root_redirects(client):
 # /identify  (JSON endpoint)
 # ---------------------------------------------------------------------------
 
+
 def test_identify_missing_base64(client):
     r = client.post("/identify", json={"not_base64": "x"})
     assert r.status_code == 400
@@ -78,7 +81,7 @@ def test_identify_bad_base64(client):
 
 def test_identify_scrying_glass(client, sample_bytes):
     b64 = base64.b64encode(sample_bytes).decode()
-    r   = client.post("/identify", json={"_base64": b64})
+    r = client.post("/identify", json={"_base64": b64})
     assert r.status_code == 200
 
     body = r.json()
@@ -100,11 +103,11 @@ def test_identify_rolling_buffer(client, sample_bytes):
     b64 = base64.b64encode(sample_bytes).decode()
 
     # First call — get the embedding for this frame
-    r1  = client.post("/identify", json={"_base64": b64})
+    r1 = client.post("/identify", json={"_base64": b64})
     emb = r1.json()["embedding"]
 
     # Second call — send that embedding back as a prior; result should still be correct
-    r2   = client.post("/identify", json={"_base64": b64, "prior_embeddings": [emb]})
+    r2 = client.post("/identify", json={"_base64": b64, "prior_embeddings": [emb]})
     body = r2.json()
     assert body["card_present"] is True
     assert body["card_id"] == SCRYING_GLASS_ID
@@ -118,14 +121,17 @@ def test_rolling_buffer_filters_distant_prior(client, sample_bytes):
     b64 = base64.b64encode(sample_bytes).decode()
 
     # Random unit-vector — will be far from any real card embedding
-    rng  = np.random.default_rng(42)
+    rng = np.random.default_rng(42)
     noise = rng.standard_normal(128).astype(np.float32)
     noise /= np.linalg.norm(noise)
 
-    r = client.post("/identify", json={
-        "_base64": b64,
-        "prior_embeddings": [noise.tolist()],
-    })
+    r = client.post(
+        "/identify",
+        json={
+            "_base64": b64,
+            "prior_embeddings": [noise.tolist()],
+        },
+    )
     body = r.json()
     # Noisy prior should be silently discarded; result unchanged
     assert body["card_present"] is True
@@ -136,6 +142,7 @@ def test_rolling_buffer_filters_distant_prior(client, sample_bytes):
 # ---------------------------------------------------------------------------
 # /identify/upload  (single-image form endpoint)
 # ---------------------------------------------------------------------------
+
 
 def test_identify_upload_scrying_glass(client, sample_bytes):
     r = client.post(
@@ -148,7 +155,7 @@ def test_identify_upload_scrying_glass(client, sample_bytes):
     assert body["card_present"] is True
     assert body["card_id"] == SCRYING_GLASS_ID
     assert body["confidence"] > 0.8
-    assert "embedding" in body   # upload endpoint also returns embedding
+    assert "embedding" in body  # upload endpoint also returns embedding
     assert "crop_jpeg" in body
 
 
@@ -156,9 +163,10 @@ def test_identify_upload_scrying_glass(client, sample_bytes):
 # detector_none mode
 # ---------------------------------------------------------------------------
 
+
 def test_identify_detector_none(client_no_detector, sample_bytes):
     b64 = base64.b64encode(sample_bytes).decode()
-    r   = client_no_detector.post("/identify", json={"_base64": b64})
+    r = client_no_detector.post("/identify", json={"_base64": b64})
     assert r.status_code == 200
     body = r.json()
     assert body["card_present"] is True

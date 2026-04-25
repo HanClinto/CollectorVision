@@ -53,6 +53,10 @@ collector_vision = ["weights/*.onnx", "py.typed"]
 
 [tool.ruff]
 line-length = 100
+exclude = [
+  "docs/animation",
+  "experiments",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]

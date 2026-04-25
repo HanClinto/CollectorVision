@@ -41,13 +41,14 @@ import onnx
 import onnxruntime as ort
 from onnx import TensorProto, helper, numpy_helper, shape_inference
 
-RNG = np.random.default_rng(42)      # deterministic weights
-INPUT_SHAPE = (1, 3, 64, 64)         # small enough for fast browser testing
+RNG = np.random.default_rng(42)  # deterministic weights
+INPUT_SHAPE = (1, 3, 64, 64)  # small enough for fast browser testing
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_conv_weights(out_ch, in_ch, kh, kw, name):
     """Deterministic small float32 weights, values in [-0.5, 0.5]."""
@@ -56,17 +57,17 @@ def make_conv_weights(out_ch, in_ch, kh, kw, name):
 
 
 def make_bn_params(ch, prefix):
-    scale  = numpy_helper.from_array(np.ones(ch, dtype=np.float32),               f"{prefix}_scale")
-    bias   = numpy_helper.from_array(np.zeros(ch, dtype=np.float32),              f"{prefix}_bias")
-    mean   = numpy_helper.from_array(np.zeros(ch, dtype=np.float32),              f"{prefix}_mean")
-    var    = numpy_helper.from_array(np.ones(ch, dtype=np.float32) * 0.9,         f"{prefix}_var")
+    scale = numpy_helper.from_array(np.ones(ch, dtype=np.float32), f"{prefix}_scale")
+    bias = numpy_helper.from_array(np.zeros(ch, dtype=np.float32), f"{prefix}_bias")
+    mean = numpy_helper.from_array(np.zeros(ch, dtype=np.float32), f"{prefix}_mean")
+    var = numpy_helper.from_array(np.ones(ch, dtype=np.float32) * 0.9, f"{prefix}_var")
     return scale, bias, mean, var
 
 
 def run_onnx(path: str, x: np.ndarray) -> np.ndarray:
     sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
     name = sess.get_inputs()[0].name
-    out  = sess.run(None, {name: x})
+    out = sess.run(None, {name: x})
     return out[0]
 
 
@@ -75,7 +76,7 @@ def save_and_check(model, path: str, x: np.ndarray):
     onnx.checker.check_model(model)
     onnx.save(model, path)
     y = run_onnx(path, x)
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Model: {path}")
     print(f"Input:  shape={x.shape}  mean={x.mean():.4f}  std={x.std():.4f}")
     print(f"Output: shape={y.shape}  dtype={y.dtype}")
@@ -88,20 +89,25 @@ def save_and_check(model, path: str, x: np.ndarray):
 # Model 1: single Conv2d (the most fundamental op)
 # ---------------------------------------------------------------------------
 
+
 def build_single_conv():
     """1 × Conv2d(3→8, 3×3, stride=1, padding=1, no bias)."""
-    name   = "test_single_conv"
-    w      = make_conv_weights(8, 3, 3, 3, "w0")
+    name = "test_single_conv"
+    w = make_conv_weights(8, 3, 3, 3, "w0")
 
-    X      = helper.make_tensor_value_info("X",  TensorProto.FLOAT, INPUT_SHAPE)
-    Y      = helper.make_tensor_value_info("Y",  TensorProto.FLOAT, None)
+    X = helper.make_tensor_value_info("X", TensorProto.FLOAT, INPUT_SHAPE)
+    Y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, None)
 
-    node   = helper.make_node(
-        "Conv", inputs=["X", "w0"], outputs=["Y"],
-        kernel_shape=[3, 3], pads=[1, 1, 1, 1], strides=[1, 1],
+    node = helper.make_node(
+        "Conv",
+        inputs=["X", "w0"],
+        outputs=["Y"],
+        kernel_shape=[3, 3],
+        pads=[1, 1, 1, 1],
+        strides=[1, 1],
     )
-    graph  = helper.make_graph([node], name, [X], [Y], initializer=[w])
-    model  = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    graph = helper.make_graph([node], name, [X], [Y], initializer=[w])
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
     model.ir_version = 8
     return model, f"{name}.onnx"
 
@@ -110,28 +116,36 @@ def build_single_conv():
 # Model 2: Conv → BatchNorm → ReLU
 # ---------------------------------------------------------------------------
 
+
 def build_conv_bn_relu():
     """Conv2d(3→8) → BatchNorm → ReLU.  Exercises precision after normalisation."""
-    name   = "test_conv_bn_relu"
-    w      = make_conv_weights(8, 3, 3, 3, "cbn_w")
+    name = "test_conv_bn_relu"
+    w = make_conv_weights(8, 3, 3, 3, "cbn_w")
     scale, bias, mean, var = make_bn_params(8, "cbn_bn")
 
-    X      = helper.make_tensor_value_info("X",  TensorProto.FLOAT, INPUT_SHAPE)
-    Y      = helper.make_tensor_value_info("Y",  TensorProto.FLOAT, None)
+    X = helper.make_tensor_value_info("X", TensorProto.FLOAT, INPUT_SHAPE)
+    Y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, None)
 
-    conv   = helper.make_node("Conv", ["X", "cbn_w"], ["conv_out"],
-                              kernel_shape=[3, 3], pads=[1, 1, 1, 1])
-    bn     = helper.make_node("BatchNormalization",
-                              ["conv_out", "cbn_bn_scale", "cbn_bn_bias",
-                               "cbn_bn_mean", "cbn_bn_var"],
-                              ["bn_out"], epsilon=1e-5, momentum=0.9)
-    relu   = helper.make_node("Relu", ["bn_out"], ["Y"])
+    conv = helper.make_node(
+        "Conv", ["X", "cbn_w"], ["conv_out"], kernel_shape=[3, 3], pads=[1, 1, 1, 1]
+    )
+    bn = helper.make_node(
+        "BatchNormalization",
+        ["conv_out", "cbn_bn_scale", "cbn_bn_bias", "cbn_bn_mean", "cbn_bn_var"],
+        ["bn_out"],
+        epsilon=1e-5,
+        momentum=0.9,
+    )
+    relu = helper.make_node("Relu", ["bn_out"], ["Y"])
 
-    graph  = helper.make_graph(
-        [conv, bn, relu], name, [X], [Y],
+    graph = helper.make_graph(
+        [conv, bn, relu],
+        name,
+        [X],
+        [Y],
         initializer=[w, scale, bias, mean, var],
     )
-    model  = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
     model.ir_version = 8
     return model, f"{name}.onnx"
 
@@ -140,24 +154,24 @@ def build_conv_bn_relu():
 # Model 3: two Conv layers in sequence
 # ---------------------------------------------------------------------------
 
+
 def build_two_conv():
     """Conv2d(3→16) → ReLU → Conv2d(16→8).  Checks multi-layer accumulation."""
-    name   = "test_two_conv"
-    w0     = make_conv_weights(16, 3,  3, 3, "tc_w0")
-    w1     = make_conv_weights(8,  16, 1, 1, "tc_w1")   # 1×1 conv (pointwise)
+    name = "test_two_conv"
+    w0 = make_conv_weights(16, 3, 3, 3, "tc_w0")
+    w1 = make_conv_weights(8, 16, 1, 1, "tc_w1")  # 1×1 conv (pointwise)
 
-    X      = helper.make_tensor_value_info("X",  TensorProto.FLOAT, INPUT_SHAPE)
-    Y      = helper.make_tensor_value_info("Y",  TensorProto.FLOAT, None)
+    X = helper.make_tensor_value_info("X", TensorProto.FLOAT, INPUT_SHAPE)
+    Y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, None)
 
-    conv0  = helper.make_node("Conv", ["X", "tc_w0"], ["c0_out"],
-                              kernel_shape=[3, 3], pads=[1, 1, 1, 1])
-    relu   = helper.make_node("Relu", ["c0_out"], ["relu_out"])
-    conv1  = helper.make_node("Conv", ["relu_out", "tc_w1"], ["Y"],
-                              kernel_shape=[1, 1])
+    conv0 = helper.make_node(
+        "Conv", ["X", "tc_w0"], ["c0_out"], kernel_shape=[3, 3], pads=[1, 1, 1, 1]
+    )
+    relu = helper.make_node("Relu", ["c0_out"], ["relu_out"])
+    conv1 = helper.make_node("Conv", ["relu_out", "tc_w1"], ["Y"], kernel_shape=[1, 1])
 
-    graph  = helper.make_graph([conv0, relu, conv1], name, [X], [Y],
-                               initializer=[w0, w1])
-    model  = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    graph = helper.make_graph([conv0, relu, conv1], name, [X], [Y], initializer=[w0, w1])
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
     model.ir_version = 8
     return model, f"{name}.onnx"
 
@@ -165,6 +179,7 @@ def build_two_conv():
 # ---------------------------------------------------------------------------
 # Model 4: Conv → GlobalAveragePool → Flatten → Gemm
 # ---------------------------------------------------------------------------
+
 
 def build_global_avgpool_gemm():
     """Exercises the full embedder-style pipeline end.
@@ -175,7 +190,7 @@ def build_global_avgpool_gemm():
     If the earlier Conv models pass but this one fails, the Gemm or
     GlobalAveragePool is the broken operator.
     """
-    name   = "test_global_avgpool_gemm"
+    name = "test_global_avgpool_gemm"
     w_conv = make_conv_weights(16, 3, 3, 3, "gap_w_conv")
     # Gemm: (1,16) × (16,8).T → (1,8)
     w_gemm = RNG.uniform(-0.5, 0.5, (8, 16)).astype(np.float32)
@@ -183,20 +198,21 @@ def build_global_avgpool_gemm():
     w_gemm_t = numpy_helper.from_array(w_gemm, "gap_w_gemm")
     b_gemm_t = numpy_helper.from_array(b_gemm, "gap_b_gemm")
 
-    X      = helper.make_tensor_value_info("X",  TensorProto.FLOAT, INPUT_SHAPE)
-    Y      = helper.make_tensor_value_info("Y",  TensorProto.FLOAT, None)
+    X = helper.make_tensor_value_info("X", TensorProto.FLOAT, INPUT_SHAPE)
+    Y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, None)
 
-    conv   = helper.make_node("Conv", ["X", "gap_w_conv"], ["conv_out"],
-                              kernel_shape=[3, 3], pads=[1, 1, 1, 1])
-    relu   = helper.make_node("Relu", ["conv_out"], ["relu_out"])
-    pool   = helper.make_node("GlobalAveragePool", ["relu_out"], ["pool_out"])
-    flat   = helper.make_node("Flatten", ["pool_out"], ["flat_out"], axis=1)
-    gemm   = helper.make_node("Gemm", ["flat_out", "gap_w_gemm", "gap_b_gemm"], ["Y"],
-                              transB=1)
+    conv = helper.make_node(
+        "Conv", ["X", "gap_w_conv"], ["conv_out"], kernel_shape=[3, 3], pads=[1, 1, 1, 1]
+    )
+    relu = helper.make_node("Relu", ["conv_out"], ["relu_out"])
+    pool = helper.make_node("GlobalAveragePool", ["relu_out"], ["pool_out"])
+    flat = helper.make_node("Flatten", ["pool_out"], ["flat_out"], axis=1)
+    gemm = helper.make_node("Gemm", ["flat_out", "gap_w_gemm", "gap_b_gemm"], ["Y"], transB=1)
 
-    graph  = helper.make_graph([conv, relu, pool, flat, gemm], name, [X], [Y],
-                               initializer=[w_conv, w_gemm_t, b_gemm_t])
-    model  = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    graph = helper.make_graph(
+        [conv, relu, pool, flat, gemm], name, [X], [Y], initializer=[w_conv, w_gemm_t, b_gemm_t]
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
     model.ir_version = 8
     return model, f"{name}.onnx"
 
@@ -204,6 +220,7 @@ def build_global_avgpool_gemm():
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def build_all(output_dir: "Path | None" = None) -> dict:
     """Build all test models, write expected_outputs.json, return {filename: [first8]}.
@@ -220,7 +237,12 @@ def build_all(output_dir: "Path | None" = None) -> dict:
     x = np.full(INPUT_SHAPE, 0.5, dtype=np.float32)
     results = {}
 
-    for builder in [build_single_conv, build_conv_bn_relu, build_two_conv, build_global_avgpool_gemm]:
+    for builder in [
+        build_single_conv,
+        build_conv_bn_relu,
+        build_two_conv,
+        build_global_avgpool_gemm,
+    ]:
         model, filename = builder()
         path = str(output_dir / filename)
         model = shape_inference.infer_shapes(model)
@@ -239,7 +261,8 @@ def build_all(output_dir: "Path | None" = None) -> dict:
 def main():
     x = np.full(INPUT_SHAPE, 0.5, dtype=np.float32)
 
-    print(textwrap.dedent("""
+    print(
+        textwrap.dedent("""
     ╔══════════════════════════════════════════════════════════════╗
     ║  CollectorVision — WebGPU Android ARM minimal model builder  ║
     ╚══════════════════════════════════════════════════════════════╝
@@ -248,7 +271,8 @@ def main():
     Run run_experiment.py to automate the full WebGPU vs WASM comparison.
 
     Input for all models: shape=(1,3,64,64), all values = 0.5
-    """).strip())
+    """).strip()
+    )
 
     models = [
         build_single_conv,
@@ -263,8 +287,8 @@ def main():
         y = save_and_check(model, path, x)
         results[path] = y
 
-    build_all()   # writes expected_outputs.json
-    print(f"\nexpected_outputs.json written — browser_test.html will load it automatically.")
+    build_all()  # writes expected_outputs.json
+    print("\nexpected_outputs.json written — browser_test.html will load it automatically.")
 
     return 0
 

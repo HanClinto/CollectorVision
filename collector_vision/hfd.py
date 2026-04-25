@@ -30,6 +30,7 @@ Override the root with ``$COLLECTORVISION_CACHE`` or the ``cache_dir`` argument.
       }
     }
 """
+
 from __future__ import annotations
 
 import json
@@ -175,6 +176,7 @@ class HFD:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _default_cache_dir() -> Path:
     base = Path(os.environ.get("COLLECTORVISION_CACHE", "~/.cache/collectorvision"))

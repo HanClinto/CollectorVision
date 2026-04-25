@@ -24,3 +24,6 @@ examples/web_scanner/bundle-metadata.json
 # The .gitkeep preserves the directory; everything else is local-only.
 tests/fixtures/captures/*
 !tests/fixtures/captures/.gitkeep
+# Embedding JSON files are small and needed by test_pipeline_consistency.py
+!tests/fixtures/captures/*.python.json
+!tests/fixtures/captures/*.js-cpu.json

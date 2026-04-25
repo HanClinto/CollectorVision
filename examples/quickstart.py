@@ -4,11 +4,13 @@
 Run from the repo root:
     python examples/quickstart.py
 """
+
 import json
 import urllib.request
 from pathlib import Path
 
 import cv2
+
 import collector_vision as cvg
 
 IMAGE = Path("examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg")
@@ -21,7 +23,7 @@ image = cv2.imread(str(IMAGE))
 
 # 3. Detect card corners within image, and get a sharpness score (0-1) indicating confidence in the detection.
 #    If sharpness is low, try retaking the photo with better lighting, less blur, or a clearer view of the card.
-detector  = cvg.NeuralCornerDetector()
+detector = cvg.NeuralCornerDetector()
 detection = detector.detect(image)
 print(f"Detected corner sharpness={detection.sharpness:.3f}")
 

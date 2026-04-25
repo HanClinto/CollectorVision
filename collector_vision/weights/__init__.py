@@ -18,29 +18,31 @@ Version metadata is embedded inside each ONNX file (readable via
 ``onnxruntime`` session.get_modelmeta().custom_metadata_map) and
 reflected in the constants below.  Update both when swapping a file.
 """
+
 from pathlib import Path
 
 _WEIGHTS_DIR = Path(__file__).parent
 
 # --- Paths ------------------------------------------------------------------
 
-CORNER_DETECTOR = _WEIGHTS_DIR / "cornelius.onnx"   # Cornelius
-EMBEDDER        = _WEIGHTS_DIR / "milo.onnx"     # Milo
+CORNER_DETECTOR = _WEIGHTS_DIR / "cornelius.onnx"  # Cornelius
+EMBEDDER = _WEIGHTS_DIR / "milo.onnx"  # Milo
 
 # --- Versions ---------------------------------------------------------------
 # These mirror the 'version' key in each model's ONNX metadata_props.
 # Bump here (and rebuild the wheel) whenever the .onnx file is replaced.
 
 CORNELIUS_VERSION = "1.164"
-MILO_VERSION   = "1.0.0"
+MILO_VERSION = "1.0.0"
 
 BUNDLED_VERSIONS: dict[str, str] = {
     "cornelius": CORNELIUS_VERSION,
-    "milo":      MILO_VERSION,
+    "milo": MILO_VERSION,
 }
 
 
 # --- Diagnostics ------------------------------------------------------------
+
 
 def check() -> dict[str, dict]:
     """Return presence, size, and ONNX-embedded metadata for each bundled model.
@@ -76,9 +78,8 @@ def check() -> dict[str, dict]:
         }
         try:
             import onnxruntime as ort  # noqa: PLC0415
-            sess = ort.InferenceSession(
-                str(path), providers=["CPUExecutionProvider"]
-            )
+
+            sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
             info.update(sess.get_modelmeta().custom_metadata_map)
         except Exception as exc:
             info["metadata_error"] = str(exc)

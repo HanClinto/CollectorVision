@@ -10,6 +10,7 @@ Not all captures in that directory are reference captures — some were recorded
 during the WebGPU bug investigation when the JS pipeline was in a broken state.
 Only captures listed in _REFERENCE_CAPTURES are tested here.
 """
+
 import json
 import unittest
 from pathlib import Path
@@ -43,11 +44,13 @@ class CrossPipelineConsistencyTests(unittest.TestCase):
 
         # Both embeddings should be unit-norm (L2-normalised)
         self.assertGreater(
-            float(np.linalg.norm(py_emb)), _MIN_NORM,
+            float(np.linalg.norm(py_emb)),
+            _MIN_NORM,
             f"{capture_id}: python embedding is not unit-norm",
         )
         self.assertGreater(
-            float(np.linalg.norm(cpu_emb)), _MIN_NORM,
+            float(np.linalg.norm(cpu_emb)),
+            _MIN_NORM,
             f"{capture_id}: js-cpu embedding is not unit-norm",
         )
 

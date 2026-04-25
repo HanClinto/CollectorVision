@@ -24,6 +24,7 @@ Usage
     python examples/advanced/custom_pipeline.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg --catalog hf://HanClinto/milo/scryfall-mtg --detector canny
     python examples/advanced/custom_pipeline.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg --catalog hf://HanClinto/milo/scryfall-mtg --embedder phash
 """
+
 import argparse
 import sys
 
@@ -31,10 +32,10 @@ import cv2
 import numpy as np
 from PIL import Image
 
-
 # ---------------------------------------------------------------------------
 # Custom detector — Canny contour, no ML weights required
 # ---------------------------------------------------------------------------
+
 
 def detect_canny(bgr: np.ndarray):
     """Return a DetectionResult using Canny edge contours.
@@ -60,10 +61,13 @@ def detect_canny(bgr: np.ndarray):
             continue
         pts = approx.reshape(4, 2).astype(np.float32)
         s, d = pts.sum(axis=1), np.diff(pts, axis=1).ravel()
-        ordered = np.array([pts[np.argmin(s)], pts[np.argmin(d)],
-                            pts[np.argmax(s)], pts[np.argmax(d)]], dtype=np.float32)
-        return DetectionResult(corners=ordered / [w, h], card_present=True,
-                               confidence=area / (h * w))
+        ordered = np.array(
+            [pts[np.argmin(s)], pts[np.argmin(d)], pts[np.argmax(s)], pts[np.argmax(d)]],
+            dtype=np.float32,
+        )
+        return DetectionResult(
+            corners=ordered / [w, h], card_present=True, confidence=area / (h * w)
+        )
 
     return DetectionResult(corners=None, card_present=False, confidence=0.0)
 
@@ -72,16 +76,20 @@ def detect_canny(bgr: np.ndarray):
 # Custom embedder — pHash, no ONNX runtime required
 # ---------------------------------------------------------------------------
 
+
 def phash_embed(image: Image.Image, hash_size: int = 16) -> np.ndarray:
     """Return a packed uint8 bit vector using DCT perceptual hash."""
     import imagehash
+
     bits = imagehash.phash(image.convert("RGB"), hash_size=hash_size).hash.flatten()
     padded = np.zeros((hash_size * hash_size + 7) // 8 * 8, dtype=np.uint8)
     padded[: len(bits)] = bits.astype(np.uint8)
     return np.packbits(padded)
 
 
-def hamming_search(query: np.ndarray, embeddings: np.ndarray, top_k: int) -> list[tuple[float, int]]:
+def hamming_search(
+    query: np.ndarray, embeddings: np.ndarray, top_k: int
+) -> list[tuple[float, int]]:
     n_bits = query.shape[0] * 8
     scores = 1.0 - np.unpackbits(np.bitwise_xor(embeddings, query), axis=1).sum(axis=1) / n_bits
     if top_k >= len(scores):
@@ -96,7 +104,10 @@ def hamming_search(query: np.ndarray, embeddings: np.ndarray, top_k: int) -> lis
 # Pipeline
 # ---------------------------------------------------------------------------
 
-def identify(image_path: str, catalog_path: str, use_canny: bool, use_phash: bool, top_k: int) -> None:
+
+def identify(
+    image_path: str, catalog_path: str, use_canny: bool, use_phash: bool, top_k: int
+) -> None:
     import collector_vision as cvg
 
     bgr = cv2.imread(image_path)
@@ -139,9 +150,11 @@ def identify(image_path: str, catalog_path: str, use_canny: bool, use_phash: boo
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("images", nargs="+", help="Image files to identify")
     parser.add_argument("--catalog", required=True, help="Path to NPZ catalog file")
     parser.add_argument("--detector", choices=["cornelius", "canny"], default="cornelius")
@@ -151,10 +164,13 @@ def main() -> None:
 
     for path in args.images:
         print(f"\n=== {path} ===")
-        identify(path, args.catalog,
-                 use_canny=(args.detector == "canny"),
-                 use_phash=(args.embedder == "phash"),
-                 top_k=args.top_k)
+        identify(
+            path,
+            args.catalog,
+            use_canny=(args.detector == "canny"),
+            use_phash=(args.embedder == "phash"),
+            top_k=args.top_k,
+        )
 
 
 if __name__ == "__main__":

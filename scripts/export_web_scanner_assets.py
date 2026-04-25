@@ -26,10 +26,9 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from collector_vision import weights
 from collector_vision.catalog import Catalog
 from collector_vision.hfd import HFD
-from collector_vision import weights
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT_DIR = ROOT / "examples" / "web_scanner"

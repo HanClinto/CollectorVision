@@ -28,6 +28,7 @@ transparently; new catalogs should use packed binary.
 Pack:   ``np.array([bytes.fromhex(s.replace('-','')) for s in ids], dtype=np.uint8)``
 Unpack: ``f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:]}"`` where ``h = row.tobytes().hex()``
 """
+
 from __future__ import annotations
 
 import json
@@ -37,17 +38,17 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    from collector_vision.games import Embedding, Game
     from collector_vision.hfd import HFD
     from collector_vision.interfaces import Embedder
-    from collector_vision.games import Game, Embedding
 
 
 # NPZ keys
-_KEY_EMBEDDINGS  = "embeddings"    # (N, D) float32
-_KEY_CARD_IDS    = "card_ids"      # (N,) str or (N, 16) uint8
-_KEY_ORACLE_IDS  = "oracle_ids"    # (N,) str or (N, 16) uint8 — optional
-_KEY_SOURCE      = "source"        # scalar str
-_KEY_EMBEDDER    = "embedder_spec" # scalar str — JSON
+_KEY_EMBEDDINGS = "embeddings"  # (N, D) float32
+_KEY_CARD_IDS = "card_ids"  # (N,) str or (N, 16) uint8
+_KEY_ORACLE_IDS = "oracle_ids"  # (N,) str or (N, 16) uint8 — optional
+_KEY_SOURCE = "source"  # scalar str
+_KEY_EMBEDDER = "embedder_spec"  # scalar str — JSON
 
 
 def _unpack_ids(arr: np.ndarray) -> list[str]:
@@ -69,10 +70,7 @@ def pack_ids(ids: list[str]) -> np.ndarray:
     or converting a catalog NPZ to store card/oracle IDs efficiently.
     Empty strings produce a zero row.
     """
-    raw = b"".join(
-        (b"\x00" * 16) if not s else bytes.fromhex(s.replace("-", ""))
-        for s in ids
-    )
+    raw = b"".join((b"\x00" * 16) if not s else bytes.fromhex(s.replace("-", "")) for s in ids)
     return np.frombuffer(raw, dtype=np.uint8).reshape(len(ids), 16).copy()
 
 
@@ -108,7 +106,7 @@ class Catalog:
         self.source = source
         self.embedder_spec = embedder_spec
 
-        self._embedder: "Embedder | None" = None
+        self._embedder: Embedder | None = None
 
         # Fast lookup dicts — built once, used for oracle-level accuracy checks.
         # Both are empty dicts when oracle_ids is absent.
@@ -123,7 +121,7 @@ class Catalog:
             self.oracle_to_cards = {}
 
     @classmethod
-    def load(cls, source: str | Path | HFD) -> "Catalog":
+    def load(cls, source: str | Path | HFD) -> Catalog:
         """Load a catalog from a local NPZ file or a HuggingFace reference.
 
         Parameters
@@ -146,12 +144,11 @@ class Catalog:
         if isinstance(source, _HFD):
             path = source.resolve()
         elif isinstance(source, str) and source.startswith("hf://"):
-            rest = source[len("hf://"):]
+            rest = source[len("hf://") :]
             parts = rest.split("/", 2)
             if len(parts) != 3:
                 raise ValueError(
-                    f"Invalid hf:// URI {source!r}. "
-                    "Expected format: hf://user/repo/catalog-key"
+                    f"Invalid hf:// URI {source!r}. Expected format: hf://user/repo/catalog-key"
                 )
             repo = f"{parts[0]}/{parts[1]}"
             path = _HFD(repo, parts[2]).resolve()
@@ -167,11 +164,7 @@ class Catalog:
         if _KEY_EMBEDDER in data.files:
             embedder_spec = json.loads(str(data[_KEY_EMBEDDER]))
 
-        oracle_ids = (
-            _unpack_ids(data[_KEY_ORACLE_IDS])
-            if _KEY_ORACLE_IDS in data.files
-            else None
-        )
+        oracle_ids = _unpack_ids(data[_KEY_ORACLE_IDS]) if _KEY_ORACLE_IDS in data.files else None
 
         return cls(
             embeddings=data[_KEY_EMBEDDINGS],
@@ -182,7 +175,7 @@ class Catalog:
         )
 
     @property
-    def embedder(self) -> "Embedder":
+    def embedder(self) -> Embedder:
         """The embedder that must be used to query this catalog.
 
         Constructed lazily from :attr:`embedder_spec` on first access.
@@ -199,11 +192,11 @@ class Catalog:
     @classmethod
     def for_game(
         cls,
-        game: "Game",
-        embedding: "Embedding | None" = None,
+        game: Game,
+        embedding: Embedding | None = None,
         cache_dir: Path | None = None,
         offline: bool = False,
-    ) -> "Catalog":
+    ) -> Catalog:
         """Download (or load from cache) the latest catalog for a single game.
 
         Parameters
@@ -223,7 +216,8 @@ class Catalog:
             from collector_vision.games import Game
             catalog = Catalog.for_game(Game.MTG)
         """
-        from collector_vision.games import Embedding as _Embedding, GAME_PRIMARY_SOURCE
+        from collector_vision.games import GAME_PRIMARY_SOURCE
+        from collector_vision.games import Embedding as _Embedding
         from collector_vision.hfd import HFD
 
         embedding = embedding or _Embedding.MILO
@@ -235,11 +229,11 @@ class Catalog:
     @classmethod
     def for_games(
         cls,
-        *games: "Game",
-        embedding: "Embedding | None" = None,
+        *games: Game,
+        embedding: Embedding | None = None,
         cache_dir: Path | None = None,
         offline: bool = False,
-    ) -> "Catalog":
+    ) -> Catalog:
         """Download and merge catalogs for multiple games.
 
         All games must use the same embedding so query vectors are compatible.
@@ -258,7 +252,7 @@ class Catalog:
         return loaded[0] if len(loaded) == 1 else cls._merge(loaded)
 
     @classmethod
-    def _merge(cls, catalogs: "list[Catalog]") -> "Catalog":
+    def _merge(cls, catalogs: list[Catalog]) -> Catalog:
         """Concatenate multiple compatible catalogs into one."""
         ref_spec = catalogs[0].embedder_spec
         for c in catalogs[1:]:
@@ -324,12 +318,14 @@ class Catalog:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _embedder_from_spec(spec: dict) -> "Embedder":
+
+def _embedder_from_spec(spec: dict) -> Embedder:
     """Reconstruct an Embedder from the spec dict stored in the catalog."""
     kind = spec.get("kind")
 
     if kind == "neural":
         from collector_vision.embedders.neural import NeuralEmbedder
+
         return NeuralEmbedder()
 
     raise ValueError(

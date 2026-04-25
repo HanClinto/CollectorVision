@@ -6,18 +6,21 @@ Run from the collector_vision project root:
 
 Outputs: docs/animation/precomputed.json
 """
+
 import json
 import sys
 from pathlib import Path
 
 import cv2
-import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 def main():
-    sample = Path(__file__).parent.parent.parent / "examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg"
+    sample = (
+        Path(__file__).parent.parent.parent
+        / "examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg"
+    )
     if not sample.exists():
         print(f"Sample image not found: {sample}")
         sys.exit(1)
@@ -34,7 +37,7 @@ def main():
     detection = detector.detect(bgr)
     print(f"card_present: {detection.card_present}")
     print(f"sharpness:    {detection.sharpness:.4f}")
-    print(f"corners (normalized):")
+    print("corners (normalized):")
     for label, corner in zip(["TL", "TR", "BR", "BL"], detection.corners):
         print(f"  {label}: ({corner[0]:.4f}, {corner[1]:.4f})")
 
@@ -55,9 +58,9 @@ def main():
         embedding_values = emb.tolist()
         hits = catalog.search(emb, top_k=5)
         top_hits = [(float(score), cid) for score, cid in hits]
-        print(f"\nTop-5 hits:")
+        print("\nTop-5 hits:")
         for i, (score, cid) in enumerate(top_hits):
-            print(f"  {i+1}. {cid}  score={score:.4f}")
+            print(f"  {i + 1}. {cid}  score={score:.4f}")
 
     result = {
         "image_size": [w, h],

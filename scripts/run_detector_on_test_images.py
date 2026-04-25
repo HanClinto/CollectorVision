@@ -12,6 +12,7 @@ Walks all .jpg/.png in input_dir, runs Cornelius, saves:
 
 Prints a summary at the end.
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -85,14 +86,15 @@ def run(input_dir: Path, output_dir: Path, min_sharpness: float) -> None:
             )
 
     total = n_detected + n_missed
-    print(f"\n{input_dir.name}: {n_detected}/{total} detected  ({100*n_detected/total:.1f}%)")
+    print(f"\n{input_dir.name}: {n_detected}/{total} detected  ({100 * n_detected / total:.1f}%)")
     print(f"  dewarped crops → {crops_dir}")
     print(f"  debug overlays → {debug_dir}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("input_dir", type=Path)
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--min-sharpness", type=float, default=0.02)

@@ -1,4 +1,5 @@
 """CollectorVision — card identification library for collectible card games."""
+
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version

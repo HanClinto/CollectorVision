@@ -10,12 +10,9 @@ from unittest import mock
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 IMAGES_DIR = ROOT / "examples" / "images"
-_UUID_RE = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I
-)
+_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
 class _FakeResponse:
@@ -85,6 +82,7 @@ class SampleImagesIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         import cv2  # noqa: F401 — confirm OpenCV is importable before loading catalog
+
         import collector_vision as cvg
 
         cls.catalog = cvg.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
@@ -119,9 +117,7 @@ class SampleImagesIntegrationTests(unittest.TestCase):
         )
 
     def test_sample_image(self) -> None:
-        self._assert_image_identifies_correctly(
-            "7286819f-6c57-4503-898c-528786ad86e9_sample.jpg"
-        )
+        self._assert_image_identifies_correctly("7286819f-6c57-4503-898c-528786ad86e9_sample.jpg")
 
     def test_hidden_name_image(self) -> None:
         self._assert_image_identifies_correctly(

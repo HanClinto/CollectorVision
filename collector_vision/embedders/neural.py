@@ -6,6 +6,7 @@ Architecture: MobileViT-XXS backbone + shared linear projection trained with
 multi-task ArcFace loss (illustration_id + set_code).  Input 448×448 RGB,
 outputs a L2-normalised 128-d float32 embedding.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,14 +15,14 @@ import numpy as np
 from PIL import Image
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-_IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+_IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
 def _preprocess_pil(img: Image.Image, size: int) -> np.ndarray:
     """PIL Image (any mode) → (1, 3, size, size) float32, ImageNet-normalised."""
     rgb = img.convert("RGB").resize((size, size), Image.BILINEAR)
-    x   = np.array(rgb, dtype=np.float32) / 255.0
-    x   = (x - _IMAGENET_MEAN) / _IMAGENET_STD
+    x = np.array(rgb, dtype=np.float32) / 255.0
+    x = (x - _IMAGENET_MEAN) / _IMAGENET_STD
     return x.transpose(2, 0, 1)[np.newaxis].astype(np.float32)  # (1,3,H,W)
 
 
@@ -80,7 +81,7 @@ class NeuralEmbedder:
         input_size = int(shape[2]) if isinstance(shape[2], int) else 448
         return sess, input_name, input_size
 
-    def embed(self, images: "Image.Image | list[Image.Image]") -> np.ndarray:
+    def embed(self, images: Image.Image | list[Image.Image]) -> np.ndarray:
         """Embed one or more PIL Images.
 
         Parameters
@@ -108,7 +109,7 @@ class NeuralEmbedder:
             # ONNX model was exported for batch_size=1; run each image separately
             # and stack the results.
             for img in batch:
-                x   = _preprocess_pil(img, self._input_size)
+                x = _preprocess_pil(img, self._input_size)
                 out = self._sess.run(None, {self._input_name: x})[0]
                 emb = out.squeeze().astype(np.float32)  # (128,)
                 norm = float(np.linalg.norm(emb))

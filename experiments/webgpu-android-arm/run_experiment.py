@@ -65,6 +65,7 @@ CHROME_DEVTOOLS_SOCKETS = [
 # Prerequisites
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def check_prerequisites() -> None:
     missing = []
     try:
@@ -87,9 +88,10 @@ def check_prerequisites() -> None:
 # Model building
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def build_models(force: bool = False) -> None:
     expected_json = EXPERIMENT_DIR / "expected_outputs.json"
-    onnx_files    = list(EXPERIMENT_DIR.glob("test_*.onnx"))
+    onnx_files = list(EXPERIMENT_DIR.glob("test_*.onnx"))
 
     if not force and expected_json.exists() and len(onnx_files) >= 4:
         print("Models present (use --rebuild to regenerate).")
@@ -114,6 +116,7 @@ def build_models(force: bool = False) -> None:
 # HTTP server
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class _QuietHandler(SimpleHTTPRequestHandler):
     def log_message(self, *_):
         pass  # silence per-request noise
@@ -122,8 +125,8 @@ class _QuietHandler(SimpleHTTPRequestHandler):
 def start_server() -> int:
     """Start a local file server in a daemon thread; return the bound port."""
     handler = lambda *args: _QuietHandler(*args, directory=str(EXPERIMENT_DIR))
-    server  = HTTPServer(("127.0.0.1", 0), handler)
-    port    = server.server_address[1]
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return port
 
@@ -132,10 +135,13 @@ def start_server() -> int:
 # ADB / Android
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _adb(serial: str, *args, timeout: int = 10) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["adb", "-s", serial, *args],
-        capture_output=True, text=True, timeout=timeout,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
     )
 
 
@@ -144,13 +150,15 @@ def find_android_device() -> "tuple[str | None, str]":
     try:
         r = subprocess.run(
             ["adb", "devices", "-l"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         for line in r.stdout.splitlines()[1:]:
             if "\tdevice" in line:
-                parts     = line.split()
-                serial    = parts[0]
-                model     = next((p.split(":")[1] for p in parts if p.startswith("model:")), "Android")
+                parts = line.split()
+                serial = parts[0]
+                model = next((p.split(":")[1] for p in parts if p.startswith("model:")), "Android")
                 return serial, model
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
@@ -165,8 +173,17 @@ def setup_android(serial: str, server_port: int) -> bool:
     4. Return True if the DevTools endpoint is responding.
     """
     # Ensure Chrome is running on the device.
-    _adb(serial, "shell", "am", "start", "-a", "android.intent.action.VIEW",
-         "-d", "about:blank", "com.android.chrome")
+    _adb(
+        serial,
+        "shell",
+        "am",
+        "start",
+        "-a",
+        "android.intent.action.VIEW",
+        "-d",
+        "about:blank",
+        "com.android.chrome",
+    )
     time.sleep(2)
 
     # Try each known socket name until one forwards successfully.
@@ -185,9 +202,7 @@ def setup_android(serial: str, server_port: int) -> bool:
     # Poll until Chrome's DevTools responds.
     for _ in range(15):
         try:
-            with urllib.request.urlopen(
-                f"http://localhost:{CDP_PORT}/json/version", timeout=2
-            ):
+            with urllib.request.urlopen(f"http://localhost:{CDP_PORT}/json/version", timeout=2):
                 return True
         except Exception:
             time.sleep(0.5)
@@ -195,15 +210,18 @@ def setup_android(serial: str, server_port: int) -> bool:
 
 
 def teardown_adb(serial: str, server_port: int) -> None:
-    subprocess.run(["adb", "-s", serial, "forward", "--remove", f"tcp:{CDP_PORT}"],
-                   capture_output=True)
-    subprocess.run(["adb", "-s", serial, "reverse", "--remove", f"tcp:{server_port}"],
-                   capture_output=True)
+    subprocess.run(
+        ["adb", "-s", serial, "forward", "--remove", f"tcp:{CDP_PORT}"], capture_output=True
+    )
+    subprocess.run(
+        ["adb", "-s", serial, "reverse", "--remove", f"tcp:{server_port}"], capture_output=True
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Browser / Playwright
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def run_tests(test_url: str, android: bool, timeout_s: int) -> dict:
     from playwright.sync_api import sync_playwright
@@ -225,8 +243,7 @@ def run_tests(test_url: str, android: bool, timeout_s: int) -> dict:
         page.goto(test_url, timeout=30_000)
 
         print(f"  Waiting for tests to complete (timeout {timeout_s}s)…")
-        page.wait_for_function("() => window.__testDone === true",
-                               timeout=timeout_s * 1_000)
+        page.wait_for_function("() => window.__testDone === true", timeout=timeout_s * 1_000)
 
         results = page.evaluate("""() => {
             const r = window.__testResults ?? {};
@@ -259,57 +276,59 @@ def run_tests(test_url: str, android: bool, timeout_s: int) -> dict:
 
 # Smallest model that exercises each operator set (in ascending complexity).
 MODEL_OPS = {
-    "test_single_conv.onnx":         "Conv",
-    "test_conv_bn_relu.onnx":        "Conv › BatchNorm › ReLU",
-    "test_two_conv.onnx":            "Conv › ReLU › Conv",
+    "test_single_conv.onnx": "Conv",
+    "test_conv_bn_relu.onnx": "Conv › BatchNorm › ReLU",
+    "test_two_conv.onnx": "Conv › ReLU › Conv",
     "test_global_avgpool_gemm.onnx": "Conv › ReLU › GlobalAveragePool › Flatten › Gemm",
 }
 
-GREEN  = "\033[92m"
+GREEN = "\033[92m"
 YELLOW = "\033[93m"
-RED    = "\033[91m"
-BOLD   = "\033[1m"
-DIM    = "\033[2m"
-RESET  = "\033[0m"
+RED = "\033[91m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
 
 
 def print_report(results: dict, android: bool, device_model: str) -> None:
     if results.get("error"):
         print(f"\n{RED}  Fatal error in browser page:{RESET}")
         print(f"  {results['error']}")
-        print(f"  (Check browser_test.html console for details)\n")
+        print("  (Check browser_test.html console for details)\n")
         return
     ai = results.get("adapterInfo", {})
     ua = results.get("userAgent", "")
-    chrome_ver = next(
-        (seg.split("/")[1] for seg in ua.split() if seg.startswith("Chrome/")), "?"
-    )
+    chrome_ver = next((seg.split("/")[1] for seg in ua.split() if seg.startswith("Chrome/")), "?")
 
     sep = "─" * 62
     print(f"\n{BOLD}{sep}{RESET}")
     print(f"{BOLD}  ORT WebGPU vs WASM — results{RESET}")
     print(sep)
-    print(f"  Platform : {'Android (' + device_model + ')' if android else 'local Chrome (desktop)'}")
-    print(f"  GPU      : {ai.get('vendor','?')} / {ai.get('architecture','?')} / {ai.get('device','?')}")
+    print(
+        f"  Platform : {'Android (' + device_model + ')' if android else 'local Chrome (desktop)'}"
+    )
+    print(
+        f"  GPU      : {ai.get('vendor', '?')} / {ai.get('architecture', '?')} / {ai.get('device', '?')}"
+    )
     print(f"  Chrome   : {chrome_ver}")
     print(sep)
 
     tests = results.get("tests", [])
     for t in tests:
-        name   = t.get("name", "?")
+        name = t.get("name", "?")
         status = t.get("status", "skip")
-        wdiff  = t.get("wasmMaxDiff")
-        gdiff  = t.get("webgpuMaxDiff")
-        ops    = MODEL_OPS.get(name, "?")
+        wdiff = t.get("wasmMaxDiff")
+        gdiff = t.get("webgpuMaxDiff")
+        ops = MODEL_OPS.get(name, "?")
 
         if status == "pass":
             icon, label = f"{GREEN}✓{RESET}", f"{GREEN}PASS{RESET}"
         elif status == "warn":
             icon, label = f"{YELLOW}△{RESET}", f"{YELLOW}WARN — WebGPU wrong{RESET}"
         elif status == "fail":
-            icon, label = f"{RED}✗{RESET}",   f"{RED}FAIL{RESET}"
+            icon, label = f"{RED}✗{RESET}", f"{RED}FAIL{RESET}"
         else:
-            icon, label = f"{DIM}–{RESET}",   f"{DIM}SKIP{RESET}"
+            icon, label = f"{DIM}–{RESET}", f"{DIM}SKIP{RESET}"
 
         print(f"  {icon} {name}  [{ops}]")
         print(f"      {label}")
@@ -323,24 +342,28 @@ def print_report(results: dict, android: bool, device_model: str) -> None:
     s = results.get("summary", {})
     print(sep)
     print(
-        f"  {GREEN}{s.get('pass',0)} pass{RESET}  "
-        f"{YELLOW}{s.get('warn',0)} warn (WebGPU wrong){RESET}  "
-        f"{RED}{s.get('fail',0)} fail{RESET}  "
-        f"{DIM}{s.get('skip',0)} skip{RESET}"
+        f"  {GREEN}{s.get('pass', 0)} pass{RESET}  "
+        f"{YELLOW}{s.get('warn', 0)} warn (WebGPU wrong){RESET}  "
+        f"{RED}{s.get('fail', 0)} fail{RESET}  "
+        f"{DIM}{s.get('skip', 0)} skip{RESET}"
     )
     print(sep)
 
     warns = [t for t in tests if t.get("status") == "warn"]
     if warns:
         first = warns[0]
-        ops   = MODEL_OPS.get(first["name"], "?")
+        ops = MODEL_OPS.get(first["name"], "?")
         print(f"\n{BOLD}  ► Broken operator(s) narrowed to: {ops}{RESET}")
         print(f"    First model where WebGPU diverges: {first['name']}")
         print()
         for t in tests:
-            mark = "✓" if t.get("status") == "pass" else ("✗ BROKEN" if t.get("status") == "warn" else "–")
+            mark = (
+                "✓"
+                if t.get("status") == "pass"
+                else ("✗ BROKEN" if t.get("status") == "warn" else "–")
+            )
             arrow = "→ " if t.get("status") not in ("pass", "skip") else "  "
-            print(f"    {arrow}{mark}  {t['name']}  [{MODEL_OPS.get(t['name'],'?')}]")
+            print(f"    {arrow}{mark}  {t['name']}  [{MODEL_OPS.get(t['name'], '?')}]")
         print()
         print("  Next steps to file an upstream report:")
         print("  1. Attach results-<timestamp>.json and the .onnx file to the issue")
@@ -351,13 +374,15 @@ def print_report(results: dict, android: bool, device_model: str) -> None:
     elif s.get("pass", 0) == len(tests) and tests:
         print(f"\n  {GREEN}All tests pass — WebGPU EP is correct on this platform.{RESET}")
         if not android:
-            print(f"  {DIM}(This is expected on desktop; test on Android to reproduce the bug.){RESET}")
+            print(
+                f"  {DIM}(This is expected on desktop; test on Android to reproduce the bug.){RESET}"
+            )
 
     print()
 
 
 def write_results(results: dict) -> Path:
-    ts   = datetime.now().strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     path = EXPERIMENT_DIR / f"results-{ts}.json"
     with open(path, "w") as f:
         json.dump(results, f, indent=2)
@@ -373,19 +398,30 @@ def write_results(results: dict) -> Path:
 # CLI
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--local",           action="store_true",
-                   help="Use local Chrome only (skip ADB detection)")
-    p.add_argument("--rebuild",         action="store_true",
-                   help="Rebuild ONNX models even if they already exist")
-    p.add_argument("--capture-shaders", action="store_true",
-                   help="Capture WGSL shaders generated by ORT (for upstream report)")
-    p.add_argument("--timeout",         type=int, default=120, metavar="S",
-                   help="Test timeout in seconds (default: 120)")
+    p.add_argument(
+        "--local", action="store_true", help="Use local Chrome only (skip ADB detection)"
+    )
+    p.add_argument(
+        "--rebuild", action="store_true", help="Rebuild ONNX models even if they already exist"
+    )
+    p.add_argument(
+        "--capture-shaders",
+        action="store_true",
+        help="Capture WGSL shaders generated by ORT (for upstream report)",
+    )
+    p.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        metavar="S",
+        help="Test timeout in seconds (default: 120)",
+    )
     return p.parse_args()
 
 
@@ -399,14 +435,14 @@ def main() -> int:
     build_models(force=args.rebuild)
 
     server_port = start_server()
-    test_url    = f"http://localhost:{server_port}/browser_test.html"
+    test_url = f"http://localhost:{server_port}/browser_test.html"
     if args.capture_shaders:
         test_url += "?capture_shaders=1"
     print(f"Serving at {test_url}")
 
-    android      = False
+    android = False
     device_model = "local"
-    serial       = None
+    serial = None
 
     if not args.local:
         serial, device_model = find_android_device()

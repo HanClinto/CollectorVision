@@ -40,6 +40,7 @@ giving a consensus identification without re-uploading any image data::
             buffer.append(result["embedding"])
             print(result["card_id"], result["confidence"])
 """
+
 from __future__ import annotations
 
 import base64
@@ -60,15 +61,15 @@ import collector_vision as cvg
 # Configuration — set before the lifespan starts (TestClient or uvicorn.run)
 # ---------------------------------------------------------------------------
 
-catalog_source:       str | Path | None = None
-top_k_default:        int   = 5
-min_sharpness:        float = 0.0
-detector_none:        bool  = False
-min_prior_similarity: float = 0.7   # drop prior embeddings with cosine sim < this
+catalog_source: str | Path | None = None
+top_k_default: int = 5
+min_sharpness: float = 0.0
+detector_none: bool = False
+min_prior_similarity: float = 0.7  # drop prior embeddings with cosine sim < this
 
 
 def configure(
-    catalog: "str | Path | None" = None,
+    catalog: str | Path | None = None,
     top_k: int = 5,
     min_sharpness_val: float = 0.0,
     no_detector: bool = False,
@@ -76,10 +77,10 @@ def configure(
 ) -> None:
     """Configure the server before startup (used by tests and scripts)."""
     global catalog_source, top_k_default, min_sharpness, detector_none, min_prior_similarity
-    catalog_source       = catalog
-    top_k_default        = top_k
-    min_sharpness        = min_sharpness_val
-    detector_none        = no_detector
+    catalog_source = catalog
+    top_k_default = top_k
+    min_sharpness = min_sharpness_val
+    detector_none = no_detector
     min_prior_similarity = min_prior_sim
 
 
@@ -87,7 +88,7 @@ def configure(
 async def lifespan(app: FastAPI):
     if not catalog_source:
         raise RuntimeError("No catalog configured. Call configure() or use --catalog / --hfd.")
-    app.state.catalog  = cvg.Catalog.load(catalog_source)
+    app.state.catalog = cvg.Catalog.load(catalog_source)
     app.state.detector = None if detector_none else cvg.NeuralCornerDetector()
     yield
 
@@ -98,13 +99,13 @@ app = FastAPI(
     version=cvg.__version__,
     lifespan=lifespan,
 )
-app.add_middleware(CORSMiddleware, allow_origins=["*"],
-                   allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 # ---------------------------------------------------------------------------
 # Core pipeline
 # ---------------------------------------------------------------------------
+
 
 def _decode_bgr(data: bytes) -> np.ndarray:
     bgr = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
@@ -116,9 +117,9 @@ def _decode_bgr(data: bytes) -> np.ndarray:
 def _identify(
     bgr: np.ndarray,
     catalog: cvg.Catalog,
-    detector: "cvg.NeuralCornerDetector | None",
+    detector: cvg.NeuralCornerDetector | None,
     top_k: int,
-    prior_embeddings: "list[list[float]] | None" = None,
+    prior_embeddings: list[list[float]] | None = None,
 ) -> dict:
     t0 = time.perf_counter()
 
@@ -128,8 +129,11 @@ def _identify(
         det = detector.detect(bgr, min_sharpness=min_sharpness)
         sharpness = det.sharpness
         if not det.card_present:
-            return {"card_present": False, "sharpness": sharpness,
-                    "_timing": {"total_ms": round((time.perf_counter() - t0) * 1000, 1)}}
+            return {
+                "card_present": False,
+                "sharpness": sharpness,
+                "_timing": {"total_ms": round((time.perf_counter() - t0) * 1000, 1)},
+            }
         crop = det.dewarp(bgr)
     else:
         crop = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
@@ -166,13 +170,12 @@ def _identify(
 
     result = {
         "card_present": True,
-        "card_id":      best_id,
-        "confidence":   round(float(best_score), 4),
-        "alternatives": [{"card_id": cid, "confidence": round(float(s), 4)}
-                         for s, cid in hits[1:]],
-        "embedding":    current_emb.tolist(),   # client stores this in its rolling buffer
-        "crop_jpeg":    crop_jpeg,
-        "_timing":      {"total_ms": round((time.perf_counter() - t0) * 1000, 1)},
+        "card_id": best_id,
+        "confidence": round(float(best_score), 4),
+        "alternatives": [{"card_id": cid, "confidence": round(float(s), 4)} for s, cid in hits[1:]],
+        "embedding": current_emb.tolist(),  # client stores this in its rolling buffer
+        "crop_jpeg": crop_jpeg,
+        "_timing": {"total_ms": round((time.perf_counter() - t0) * 1000, 1)},
     }
     if sharpness is not None:
         result["sharpness"] = round(float(sharpness), 5)
@@ -182,6 +185,7 @@ def _identify(
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @app.get("/", include_in_schema=False)
 async def _root():
@@ -231,8 +235,9 @@ async def identify(request: Request):
     prior = body.get("prior_embeddings") or []
     top_k = int(body.get("top_k", top_k_default))
 
-    return JSONResponse(_identify(bgr, request.app.state.catalog,
-                                  request.app.state.detector, top_k, prior))
+    return JSONResponse(
+        _identify(bgr, request.app.state.catalog, request.app.state.detector, top_k, prior)
+    )
 
 
 @app.post("/identify/upload")
@@ -257,8 +262,7 @@ async def identify_upload(
         raise HTTPException(status_code=400, detail=str(exc))
 
     k = top_k if top_k is not None else top_k_default
-    return JSONResponse(_identify(bgr, request.app.state.catalog,
-                                  request.app.state.detector, k))
+    return JSONResponse(_identify(bgr, request.app.state.catalog, request.app.state.detector, k))
 
 
 # ---------------------------------------------------------------------------
@@ -267,25 +271,42 @@ async def identify_upload(
 
 if __name__ == "__main__":
     import argparse
+
     import uvicorn
 
     p = argparse.ArgumentParser(description="CollectorVision identification server")
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--catalog", type=Path, help="Path to a local .npz catalog file")
-    g.add_argument("--hfd",     nargs=2, metavar=("REPO", "KEY"),
-                   help="Auto-download from HuggingFace: --hfd REPO KEY")
-    p.add_argument("--host",          default="127.0.0.1")
-    p.add_argument("--port",          type=int, default=8000)
-    p.add_argument("--top-k",         type=int, default=5)
-    p.add_argument("--min-sharpness",   type=float, default=0.0,
-                   help="SimCC sharpness gate; 0=disabled. ~0.02 skips blank frames.")
-    p.add_argument("--min-prior-sim",   type=float, default=0.7,
-                   help="Cosine similarity threshold for rolling-buffer priors (0–1). "
-                        "Priors below this value are discarded before averaging.")
-    p.add_argument("--detector-none",   action="store_true",
-                   help="Skip corner detection — inputs are pre-cropped card images.")
-    p.add_argument("--ssl",             action="store_true",
-                   help="Serve over HTTPS using a self-signed certificate.")
+    g.add_argument(
+        "--hfd",
+        nargs=2,
+        metavar=("REPO", "KEY"),
+        help="Auto-download from HuggingFace: --hfd REPO KEY",
+    )
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--top-k", type=int, default=5)
+    p.add_argument(
+        "--min-sharpness",
+        type=float,
+        default=0.0,
+        help="SimCC sharpness gate; 0=disabled. ~0.02 skips blank frames.",
+    )
+    p.add_argument(
+        "--min-prior-sim",
+        type=float,
+        default=0.7,
+        help="Cosine similarity threshold for rolling-buffer priors (0–1). "
+        "Priors below this value are discarded before averaging.",
+    )
+    p.add_argument(
+        "--detector-none",
+        action="store_true",
+        help="Skip corner detection — inputs are pre-cropped card images.",
+    )
+    p.add_argument(
+        "--ssl", action="store_true", help="Serve over HTTPS using a self-signed certificate."
+    )
     args = p.parse_args()
 
     configure(
@@ -300,13 +321,30 @@ if __name__ == "__main__":
         import subprocess
         import tempfile
 
-        tmp  = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp()
         cert, key = f"{tmp}/cert.pem", f"{tmp}/key.pem"
-        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048",
-                        "-keyout", key, "-out", cert, "-days", "365", "-nodes",
-                        "-subj", "/CN=localhost"],
-                       check=True, capture_output=True)
-        uvicorn.run("server:app", host=args.host, port=args.port,
-                    ssl_certfile=cert, ssl_keyfile=key)
+        subprocess.run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-keyout",
+                key,
+                "-out",
+                cert,
+                "-days",
+                "365",
+                "-nodes",
+                "-subj",
+                "/CN=localhost",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        uvicorn.run(
+            "server:app", host=args.host, port=args.port, ssl_certfile=cert, ssl_keyfile=key
+        )
     else:
         uvicorn.run("server:app", host=args.host, port=args.port)

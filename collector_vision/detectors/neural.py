@@ -21,6 +21,7 @@ and the presence logit is recorded in ``extra`` for diagnostics only.
 When the model does not emit sharpness (older checkpoints or non-SimCC models),
 the detector falls back to ``sigmoid(presence_logit) >= presence_threshold``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,15 +32,15 @@ import numpy as np
 from collector_vision.interfaces import DetectionResult
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-_IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+_IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
 def _preprocess(bgr: np.ndarray, size: int) -> np.ndarray:
     """BGR uint8 ndarray → (1, 3, size, size) float32, ImageNet-normalised."""
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     rgb = cv2.resize(rgb, (size, size), interpolation=cv2.INTER_LINEAR)
-    x   = rgb.astype(np.float32) / 255.0
-    x   = (x - _IMAGENET_MEAN) / _IMAGENET_STD
+    x = rgb.astype(np.float32) / 255.0
+    x = (x - _IMAGENET_MEAN) / _IMAGENET_STD
     return x.transpose(2, 0, 1)[np.newaxis].astype(np.float32)  # (1,3,H,W)
 
 
@@ -47,12 +48,15 @@ def _order_corners(pts: np.ndarray) -> np.ndarray:
     """Reorder four (x,y) points to canonical TL, TR, BR, BL order."""
     s = pts.sum(axis=1)
     d = np.diff(pts, axis=1).ravel()
-    return np.array([
-        pts[np.argmin(s)],   # TL: smallest x+y
-        pts[np.argmin(d)],   # TR: smallest x-y
-        pts[np.argmax(s)],   # BR: largest x+y
-        pts[np.argmax(d)],   # BL: largest x-y
-    ], dtype=np.float32)
+    return np.array(
+        [
+            pts[np.argmin(s)],  # TL: smallest x+y
+            pts[np.argmin(d)],  # TR: smallest x-y
+            pts[np.argmax(s)],  # BR: largest x+y
+            pts[np.argmax(d)],  # BL: largest x-y
+        ],
+        dtype=np.float32,
+    )
 
 
 class NeuralCornerDetector:
@@ -87,8 +91,8 @@ class NeuralCornerDetector:
             )
 
         self._presence_threshold = presence_threshold
-        self._sess, self._input_name, self._input_size, self._has_sharpness = (
-            self._load(checkpoint, num_threads)
+        self._sess, self._input_name, self._input_size, self._has_sharpness = self._load(
+            checkpoint, num_threads
         )
 
     @staticmethod
@@ -142,12 +146,12 @@ class NeuralCornerDetector:
 
         sharpness: float | None = None
         if self._has_sharpness:
-            sharpness    = float(outs[2].squeeze())
+            sharpness = float(outs[2].squeeze())
             card_present = sharpness >= min_sharpness
-            confidence   = sharpness
+            confidence = sharpness
         else:
             card_present = presence >= self._presence_threshold
-            confidence   = presence
+            confidence = presence
 
         corners = _order_corners(corners_flat.reshape(4, 2).astype(np.float32))
 

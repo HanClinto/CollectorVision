@@ -8,6 +8,7 @@ Adding a new game requires:
      ``{algo}-{source}-{game}-{YYYY-MM}.npz``
   3. The manifest on HF Datasets updated to point at the new file
 """
+
 from __future__ import annotations
 
 import re
@@ -45,19 +46,19 @@ class Game(str, Enum):
     # -----------------------------------------------------------------------
     # Currently supported (catalogs published)
     # -----------------------------------------------------------------------
-    MTG     = "mtg"       # Magic: The Gathering  (source: Scryfall)
-    POKEMON = "pokemon"   # Pokémon TCG           (source: TCGplayer / PokémonTCG.io)
+    MTG = "mtg"  # Magic: The Gathering  (source: Scryfall)
+    POKEMON = "pokemon"  # Pokémon TCG           (source: TCGplayer / PokémonTCG.io)
 
     # -----------------------------------------------------------------------
     # Planned (catalogs not yet published)
     # -----------------------------------------------------------------------
-    YUGIOH  = "yugioh"    # Yu-Gi-Oh!             (source: TCGplayer)
-    FAB     = "fab"       # Flesh and Blood        (source: TCGplayer)
-    LORCANA = "lorcana"   # Disney Lorcana         (source: TCGplayer)
-    DIGIMON = "digimon"   # Digimon Card Game      (source: TCGplayer)
-    ONEPIECE = "onepiece" # One Piece Card Game    (source: TCGplayer)
-    SWU     = "swu"       # Star Wars: Unlimited   (source: TCGplayer)
-    DBS     = "dbs"       # Dragon Ball Super CG   (source: TCGplayer)
+    YUGIOH = "yugioh"  # Yu-Gi-Oh!             (source: TCGplayer)
+    FAB = "fab"  # Flesh and Blood        (source: TCGplayer)
+    LORCANA = "lorcana"  # Disney Lorcana         (source: TCGplayer)
+    DIGIMON = "digimon"  # Digimon Card Game      (source: TCGplayer)
+    ONEPIECE = "onepiece"  # One Piece Card Game    (source: TCGplayer)
+    SWU = "swu"  # Star Wars: Unlimited   (source: TCGplayer)
+    DBS = "dbs"  # Dragon Ball Super CG   (source: TCGplayer)
 
     def __str__(self) -> str:
         return self.value
@@ -65,29 +66,29 @@ class Game(str, Enum):
 
 # Human-readable display names for UI / error messages
 GAME_DISPLAY_NAMES: dict[Game, str] = {
-    Game.MTG:    "Magic: The Gathering",
-    Game.POKEMON:  "Pokémon TCG",
-    Game.YUGIOH:   "Yu-Gi-Oh!",
-    Game.FAB:      "Flesh and Blood",
-    Game.LORCANA:  "Disney Lorcana",
-    Game.DIGIMON:  "Digimon Card Game",
+    Game.MTG: "Magic: The Gathering",
+    Game.POKEMON: "Pokémon TCG",
+    Game.YUGIOH: "Yu-Gi-Oh!",
+    Game.FAB: "Flesh and Blood",
+    Game.LORCANA: "Disney Lorcana",
+    Game.DIGIMON: "Digimon Card Game",
     Game.ONEPIECE: "One Piece Card Game",
-    Game.SWU:      "Star Wars: Unlimited",
-    Game.DBS:      "Dragon Ball Super Card Game",
+    Game.SWU: "Star Wars: Unlimited",
+    Game.DBS: "Dragon Ball Super Card Game",
 }
 
 # Primary data source for each game.
 # This is informational — the catalog filename encodes the source explicitly.
 GAME_PRIMARY_SOURCE: dict[Game, str] = {
-    Game.MTG:    "scryfall",
-    Game.POKEMON:  "tcgplayer",
-    Game.YUGIOH:   "tcgplayer",
-    Game.FAB:      "tcgplayer",
-    Game.LORCANA:  "tcgplayer",
-    Game.DIGIMON:  "tcgplayer",
+    Game.MTG: "scryfall",
+    Game.POKEMON: "tcgplayer",
+    Game.YUGIOH: "tcgplayer",
+    Game.FAB: "tcgplayer",
+    Game.LORCANA: "tcgplayer",
+    Game.DIGIMON: "tcgplayer",
     Game.ONEPIECE: "tcgplayer",
-    Game.SWU:      "tcgplayer",
-    Game.DBS:      "tcgplayer",
+    Game.SWU: "tcgplayer",
+    Game.DBS: "tcgplayer",
 }
 
 
@@ -97,9 +98,7 @@ def parse_embedding(value: str) -> Embedding:
         return Embedding(value.lower().strip())
     except ValueError:
         known = ", ".join(e.value for e in Embedding)
-        raise ValueError(
-            f"Unknown embedding {value!r}. Supported embeddings: {known}"
-        ) from None
+        raise ValueError(f"Unknown embedding {value!r}. Supported embeddings: {known}") from None
 
 
 def parse_game(value: str) -> Game:
@@ -111,6 +110,4 @@ def parse_game(value: str) -> Game:
         return Game(value.lower().strip())
     except ValueError:
         known = ", ".join(g.value for g in Game)
-        raise ValueError(
-            f"Unknown game {value!r}. Supported games: {known}"
-        ) from None
+        raise ValueError(f"Unknown game {value!r}. Supported games: {known}") from None
