@@ -4,6 +4,11 @@ Card identification library for collectible card games. Feed it a photo, get bac
 
 Supports Magic: The Gathering today. Pokémon, Yu-Gi-Oh, and others are planned.
 
+## Try online
+
+Experimental javascript port version hosted here: https://hanclinto.github.io/CollectorVision/
+
+
 ---
 
 ## Install
