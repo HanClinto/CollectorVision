@@ -8,6 +8,12 @@ on:
         required: false
         default: false
         type: boolean
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/export_web_scanner_assets.py"
+      - "examples/web_scanner/assets.bundle.json"
   schedule:
     - cron: "17 8 1 * *"
 
@@ -86,7 +92,7 @@ jobs:
           import json
           from pathlib import Path
 
-          force = "${{ inputs.force }}" == "true"
+          force = "${{ inputs.force }}" == "true" or "${{ github.event_name }}" == "push"
           metadata_path = Path(".release/web-scanner-assets-metadata.json")
           current = None
           if metadata_path.exists():
