@@ -466,25 +466,19 @@ class WorkerRuntime {
     // NOTE: multi-threaded WASM requires SharedArrayBuffer / COOP+COEP headers.
     // GitHub Pages does not set these, so ort-web silently falls back to 1 thread.
     ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
-    // Both models run on WASM only.
-    //
-    // Corner detector (cornelius): the new WebGPU EP (ort.webgpu.min.mjs) gives
-    // numerically wrong outputs on Android ARM GPUs — coherent but incorrect corners
-    // that silently corrupt every downstream step.
-    //
-    // Embedder (milo): we have never validated milo's WebGPU output on Android in
-    // isolation, because every Android capture had wrong corners feeding the wrong
-    // crop to the embedder. Commit 1e66892 found both models broken under the legacy
-    // JSEP backend; aa0f88f switched to the new EP and assumed both were fixed based
-    // on desktop-only testing. Do not re-enable WebGPU for milo until a fresh Android
-    // capture (with correct WASM corners) confirms correct match scores.
-    //
+    // Corner detector (cornelius): WASM only.
+    // The new WebGPU EP gives wrong outputs for this model on Android ARM GPUs
+    // (coherent but incorrect corners that silently corrupt the pipeline).
     // See ARCHITECTURE.md "Lessons Learned" for the full history.
     this.detector = await ort.InferenceSession.create(detectorBuffer, {
       executionProviders: ["wasm"],
     });
+    // Embedder (milo): WebGPU with WASM fallback — EXPERIMENTAL on Android ARM.
+    // WASM correctness was validated by issues #10/#11 (correct corners, score 0.74).
+    // WebGPU correctness on Android ARM is unproven; capture bundles record jsScore
+    // so divergence from Python will be visible. Revert to ["wasm"] if scores regress.
     this.embedder = await ort.InferenceSession.create(embedderBuffer, {
-      executionProviders: ["wasm"],
+      executionProviders: ["webgpu", "wasm"],
     });
 
     this.inputNames.detector = this.detector.inputNames[0];
@@ -730,13 +724,11 @@ self.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
       const webgpuReady = await configureWebGpu();
-      // inferenceMode reflects what the sessions actually use, not just whether
-      // WebGPU hardware is available.  Currently both sessions use WASM only
-      // (see WorkerRuntime.load), so we report WASM even if the GPU is present.
-      // Update this when/if WebGPU EP is re-enabled for the embedder.
+      // inferenceMode reflects the actual EPs used by each session, not just
+      // whether WebGPU hardware is present.
       const detectorEp = "wasm";
-      const embedderEp = "wasm";
-      const inferenceMode = (detectorEp === "webgpu" || embedderEp === "webgpu")
+      const embedderEp = webgpuReady ? "webgpu" : "wasm";
+      const inferenceMode = embedderEp === "webgpu"
         ? `WebGPU (detect:${detectorEp} embed:${embedderEp})`
         : "WASM";
       self.postMessage({ type: "progress", stage: "webgpu", inferenceMode });

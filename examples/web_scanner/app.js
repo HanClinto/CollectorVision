@@ -503,6 +503,10 @@ function setupCaptureButton(camera, captureState) {
           orderedCorners: data.corners ? data.corners.map(([x, y]) => ({ x, y })) : null,
           sharpness: data.sharpness ?? null,
           cardPresent: data.cardPresent ?? null,
+          // JS pipeline result — compare jsScore to Python re-run score to detect
+          // embedding divergence between JS (WebGPU/WASM) and Python (CPU ONNX).
+          jsCardId: data.cardId ?? null,
+          jsScore: data.score ?? null,
           consoleLog: logEntries,
           // Python: cv2.imdecode(np.frombuffer(base64.b64decode(bundle["framePng"]), np.uint8), cv2.IMREAD_COLOR)
           framePng,

@@ -166,15 +166,17 @@ wrong results.  Fixed by switching to the *new* WebGPU EP (see below).
 
 Commit: `aa0f88f fix(webgpu): switch to new WebGPU EP (ort.webgpu.min.mjs)`
 
-### Use `ort.webgpu.min.mjs` (new WebGPU EP) for the embedder
+### Use `ort.webgpu.min.mjs` (new WebGPU EP) for the embedder — **EXPERIMENTAL on Android ARM**
 
 The new EP (`ort.webgpu.min.mjs` + `ort-wasm-simd-threaded.asyncify.wasm`) fixes
-the JSEP Conv bug.  It works correctly for `milo.onnx` (embedder) on desktop.
-However, milo has **never been validated on Android in isolation**: every Android
-capture before the cornelius WASM fix had wrong corners feeding wrong crops to the
-embedder, so we could not distinguish embedder errors from corner errors.  Until a
-fresh Android capture (with correct WASM corners) confirms correct match scores, milo
-also runs on WASM.
+the JSEP Conv bug and works correctly for `milo.onnx` on desktop.
+
+WASM correctness for milo on Android ARM was validated by issues #10 and #11:
+correct corners, Sanguinary Mage score 0.74 on a sharp frame.  WebGPU correctness
+for milo on Android ARM is **unproven** — it is re-enabled experimentally in commit
+`TODO` with `jsCardId`/`jsScore` added to capture bundles so any divergence from
+Python re-runs is immediately visible.  If scores regress, revert the embedder to
+`executionProviders: ["wasm"]`.
 
 The new EP requires the **asyncify** WASM variant, not the jsep variant:
 ```
