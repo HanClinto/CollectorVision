@@ -316,6 +316,18 @@ h2 {
   -webkit-tap-highlight-color: transparent;
 }
 
+.camera-badge:not(:disabled):not([data-camera-live="true"]) {
+  min-height: 2.4rem;
+  padding: 0.35rem 1rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.camera-badge:not(:disabled):not([data-camera-live="true"]):active {
+  background: rgba(255, 255, 255, 0.3);
+}
+
 .camera-badge[data-camera-live="true"] {
   cursor: pointer;
 }

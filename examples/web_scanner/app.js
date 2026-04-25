@@ -693,6 +693,7 @@ class CameraSurface {
     this.ctx = this.canvas.getContext("2d");
     this.badge = document.getElementById("camera-badge");
     this.badge.disabled = true;
+    this.placeholder = document.querySelector(".camera-placeholder");
     this.debugLog = debugLog;
     this.diag = diag;
     this.stream = null;
@@ -723,6 +724,13 @@ class CameraSurface {
           this.badge.textContent = this.describeCameraError(error);
           this.badge.disabled = false;
         }
+      }
+    });
+
+    // Tapping the dark camera area before the stream starts fires the badge.
+    this.placeholder.addEventListener("click", (e) => {
+      if (!this.stream && !this.badge.disabled && e.target === this.placeholder) {
+        this.badge.click();
       }
     });
   }
