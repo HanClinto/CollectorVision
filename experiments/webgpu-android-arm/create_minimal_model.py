@@ -204,6 +204,36 @@ def build_global_avgpool_gemm():
 # Main
 # ---------------------------------------------------------------------------
 
+def build_all(output_dir: "Path | None" = None) -> dict:
+    """Build all test models, write expected_outputs.json, return {filename: [first8]}.
+
+    Called by run_experiment.py.  Safe to call with an explicit output_dir when
+    the working directory is not the experiment folder.
+    """
+    import json
+    from pathlib import Path as _Path
+
+    if output_dir is None:
+        output_dir = _Path(__file__).parent
+
+    x = np.full(INPUT_SHAPE, 0.5, dtype=np.float32)
+    results = {}
+
+    for builder in [build_single_conv, build_conv_bn_relu, build_two_conv, build_global_avgpool_gemm]:
+        model, filename = builder()
+        path = str(output_dir / filename)
+        onnx.checker.check_model(model)
+        onnx.save(model, path)
+        y = run_onnx(path, x)
+        results[filename] = y.ravel()[:8].tolist()
+
+    json_path = output_dir / "expected_outputs.json"
+    with open(json_path, "w") as f:
+        json.dump(results, f, indent=2)
+
+    return results
+
+
 def main():
     x = np.full(INPUT_SHAPE, 0.5, dtype=np.float32)
 
@@ -212,8 +242,8 @@ def main():
     ║  CollectorVision — WebGPU Android ARM minimal model builder  ║
     ╚══════════════════════════════════════════════════════════════╝
 
-    Builds 4 minimal ONNX models and prints expected outputs.
-    Copy the "first 8 values" lines into browser_test.html EXPECTED_OUTPUTS.
+    Builds 4 minimal ONNX models and writes expected_outputs.json.
+    Run run_experiment.py to automate the full WebGPU vs WASM comparison.
 
     Input for all models: shape=(1,3,64,64), all values = 0.5
     """).strip())
@@ -231,12 +261,8 @@ def main():
         y = save_and_check(model, path, x)
         results[path] = y
 
-    print(f"\n{'='*60}")
-    print("Copy this block into browser_test.html → EXPECTED_OUTPUTS:")
-    print()
-    for path, y in results.items():
-        flat = y.ravel()[:8].tolist()
-        print(f'  "{path}": {flat},')
+    build_all()   # writes expected_outputs.json
+    print(f"\nexpected_outputs.json written — browser_test.html will load it automatically.")
 
     return 0
 
