@@ -701,6 +701,7 @@ class CameraSurface {
     this.frameCtx = this.frameCanvas.getContext("2d", { willReadFrequently: true });
     this._resizeHandler = () => this.resize();
     this._previewFrame = null;
+    this._wasLive = false;
   }
 
   bind(onStart, onStop) {
@@ -731,6 +732,38 @@ class CameraSurface {
     this.placeholder.addEventListener("click", (e) => {
       if (!this.stream && !this.badge.disabled && e.target === this.placeholder) {
         this.badge.click();
+      }
+    });
+
+    // Stop the camera when the page goes to the background; try to auto-resume
+    // when it returns (Chrome Android allows this; iOS Safari requires a gesture
+    // so we fall back to "tap to resume" on failure).
+    document.addEventListener("visibilitychange", async () => {
+      if (document.visibilityState === "hidden") {
+        if (this.stream) {
+          this._wasLive = true;
+          this.stop();
+          onStop();
+          this.badge.textContent = "Camera paused — tap to resume";
+          delete this.badge.dataset.cameraLive;
+          this.debugLog.info("page hidden — camera stopped");
+        }
+      } else if (document.visibilityState === "visible" && this._wasLive) {
+        this._wasLive = false;
+        this.badge.disabled = true;
+        this.badge.textContent = "Resuming…";
+        try {
+          await this.start();
+          await onStart();
+          this.badge.dataset.cameraLive = "true";
+          this.badge.disabled = false;
+          this.debugLog.info("page visible — camera resumed");
+        } catch {
+          // Likely a gesture-required restriction (iOS Safari).
+          this.badge.textContent = "Camera paused — tap to resume";
+          this.badge.disabled = false;
+          this.debugLog.info("auto-resume blocked — tap required");
+        }
       }
     });
   }
