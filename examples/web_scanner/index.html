@@ -134,6 +134,15 @@
             <button class="sheet-close" id="settings-close" type="button">Close</button>
           </header>
 
+          <section class="panel panel--nested panel--feedback">
+            <p class="feedback-cta">Enjoying CollectorVision? Found a bug? We’d love to hear from you.</p>
+            <a class="action-button action-button--block feedback-link"
+              href="https://github.com/HanClinto/CollectorVision/issues/new"
+              target="_blank" rel="noopener noreferrer">
+              ↗ Share feedback on GitHub
+            </a>
+          </section>
+
           <section class="panel panel--nested" id="webgpu-toggle-section" hidden>
             <header class="panel-header">
               <div>
@@ -154,11 +163,11 @@
           <section class="panel panel--nested panel--capture">
             <header class="panel-header">
               <div>
-                <p class="section-kicker">Debug</p>
-                <h2>Capture &amp; Report</h2>
+                <p class="section-kicker">Optional — for bug reports</p>
+                <h2>Debug Bundle</h2>
               </div>
             </header>
-            <p class="capture-hint">Download a debug bundle, then open a pre-filled GitHub issue.</p>
+            <p class="capture-hint">If something isn’t scanning correctly, download a debug bundle and attach it to your GitHub issue for a faster fix.</p>
             <div class="capture-actions">
               <button class="action-button action-button--block" id="capture-frame" type="button">⬇ Download Debug Bundle</button>
               <a class="action-button action-button--block capture-report-link" id="report-issue" target="_blank" rel="noopener noreferrer" hidden>↗ Open GitHub Issue</a>

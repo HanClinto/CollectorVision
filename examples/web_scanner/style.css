@@ -694,6 +694,27 @@ dd {
   flex-shrink: 0;
 }
 
+.panel--feedback {
+  background: var(--accent-soft);
+  border-radius: 0.85rem;
+  border: 1px solid var(--line);
+}
+
+.feedback-cta {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.feedback-link {
+  text-align: center;
+  text-decoration: none;
+  color: var(--ink);
+  background: white;
+  border-color: var(--line);
+}
+
 .panel--capture {
   background: var(--accent-soft);
   border-radius: 0.85rem;
