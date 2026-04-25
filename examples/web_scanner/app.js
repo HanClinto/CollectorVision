@@ -513,7 +513,7 @@ function setupCaptureButton(camera, captureState) {
           jsScore: data.score ?? null,
           timing: data.timing ?? null,
           crossOriginIsolated: self.crossOriginIsolated ?? false,
-          numThreads: numThreads ?? null,
+          numThreads: captureState.numThreads ?? null,
           consoleLog: logEntries,
           // Python: cv2.imdecode(np.frombuffer(base64.b64decode(bundle["framePng"]), np.uint8), cv2.IMREAD_COLOR)
           framePng,
@@ -1405,7 +1405,7 @@ async function boot() {
   debugLog.info("wasm threads", threadLabel);
 
   // captureState is updated by the scanner result handler inside createScannerLoop.
-  const captureState = { lastResult: null, lastDetectorBitmap: null, lastCropBitmap: null, pendingCapture: false, onCapture: null, inferenceMode };
+  const captureState = { lastResult: null, lastDetectorBitmap: null, lastCropBitmap: null, pendingCapture: false, onCapture: null, inferenceMode, numThreads };
 
   const loop = createScannerLoop(
     camera, scannerWorker, enricherWorker, scans, audioBus, manifest, debugLog, diag, captureState,
