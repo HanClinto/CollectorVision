@@ -21,6 +21,7 @@ const WEBGPU_PREF_KEY = "cv_webgpu_enabled";
 const MATCH_SCORE_KEY = "cv_min_match_score";
 const MIN_MATCHES_DEFAULT = 2;
 const MATCHES_KEY = "cv_min_matches";
+const SCANS_KEY = "cv_scans";
 
 const NOTES = [
   "The scanner now uses the real ONNX weights and the real MTG gallery bundle.",
@@ -1005,6 +1006,25 @@ class CameraSurface {
   }
 }
 
+function saveScans(scans) {
+  try {
+    localStorage.setItem(SCANS_KEY, JSON.stringify(scans));
+  } catch {
+    // Storage quota exceeded or private-browsing restriction — silently ignore.
+  }
+}
+
+function loadScans() {
+  try {
+    const raw = localStorage.getItem(SCANS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function renderScanList(scans) {
   const list = document.getElementById("scan-list");
   const count = document.getElementById("scan-count");
@@ -1049,6 +1069,7 @@ function renderScanList(scans) {
   );
   count.textContent = `${cardCount} cards`;
   total.textContent = `$${totalValue.toFixed(2)}`;
+  saveScans(scans);
 }
 
 function ensureScanRecord(scans, cardId) {
@@ -1396,7 +1417,7 @@ function formatBytes(value) {
 }
 
 async function boot() {
-  const scans = [];
+  const scans = loadScans();
   const audioBus = createAudioBus();
   const debugLog = createDebugLog();
   const diag = createDiagnostics();
