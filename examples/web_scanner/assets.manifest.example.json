@@ -4,6 +4,10 @@
     "cornelius": "assets/models/cornelius.onnx",
     "milo": "assets/models/milo.onnx"
   },
+  "model_hashes": {
+    "cornelius": "sha256:placeholder",
+    "milo": "sha256:placeholder"
+  },
   "catalog": {
     "embeddings": "assets/catalog/scryfall-mtg-embeddings.f32",
     "card_ids": "assets/catalog/scryfall-mtg-card-ids.json",

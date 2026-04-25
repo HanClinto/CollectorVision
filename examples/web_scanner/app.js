@@ -1280,6 +1280,9 @@ async function boot() {
   loadingScreen.step("manifest", "done", `v${manifest.version}`);
   loadingScreen.progress(14, "Manifest loaded");
   debugLog.info("manifest loaded", manifest.version);
+  const modelHashes = manifest.model_hashes ?? {};
+  setText("settings-cornelius-hash", modelHashes.cornelius ? modelHashes.cornelius.slice(0, 16) + "\u2026" : manifest.version);
+  setText("settings-milo-hash",      modelHashes.milo      ? modelHashes.milo.slice(0, 16)      + "\u2026" : manifest.version);
 
   // Create two workers.  The scanner worker does all GPU/CPU inference;
   // the enricher worker handles Scryfall price lookups independently.

@@ -156,11 +156,18 @@ def main() -> None:
     sample_path = samples_dir / "mtg-sample.jpg"
     shutil.copy2(SAMPLE_IMAGE, sample_path)
 
+    cornelius_hash = _sha256(cornelius_path)
+    milo_hash = _sha256(milo_path)
+
     manifest = {
         "version": bundle_version,
         "models": {
             "cornelius": "models/cornelius.onnx",
             "milo": "models/milo.onnx",
+        },
+        "model_hashes": {
+            "cornelius": cornelius_hash,
+            "milo": milo_hash,
         },
         "catalog": {
             "embeddings": f"catalog/{args.catalog_key}-embeddings.f16.bin",
@@ -181,8 +188,8 @@ def main() -> None:
         "catalog_rows": int(catalog.embeddings.shape[0]),
         "catalog_dims": int(catalog.embeddings.shape[1]),
         "models": {
-            "cornelius": _sha256(cornelius_path),
-            "milo": _sha256(milo_path),
+            "cornelius": cornelius_hash,
+            "milo": milo_hash,
         },
         "vendor": {
             "onnxruntime_web": ORT_VERSION,

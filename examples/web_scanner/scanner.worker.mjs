@@ -452,14 +452,20 @@ class WorkerRuntime {
 
   async load(onStage) {
     const version = this.manifest.version;
+    // Use per-model content hashes as cache keys when available so that a new
+    // model weight file (same filename, different content) always busts the
+    // IndexedDB entry, even if the bundle version string hasn't changed.
+    const hashes = this.manifest.model_hashes ?? {};
+    const detectorVersion = hashes.cornelius ?? version;
+    const embedderVersion = hashes.milo       ?? version;
     const detectorBuffer = await fetchBufferCached(
       `./assets/${this.manifest.models.cornelius}`,
-      version,
+      detectorVersion,
       (ratio, loaded, total, cached) => onStage?.("detector", ratio, loaded, total, cached),
     );
     const embedderBuffer = await fetchBufferCached(
       `./assets/${this.manifest.models.milo}`,
-      version,
+      embedderVersion,
       (ratio, loaded, total, cached) => onStage?.("embedder", ratio, loaded, total, cached),
     );
 
