@@ -509,6 +509,9 @@ function setupCaptureButton(camera, captureState) {
           // embedding divergence between JS (WebGPU/WASM) and Python (CPU ONNX).
           jsCardId: data.cardId ?? null,
           jsScore: data.score ?? null,
+          timing: data.timing ?? null,
+          crossOriginIsolated: self.crossOriginIsolated ?? false,
+          numThreads: numThreads ?? null,
           consoleLog: logEntries,
           // Python: cv2.imdecode(np.frombuffer(base64.b64decode(bundle["framePng"]), np.uint8), cv2.IMREAD_COLOR)
           framePng,
@@ -620,6 +623,7 @@ function createDiagnostics() {
     "diag-video", "diag-video-aspect", "diag-source-crop",
     "diag-process-canvas", "diag-display-canvas", "diag-dpr",
     "diag-detector-input", "diag-raw-corners", "diag-corners", "diag-sharpness",
+    "diag-timing",
   ];
   const LABELS = {
     "diag-video": "videoSensor",
@@ -632,6 +636,7 @@ function createDiagnostics() {
     "diag-raw-corners": "rawCorners",
     "diag-corners": "lastCorners",
     "diag-sharpness": "lastSharpness",
+    "diag-timing": "lastTiming",
   };
   const els = {};
   for (const id of IDS) {
@@ -1148,6 +1153,11 @@ function createScannerLoop(
     diag.set("diag-detector-input", data.detectorInput ?? "—");
     diag.set("diag-raw-corners", data.rawCorners ?? "—");
     diag.set("diag-sharpness", `${data.sharpness?.toFixed(3) ?? "—"} (card ${data.cardPresent ? "yes" : "no"})`);
+
+    if (data.timing) {
+      const t = data.timing;
+      diag.set("diag-timing", `${t.totalMs}ms  (det ${t.detectMs} + dew ${t.dewarpMs} + emb ${t.embedMs} + search ${t.searchMs})`);
+    }
 
     if (!data.cardPresent) {
       camera.drawCorners(null);

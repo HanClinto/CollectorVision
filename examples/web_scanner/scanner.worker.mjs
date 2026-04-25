@@ -638,6 +638,8 @@ async function processFrame(bitmap, captureRequested = false) {
   frameCtx.drawImage(bitmap, 0, 0);
   bitmap.close();
 
+  const t0 = performance.now();
+
   // Snapshot the frame for the capture bundle (zero-copy, worker → main).
   let captureFrameBitmap = null;
   if (captureRequested) {
@@ -646,7 +648,9 @@ async function processFrame(bitmap, captureRequested = false) {
     captureFrameBitmap = snap.transferToImageBitmap();
   }
 
+  const t1 = performance.now();
   const detection = await runtime.detect(frameCanvas);
+  const t2 = performance.now();
 
   if (!detection.cardPresent) {
     const transfer0 = captureFrameBitmap ? [captureFrameBitmap] : [];
@@ -665,6 +669,7 @@ async function processFrame(bitmap, captureRequested = false) {
       detectorInput: runtime._lastDetectorInput,
       detectorBitmap: null,
       cropBitmap: null,
+      timing: { detectMs: Math.round(t2 - t1), dewarpMs: 0, embedMs: 0, searchMs: 0, totalMs: Math.round(t2 - t0) },
     }, transfer0);
     return;
   }
@@ -693,13 +698,18 @@ async function processFrame(bitmap, captureRequested = false) {
       detectorInput: runtime._lastDetectorInput,
       detectorBitmap,
       cropBitmap: null,
+      timing: { detectMs: Math.round(t2 - t1), dewarpMs: 0, embedMs: 0, searchMs: 0, totalMs: Math.round(t2 - t0) },
     }, transfer1);
     return;
   }
 
+  const t3 = performance.now();
   const cropCanvas = runtime.dewarp(frameCanvas, detection.corners);
+  const t4 = performance.now();
   const embedding = await runtime.embed(cropCanvas);
+  const t5 = performance.now();
   const best = runtime.search(embedding);
+  const t6 = performance.now();
 
   // Transfer the dewarp canvas bitmap (zero-copy) then it gets a fresh blank.
   const cropBitmap = cropCanvas.transferToImageBitmap();
@@ -721,6 +731,13 @@ async function processFrame(bitmap, captureRequested = false) {
     detectorInput: runtime._lastDetectorInput,
     detectorBitmap,
     cropBitmap,
+    timing: {
+      detectMs: Math.round(t2 - t1),
+      dewarpMs: Math.round(t4 - t3),
+      embedMs: Math.round(t5 - t4),
+      searchMs: Math.round(t6 - t5),
+      totalMs: Math.round(t6 - t0),
+    },
   }, transfer2);
 }
 
