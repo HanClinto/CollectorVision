@@ -788,13 +788,16 @@ class CameraSurface {
     const nextDisplayHeight = Math.round(height * dpr);
     const nextProcessWidth = Math.round(Math.max(width, height * frameAspect) * dpr);
     const nextProcessHeight = Math.round(nextProcessWidth / frameAspect);
+    let dimensionsChanged = false;
     if (this.preview.width !== nextDisplayWidth || this.preview.height !== nextDisplayHeight) {
       this.preview.width = nextDisplayWidth;
       this.preview.height = nextDisplayHeight;
+      dimensionsChanged = true;
     }
     if (this.canvas.width !== nextDisplayWidth || this.canvas.height !== nextDisplayHeight) {
       this.canvas.width = nextDisplayWidth;
       this.canvas.height = nextDisplayHeight;
+      dimensionsChanged = true;
     }
     if (
       this.processCanvas.width !== nextProcessWidth
@@ -802,6 +805,7 @@ class CameraSurface {
     ) {
       this.processCanvas.width = nextProcessWidth;
       this.processCanvas.height = nextProcessHeight;
+      dimensionsChanged = true;
     }
 
     if (vw && vh) {
@@ -811,13 +815,15 @@ class CameraSurface {
     this.diag.set("diag-dpr", String(dpr));
     this.diag.set("diag-process-canvas", `${nextProcessWidth} × ${nextProcessHeight}`);
     this.diag.set("diag-display-canvas", `${nextDisplayWidth} × ${nextDisplayHeight}`);
-    this.debugLog.info(
-      "resize",
-      `video=${vw}×${vh}`,
-      `process=${nextProcessWidth}×${nextProcessHeight}`,
-      `display=${nextDisplayWidth}×${nextDisplayHeight}`,
-      `dpr=${dpr}`,
-    );
+    if (dimensionsChanged) {
+      this.debugLog.info(
+        "resize",
+        `video=${vw}×${vh}`,
+        `process=${nextProcessWidth}×${nextProcessHeight}`,
+        `display=${nextDisplayWidth}×${nextDisplayHeight}`,
+        `dpr=${dpr}`,
+      );
+    }
   }
 
   sourceCrop() {
