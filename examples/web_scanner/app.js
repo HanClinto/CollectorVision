@@ -1089,6 +1089,7 @@ function ensureScanRecord(scans, cardId) {
       setCode: "mtg",
       setName: "Loading...",
       priceUsd: null,
+      enriched: false,
       count: 0,
     };
     scans.unshift(scan);
@@ -1276,6 +1277,7 @@ function createScannerLoop(
         scan.setCode = data.set;
         scan.setName = data.setName;
         scan.priceUsd = data.priceUsd;
+        scan.enriched = true;
         renderScanList(scans);
         await audioBus.playPriceTier(data.priceUsd);
         debugLog.info("scryfall metadata ready", data.name, data.set, data.priceUsd ?? "n/a");
@@ -1358,7 +1360,7 @@ function createScannerLoop(
     setText("camera-badge", `Match ${confirmed.score.toFixed(2)}`);
     camera.flashConfirmed();
     await audioBus.playScanConfirmed();
-    if (scan.name === scan.cardId) {
+    if (scan.name === scan.cardId || !scan.enriched) {
       enricherWorker.postMessage({ type: "enrich", cardId: confirmed.cardId });
     }
   });
