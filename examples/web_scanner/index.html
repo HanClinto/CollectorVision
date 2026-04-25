@@ -171,6 +171,27 @@
             </div>
           </section>
 
+          <section class="panel panel--nested">
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Recognition</p>
+                <h2>Match Threshold</h2>
+              </div>
+            </header>
+            <label class="slider-row" for="match-score-slider">
+              <span class="slider-row__label">Minimum match score</span>
+              <span class="slider-row__value" id="match-score-value">0.60</span>
+            </label>
+            <input type="range" id="match-score-slider"
+              class="threshold-slider"
+              min="0.40" max="0.85" step="0.01" value="0.60" />
+            <p class="capture-hint">
+              Lower values confirm cards more readily but may produce false
+              positives. Higher values require a stronger match before
+              confirming. Default is 0.60.
+            </p>
+          </section>
+
           <dl class="settings-grid">
             <div>
               <dt>Build</dt>

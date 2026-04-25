@@ -552,6 +552,36 @@ dd {
   accent-color: var(--accent, #7c6e55);
 }
 
+.slider-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.2rem 0.2rem;
+}
+
+.slider-row__label {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.slider-row__value {
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.8rem;
+  text-align: right;
+  color: var(--accent, #7c6e55);
+}
+
+.threshold-slider {
+  display: block;
+  width: 100%;
+  margin: 0.4rem 0 0.2rem;
+  accent-color: var(--accent, #7c6e55);
+  cursor: pointer;
+}
+
 .code {
   margin: 0;
   padding: 0.9rem;

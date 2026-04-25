@@ -5,7 +5,7 @@ const GITHUB_REPO = "HanClinto/CollectorVision";
 
 // DETECTOR_SIZE is kept here for the capture-bundle debug export.
 const DETECTOR_SIZE = 384;
-const MIN_MATCH_SCORE = 0.70;
+const MIN_MATCH_SCORE_DEFAULT = 0.60;
 const PREVIEW_ASPECT = 16 / 9;
 const SCAN_INTERVAL_MS = 900;
 
@@ -18,6 +18,7 @@ const SOUND_PATHS = {
 const ASSET_DB_NAME = "collectorvision-web-scanner";
 const ASSET_STORE_NAME = "assets";
 const WEBGPU_PREF_KEY = "cv_webgpu_enabled";
+const MATCH_SCORE_KEY = "cv_min_match_score";
 
 const NOTES = [
   "The scanner now uses the real ONNX weights and the real MTG gallery bundle.",
@@ -1006,6 +1007,26 @@ function isWebGpuEnabled() {
   return localStorage.getItem(WEBGPU_PREF_KEY) === "true";
 }
 
+function getMinMatchScore() {
+  const stored = Number.parseFloat(localStorage.getItem(MATCH_SCORE_KEY));
+  return Number.isFinite(stored) ? stored : MIN_MATCH_SCORE_DEFAULT;
+}
+
+function setupMatchScoreSlider() {
+  const slider = document.getElementById("match-score-slider");
+  const label = document.getElementById("match-score-value");
+  if (!slider || !label) return;
+
+  slider.value = getMinMatchScore();
+  label.textContent = getMinMatchScore().toFixed(2);
+
+  slider.addEventListener("input", () => {
+    const value = Number.parseFloat(slider.value);
+    label.textContent = value.toFixed(2);
+    localStorage.setItem(MATCH_SCORE_KEY, value);
+  });
+}
+
 function setupSettingsSheet() {
   const page = document.querySelector(".page");
   const sheet = document.getElementById("settings-sheet");
@@ -1146,7 +1167,7 @@ function createScannerLoop(
     camera.drawCorners(data.corners);
     diag.set("diag-corners", data.corners.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("  "));
 
-    if (!Number.isFinite(data.score) || data.score < MIN_MATCH_SCORE) {
+    if (!Number.isFinite(data.score) || data.score < getMinMatchScore()) {
       bucket.push(null);
       setText("camera-badge", `Low match ${data.score?.toFixed(2) ?? "—"}`);
       debugLog.info("rejecting low-confidence match", data.cardId, `score=${data.score?.toFixed(4)}`);
@@ -1249,6 +1270,7 @@ async function boot() {
   renderScanList(scans);
   setupSettingsSheet();
   setupWebGpuToggle();
+  setupMatchScoreSlider();
   setupViewToggle();
   setupActions(scans);
   audioBus.preload();
