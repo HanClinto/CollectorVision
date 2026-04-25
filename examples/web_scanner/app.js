@@ -613,6 +613,12 @@ class ScanBucket {
     }
 
     this.candidate = { cardId: rec.cardId, count: 1, rec };
+    if (this.candidate.count >= getMinMatches()) {
+      const confirmed = this.candidate.rec;
+      this.cooldowns.set(rec.cardId, now + this.cooldownMs);
+      this.candidate = null;
+      return confirmed;
+    }
     return null;
   }
 }
