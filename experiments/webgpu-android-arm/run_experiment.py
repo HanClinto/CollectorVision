@@ -232,6 +232,7 @@ def run_tests(test_url: str, android: bool, timeout_s: int) -> dict:
             const r = window.__testResults ?? {};
             const ai = r.adapterInfo ?? {};
             return {
+                error: r.error ?? null,
                 adapterInfo: {
                     vendor:       ai.vendor        ?? 'unknown',
                     architecture: ai.architecture  ?? 'unknown',
@@ -273,6 +274,11 @@ RESET  = "\033[0m"
 
 
 def print_report(results: dict, android: bool, device_model: str) -> None:
+    if results.get("error"):
+        print(f"\n{RED}  Fatal error in browser page:{RESET}")
+        print(f"  {results['error']}")
+        print(f"  (Check browser_test.html console for details)\n")
+        return
     ai = results.get("adapterInfo", {})
     ua = results.get("userAgent", "")
     chrome_ver = next(

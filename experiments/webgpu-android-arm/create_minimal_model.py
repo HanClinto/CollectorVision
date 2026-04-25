@@ -39,7 +39,7 @@ import textwrap
 import numpy as np
 import onnx
 import onnxruntime as ort
-from onnx import TensorProto, helper, numpy_helper
+from onnx import TensorProto, helper, numpy_helper, shape_inference
 
 RNG = np.random.default_rng(42)      # deterministic weights
 INPUT_SHAPE = (1, 3, 64, 64)         # small enough for fast browser testing
@@ -71,6 +71,7 @@ def run_onnx(path: str, x: np.ndarray) -> np.ndarray:
 
 
 def save_and_check(model, path: str, x: np.ndarray):
+    model = shape_inference.infer_shapes(model)
     onnx.checker.check_model(model)
     onnx.save(model, path)
     y = run_onnx(path, x)
@@ -222,6 +223,7 @@ def build_all(output_dir: "Path | None" = None) -> dict:
     for builder in [build_single_conv, build_conv_bn_relu, build_two_conv, build_global_avgpool_gemm]:
         model, filename = builder()
         path = str(output_dir / filename)
+        model = shape_inference.infer_shapes(model)
         onnx.checker.check_model(model)
         onnx.save(model, path)
         y = run_onnx(path, x)

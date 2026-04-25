@@ -82,12 +82,10 @@ const PASS_TOL  = 1e-3;
 // Warn threshold: if WebGPU is this far from expected, flag it.
 const WARN_TOL  = 5e-3;
 
-// Path to the ORT WebGPU bundle.  Adjust if you are serving from a different
-// directory or want to test a specific version from npm/unpkg.
-// Using the same bundle as the main app:
-const ORT_URL = "../../examples/web_scanner/vendor/onnxruntime-web/ort.webgpu.min.mjs";
-// Fallback: test with a specific version from unpkg
-// const ORT_URL = "https://unpkg.com/onnxruntime-web@1.24.3/dist/ort.webgpu.min.mjs";
+// ORT from CDN — the experiment folder doesn't vendor the JS runtime.
+// For device testing the phone fetches this over its network (or through
+// the ADB reverse tunnel if you set ORT_URL to a localhost path).
+const ORT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/ort.webgpu.min.mjs";
 
 // Standard test input: 1×3×64×64, all values = 0.5
 const INPUT_SHAPE = [1, 3, 64, 64];
@@ -196,12 +194,27 @@ function addRow(state, name, html) {
 }
 
 // ---------------------------------------------------------------------------
-// Automation hooks — read by run_experiment.py via page.evaluate()
-// ---------------------------------------------------------------------------
-
 window.__testDone    = false;
 window.__testResults = null;
 const tests = [];
+
+// Safety net: any unhandled error marks the run as done so Playwright
+// doesn't hang waiting for a page that silently crashed.
+window.addEventListener('error', (e) => {
+  if (!window.__testDone) {
+    document.getElementById('status').textContent = `Fatal error: ${e.message}`;
+    window.__testResults = { error: e.message, tests: [], summary: {} };
+    window.__testDone = true;
+  }
+});
+window.addEventListener('unhandledrejection', (e) => {
+  if (!window.__testDone) {
+    const msg = e.reason?.message ?? String(e.reason);
+    document.getElementById('status').textContent = `Fatal error: ${msg}`;
+    window.__testResults = { error: msg, tests: [], summary: {} };
+    window.__testDone = true;
+  }
+});
 
 // Load expected outputs written by create_minimal_model.py / run_experiment.py.
 try {
@@ -291,7 +304,7 @@ for (const [filename, expected] of Object.entries(EXPECTED_OUTPUTS)) {
 <div class="vals">${detail}</div>`;
   tests.push({
     name:          filename,
-    status,
+    status:        state,
     wasmFirst8:    wasmOut   ?? null,
     webgpuFirst8:  webgpuOut ?? null,
     wasmMaxDiff:   wasmOut   ? maxAbsDiff(wasmOut,   expected) : null,
