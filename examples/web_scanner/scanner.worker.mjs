@@ -476,6 +476,7 @@ class WorkerRuntime {
     // that crossOriginIsolated becomes true and all threads are available.
     const numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
     ort.env.wasm.numThreads = numThreads;
+    this.numThreads = numThreads;
     // EP selection: WASM is the safe default.
     // WebGPU is proven broken on Android ARM (issues #9 and #12) but may work
     // on iOS (Metal) and desktop.  The enableWebGpu flag in the init message
@@ -742,7 +743,7 @@ self.onmessage = async ({ data }) => {
         self.postMessage({ type: "progress", stage, ratio, loaded, total, cached });
       });
 
-      self.postMessage({ type: "ready", inferenceMode, numThreads });
+      self.postMessage({ type: "ready", inferenceMode, numThreads: runtime.numThreads ?? 1 });
 
     } else if (data.type === "frame") {
       await processFrame(data.bitmap, data.captureRequested ?? false);
