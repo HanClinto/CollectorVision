@@ -2,7 +2,41 @@
 
 **Status:** Workaround in place (WASM fallback). Root cause unconfirmed. Investigation ongoing.
 
-This document records everything we know about why `onnxruntime-web`'s WebGPU execution
+---
+
+## Current Status / Where We Left Off
+
+**Automation is complete and validated.** Run this when you have the Android device:
+
+```bash
+cd /Users/clint/github/CollectorVision
+pip install -r experiments/webgpu-android-arm/requirements.txt
+playwright install chromium
+
+# Phone plugged in via USB, USB debugging enabled, Chrome open:
+python experiments/webgpu-android-arm/run_experiment.py
+
+# Add this to capture the WGSL shaders ORT generates (needed for upstream report):
+python experiments/webgpu-android-arm/run_experiment.py --capture-shaders
+```
+
+**What the script does automatically:**
+1. Builds 4 minimal ONNX test models (Conv, Conv+BN+ReLU, two-Conv, GlobalAvgPool+Gemm)
+2. Starts a local HTTP server
+3. Detects the Android device via `adb devices`, forwards CDP + HTTP ports
+4. Loads `browser_test.html` in Chrome on the device via Playwright
+5. Runs each model under both WASM and WebGPU EP
+6. Prints a report showing the first model where WebGPU diverges from WASM
+7. Writes `results-<timestamp>.json` ready to attach to an upstream bug report
+
+**Desktop baseline (already verified):** 4/4 WASM tests pass, max diff ~1.2e-7. This confirms the tooling and baseline are correct.
+
+**After you run it on Android,** the first model with WARN (WASM ✓, WebGPU ✗) tells you which operator is broken. Then:
+- Attach `results-<timestamp>.json` and the failing `.onnx` file to a GitHub issue at `microsoft/onnxruntime` with labels `ep:webgpu` and `platform:android`
+- See §8 (Upstream Contribution Strategy) below for a full issue template
+
+---
+
 provider produces numerically wrong outputs on Android ARM GPUs, and lays out a concrete
 plan to isolate the cause and contribute a fix upstream.
 
