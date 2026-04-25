@@ -303,37 +303,26 @@ h2 {
 .camera-badge {
   display: inline-flex;
   align-items: center;
-  min-height: 1.7rem;
-  padding: 0.1rem 0.55rem;
+  min-height: 2.4rem;
+  padding: 0.35rem 1rem;
   border-radius: 999px;
   border: 0;
   background: rgba(255, 255, 255, 0.1);
   color: #faf7ef;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: default;
   -webkit-tap-highlight-color: transparent;
 }
 
-.camera-badge:not(:disabled):not([data-camera-live="true"]) {
-  min-height: 2.4rem;
-  padding: 0.35rem 1rem;
-  font-size: 0.95rem;
+.camera-badge:not(:disabled) {
   cursor: pointer;
   background: rgba(255, 255, 255, 0.18);
 }
 
-.camera-badge:not(:disabled):not([data-camera-live="true"]):active {
+.camera-badge:not(:disabled):active {
   background: rgba(255, 255, 255, 0.3);
-}
-
-.camera-badge[data-camera-live="true"] {
-  cursor: pointer;
-}
-
-.camera-badge[data-camera-live="true"]:active {
-  background: rgba(255, 255, 255, 0.22);
 }
 
 .count-badge {
