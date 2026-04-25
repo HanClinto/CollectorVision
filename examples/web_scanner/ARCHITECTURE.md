@@ -21,7 +21,7 @@ Primary path only:
 ### 2. Detection
 
 - Load `cornelius.onnx` with `onnxruntime-web`.
-- **Always run on WASM** — see Lessons Learned below.
+- **Always run on WASM** (WebGPU EP wrong on Android ARM) — see Lessons Learned below.
 - Match Python preprocessing:
   - BGR/RGB handling
   - resize to model input
@@ -41,6 +41,7 @@ Primary path only:
 ### 4. Embedding
 
 - Load `milo.onnx` with `onnxruntime-web`.
+- **Always run on WASM** (WebGPU EP wrong on Android ARM) — see Lessons Learned below.
 - Match Python preprocessing.
 - Emit `128`-d float32 embedding.
 - L2-normalize in JS even if the model already does so.
@@ -166,38 +167,32 @@ wrong results.  Fixed by switching to the *new* WebGPU EP (see below).
 
 Commit: `aa0f88f fix(webgpu): switch to new WebGPU EP (ort.webgpu.min.mjs)`
 
-### Use `ort.webgpu.min.mjs` (new WebGPU EP) for the embedder — **EXPERIMENTAL on Android ARM**
+### Do NOT use `ort.webgpu.min.mjs` (new WebGPU EP) for either model on Android ARM
 
 The new EP (`ort.webgpu.min.mjs` + `ort-wasm-simd-threaded.asyncify.wasm`) fixes
-the JSEP Conv bug and works correctly for `milo.onnx` on desktop.
+the JSEP Conv bug and works correctly for `milo.onnx` on desktop, but is numerically
+wrong for **both** models on Android ARM GPUs.
 
-WASM correctness for milo on Android ARM was validated by issues #10 and #11:
-correct corners, Sanguinary Mage score 0.74 on a sharp frame.  WebGPU correctness
-for milo on Android ARM is **unproven** — it is re-enabled experimentally in commit
-`TODO` with `jsCardId`/`jsScore` added to capture bundles so any divergence from
-Python re-runs is immediately visible.  If scores regress, revert the embedder to
-`executionProviders: ["wasm"]`.
+`milo.onnx` WebGPU-on-Android-ARM failure was confirmed definitively by issue #12
+(build `f6f1c76`): sharp frame (Laplacian 162), WASM Python score 0.81 for Drey Keeper,
+WebGPU JS score 0.39 for a completely different card.  Corners were verified correct
+(WASM cornelius, max diff 0.0003), so the wrong result is solely from a bad embedding.
+This is the same failure mode as cornelius in issue #9: coherent non-zero outputs that
+are numerically incorrect on ARM GPUs with no error signal.
 
-The new EP requires the **asyncify** WASM variant, not the jsep variant:
+Both models use `executionProviders: ["wasm"]` unconditionally.
+
+### Always run both models on WASM
+
+`cornelius.onnx` (corner detector) produces wrong-but-coherent corners on Android
+ARM with the new WebGPU EP (issue #9, build `7ed8f8f`).  `milo.onnx` (embedder)
+produces wrong-but-coherent embeddings on Android ARM with the new WebGPU EP
+(issue #12, build `f6f1c76`).  Both models are comfortably fast on WASM within the
+900 ms scan interval.
+
 ```
-ort.webgpu.min.mjs                         ← new EP entry point
-ort-wasm-simd-threaded.asyncify.mjs/.wasm  ← required WASM fallback
+executionProviders: ["wasm"]   ← use this for BOTH models
 ```
 
-### Always run `cornelius.onnx` (corner detector) on WASM
-
-Even with the new WebGPU EP, `cornelius.onnx` produces numerically wrong
-outputs on Android ARM GPU architectures (confirmed armv81 Chrome 147,
-ort-web 1.24.3).  The outputs are coherent (non-zero, convex quads that
-pass `isUsableQuad`) but point to an entirely wrong region of the frame.
-Wrong corners cascade silently through dewarp → embed → search with no
-error signal.
-
-This is distinct from the JSEP all-zeros bug; it is a model-specific
-numerical issue with the new WebGPU EP on ARM.
-
-`cornelius` is small enough that WASM completes comfortably within the
-900 ms scan interval.  Always use `executionProviders: ["wasm"]` for it.
-
-Commit: `c8defb1 fix: force corner detector (cornelius) to WASM-only`
-Diagnosed from: issue #9 capture bundle (build 7ed8f8f)
+Commits: `c8defb1` (cornelius), `TODO` (milo revert)
+Diagnosed from: issue #9 (build 7ed8f8f), issue #12 (build f6f1c76)

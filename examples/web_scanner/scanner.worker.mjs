@@ -469,16 +469,20 @@ class WorkerRuntime {
     // Corner detector (cornelius): WASM only.
     // The new WebGPU EP gives wrong outputs for this model on Android ARM GPUs
     // (coherent but incorrect corners that silently corrupt the pipeline).
+    //
+    // Embedder (milo): WASM only.
+    // Validated wrong on Android ARM with WebGPU EP in issue #12 (build f6f1c76):
+    // sharp frame (Laplacian 162), WASM Python score 0.81 for correct card,
+    // WebGPU JS score 0.39 for a completely different card.
+    // Both models behave identically: new WebGPU EP is numerically wrong for
+    // these models on Android ARM GPUs regardless of which model is tested.
+    //
     // See ARCHITECTURE.md "Lessons Learned" for the full history.
     this.detector = await ort.InferenceSession.create(detectorBuffer, {
       executionProviders: ["wasm"],
     });
-    // Embedder (milo): WebGPU with WASM fallback — EXPERIMENTAL on Android ARM.
-    // WASM correctness was validated by issues #10/#11 (correct corners, score 0.74).
-    // WebGPU correctness on Android ARM is unproven; capture bundles record jsScore
-    // so divergence from Python will be visible. Revert to ["wasm"] if scores regress.
     this.embedder = await ort.InferenceSession.create(embedderBuffer, {
-      executionProviders: ["webgpu", "wasm"],
+      executionProviders: ["wasm"],
     });
 
     this.inputNames.detector = this.detector.inputNames[0];
@@ -727,10 +731,8 @@ self.onmessage = async ({ data }) => {
       // inferenceMode reflects the actual EPs used by each session, not just
       // whether WebGPU hardware is present.
       const detectorEp = "wasm";
-      const embedderEp = webgpuReady ? "webgpu" : "wasm";
-      const inferenceMode = embedderEp === "webgpu"
-        ? `WebGPU (detect:${detectorEp} embed:${embedderEp})`
-        : "WASM";
+      const embedderEp = "wasm";
+      const inferenceMode = "WASM";
       self.postMessage({ type: "progress", stage: "webgpu", inferenceMode });
       self.postMessage({ type: "progress", stage: "dewarp", ratio: 1 });
 
