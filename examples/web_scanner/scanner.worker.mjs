@@ -7,7 +7,6 @@
 // main → worker:
 //   { type: 'init',   manifest }
 //   { type: 'frame',  bitmap: ImageBitmap }   (transferred, zero-copy)
-//   { type: 'sample', url: string }
 //
 // worker → main:
 //   { type: 'progress', stage, ratio, loaded?, total?, cached?, inferenceMode? }
@@ -764,15 +763,6 @@ self.onmessage = async ({ data }) => {
 
     } else if (data.type === "frame") {
       await processFrame(data.bitmap, data.captureRequested ?? false);
-
-    } else if (data.type === "sample") {
-      const response = await fetch(data.url);
-      if (!response.ok) {
-        throw new Error(`Failed to load sample: HTTP ${response.status}`);
-      }
-      const blob = await response.blob();
-      const bitmap = await createImageBitmap(blob);
-      await processFrame(bitmap);
     }
   } catch (error) {
     self.postMessage({ type: "error", message: error?.message ?? String(error) });

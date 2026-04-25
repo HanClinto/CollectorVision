@@ -324,18 +324,6 @@ h2 {
   background: rgba(255, 255, 255, 0.22);
 }
 
-.camera-start {
-  appearance: none;
-  min-height: 2.5rem;
-  padding: 0.55rem 0.85rem;
-  border: 0;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff7ed;
-  font: inherit;
-  cursor: pointer;
-}
-
 .count-badge {
   display: inline-flex;
   align-items: center;
