@@ -1214,9 +1214,13 @@ function setupActions(scans) {
   });
 
   document.getElementById("clear-list").addEventListener("click", () => {
+    closeMenu();
+    if (!scans.length) return;
+    const cardCount = scans.reduce((sum, s) => sum + s.count, 0);
+    const noun = cardCount === 1 ? "card" : "cards";
+    if (!confirm(`Clear all ${cardCount} ${noun}? This cannot be undone.`)) return;
     scans.splice(0, scans.length);
     renderScanList(scans);
-    closeMenu();
   });
 }
 
