@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dev deps
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install deps
+        run: uv pip install --system -e ".[dev]" opencv-python-headless
+
+      - name: Run offline tests
+        run: pytest tests/ -m "not hf" -v
+
+  test-integration:
+    name: Integration tests (HF catalog)
+    runs-on: ubuntu-latest
+    # Only run on pushes to main — catalog download is slow and uses HF bandwidth
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install deps
+        run: uv pip install --system -e ".[dev,server]" opencv-python-headless
+
+      - name: Run all tests
+        run: pytest tests/ -v

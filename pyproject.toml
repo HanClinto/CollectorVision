@@ -48,4 +48,17 @@ include = ["collector_vision*"]
 
 [tool.setuptools.package-data]
 # Single-file ONNX weights bundled in the wheel (cornelius.onnx, milo.onnx)
-collector_vision = ["weights/*.onnx"]
+# py.typed is the PEP 561 marker that tells type checkers this package has inline types.
+collector_vision = ["weights/*.onnx", "py.typed"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]  # line length — enforced by formatter, not linter
+
+[tool.pytest.ini_options]
+markers = [
+    "hf: tests that download from HuggingFace (deselect with -m 'not hf')",
+]

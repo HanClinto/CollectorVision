@@ -9,7 +9,11 @@ import sys
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+
+fastapi = pytest.importorskip("fastapi", reason="fastapi not installed — skipping server tests")
+from fastapi.testclient import TestClient  # noqa: E402
+
+pytestmark = pytest.mark.hf
 
 ROOT   = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg"

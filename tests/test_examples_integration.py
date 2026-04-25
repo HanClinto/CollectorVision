@@ -8,6 +8,8 @@ import urllib.request
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGES_DIR = ROOT / "examples" / "images"
@@ -30,6 +32,7 @@ class _FakeResponse:
         return None
 
 
+@pytest.mark.hf
 class QuickstartIntegrationTests(unittest.TestCase):
     def test_quickstart_script_prints_expected_card(self) -> None:
         real_urlopen = urllib.request.urlopen
@@ -67,6 +70,7 @@ class QuickstartIntegrationTests(unittest.TestCase):
         self.assertIn("Set       Urza's Destiny (UDS)", stdout)
 
 
+@pytest.mark.hf
 class SampleImagesIntegrationTests(unittest.TestCase):
     """Integration tests for all three UUID-labelled sample images.
 
