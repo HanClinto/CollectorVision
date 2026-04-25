@@ -769,6 +769,7 @@ class CameraSurface {
     this.resize();
     window.addEventListener("resize", this._resizeHandler);
     this.renderPreview();
+    this.setupTapToFocus();
   }
 
   resize() {
@@ -923,6 +924,44 @@ class CameraSurface {
       this.ctx.arc(x, y, Math.max(5, (window.devicePixelRatio || 1) * 4), 0, Math.PI * 2);
       this.ctx.fill();
     }
+  }
+
+  setupTapToFocus() {
+    this.preview.addEventListener("click", async (e) => {
+      const track = this.stream?.getVideoTracks()[0];
+      if (!track) return;
+      const caps = track.getCapabilities?.() ?? {};
+      if (!caps.focusMode?.includes("manual") && !caps.pointsOfInterest) return;
+
+      // Compute tap position as fractions of the rendered image.
+      const rect = this.preview.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+
+      // Draw a focus ring on the overlay canvas at the tap point.
+      const cw = this.canvas.width;
+      const ch = this.canvas.height;
+      const cx = x * cw;
+      const cy = y * ch;
+      const r = Math.round(Math.max(28, Math.min(cw, ch) * 0.1));
+      const dpr = window.devicePixelRatio || 1;
+      this.ctx.save();
+      this.ctx.strokeStyle = "rgba(255, 230, 0, 0.92)";
+      this.ctx.lineWidth = Math.max(2, dpr * 1.5);
+      this.ctx.beginPath();
+      this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      this.ctx.stroke();
+      this.ctx.restore();
+      setTimeout(() => this.clearOverlay(), 1200);
+
+      try {
+        const constraints = { advanced: [{ pointsOfInterest: [{ x, y }], focusMode: "manual" }] };
+        await track.applyConstraints(constraints);
+        this.debugLog.info("tap-to-focus", `x=${x.toFixed(2)} y=${y.toFixed(2)}`);
+      } catch (err) {
+        this.debugLog.info("tap-to-focus unsupported", err.message);
+      }
+    });
   }
 
   describeCameraError(error) {
