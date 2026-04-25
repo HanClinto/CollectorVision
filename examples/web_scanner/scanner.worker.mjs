@@ -432,8 +432,9 @@ function fillInputTensor(canvas, size) {
 // ---------------------------------------------------------------------------
 
 class WorkerRuntime {
-  constructor(manifest) {
+  constructor(manifest, useWebGpu = false) {
     this.manifest = manifest;
+    this.useWebGpu = useWebGpu;
     this.detector = null;
     this.embedder = null;
     this.inputNames = {};
@@ -466,23 +467,16 @@ class WorkerRuntime {
     // NOTE: multi-threaded WASM requires SharedArrayBuffer / COOP+COEP headers.
     // GitHub Pages does not set these, so ort-web silently falls back to 1 thread.
     ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
-    // Corner detector (cornelius): WASM only.
-    // The new WebGPU EP gives wrong outputs for this model on Android ARM GPUs
-    // (coherent but incorrect corners that silently corrupt the pipeline).
-    //
-    // Embedder (milo): WASM only.
-    // Validated wrong on Android ARM with WebGPU EP in issue #12 (build f6f1c76):
-    // sharp frame (Laplacian 162), WASM Python score 0.81 for correct card,
-    // WebGPU JS score 0.39 for a completely different card.
-    // Both models behave identically: new WebGPU EP is numerically wrong for
-    // these models on Android ARM GPUs regardless of which model is tested.
-    //
-    // See ARCHITECTURE.md "Lessons Learned" for the full history.
+    // EP selection: WASM is the safe default.
+    // WebGPU is proven broken on Android ARM (issues #9 and #12) but may work
+    // on iOS (Metal) and desktop.  The enableWebGpu flag in the init message
+    // lets the user opt in from Settings — see ARCHITECTURE.md Lessons Learned.
+    const ep = this.useWebGpu ? "webgpu" : "wasm";
     this.detector = await ort.InferenceSession.create(detectorBuffer, {
-      executionProviders: ["wasm"],
+      executionProviders: [ep],
     });
     this.embedder = await ort.InferenceSession.create(embedderBuffer, {
-      executionProviders: ["wasm"],
+      executionProviders: [ep],
     });
 
     this.inputNames.detector = this.detector.inputNames[0];
@@ -727,16 +721,14 @@ async function processFrame(bitmap, captureRequested = false) {
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
-      const webgpuReady = await configureWebGpu();
-      // inferenceMode reflects the actual EPs used by each session, not just
-      // whether WebGPU hardware is present.
-      const detectorEp = "wasm";
-      const embedderEp = "wasm";
-      const inferenceMode = "WASM";
+      const enableWebGpu = data.enableWebGpu === true;
+      const webgpuReady = enableWebGpu ? await configureWebGpu() : false;
+      const useWebGpu = webgpuReady; // only true if both requested and available
+      const inferenceMode = useWebGpu ? "WebGPU" : "WASM";
       self.postMessage({ type: "progress", stage: "webgpu", inferenceMode });
       self.postMessage({ type: "progress", stage: "dewarp", ratio: 1 });
 
-      runtime = new WorkerRuntime(data.manifest);
+      runtime = new WorkerRuntime(data.manifest, useWebGpu);
       await runtime.load((stage, ratio, loaded, total, cached) => {
         self.postMessage({ type: "progress", stage, ratio, loaded, total, cached });
       });

@@ -17,12 +17,13 @@ const SOUND_PATHS = {
 
 const ASSET_DB_NAME = "collectorvision-web-scanner";
 const ASSET_STORE_NAME = "assets";
+const WEBGPU_PREF_KEY = "cv_webgpu_enabled";
 
 const NOTES = [
   "The scanner now uses the real ONNX weights and the real MTG gallery bundle.",
   "The browser app reads local ./assets files; Hugging Face is a publish-time sync step.",
   "Models and catalog files are cached in IndexedDB after first download.",
-  "WebGPU is used when available; falls back to WASM-only inference automatically.",
+  "WebGPU EP is opt-in (Settings → Inference Backend) — WASM is the safe default on all platforms.",
   "Scryfall enrichment runs after confirmation so the recognition loop stays local.",
   "Settings include a bundled sample-frame smoke test for local bring-up.",
   "scan.wav fires on confirm; price-tier sounds fire after Scryfall returns.",
@@ -980,6 +981,31 @@ function ensureScanRecord(scans, cardId) {
   return scan;
 }
 
+function setupWebGpuToggle() {
+  const section = document.getElementById("webgpu-toggle-section");
+  const checkbox = document.getElementById("webgpu-toggle");
+  if (!section || !checkbox) return;
+
+  // Only show the toggle when the browser reports WebGPU hardware.  On
+  // devices without a GPU (or those that don't expose navigator.gpu) the
+  // option is meaningless.
+  if (!("gpu" in navigator)) return;
+
+  section.hidden = false;
+  checkbox.checked = localStorage.getItem(WEBGPU_PREF_KEY) === "true";
+
+  checkbox.addEventListener("change", () => {
+    localStorage.setItem(WEBGPU_PREF_KEY, checkbox.checked ? "true" : "false");
+    // Restart the page so the worker is recreated with the new EP preference.
+    // Round trip is fast because models are already in IndexedDB.
+    location.reload();
+  });
+}
+
+function isWebGpuEnabled() {
+  return localStorage.getItem(WEBGPU_PREF_KEY) === "true";
+}
+
 function setupSettingsSheet() {
   const page = document.querySelector(".page");
   const sheet = document.getElementById("settings-sheet");
@@ -1222,6 +1248,7 @@ async function boot() {
   renderBuildId();
   renderScanList(scans);
   setupSettingsSheet();
+  setupWebGpuToggle();
   setupViewToggle();
   setupActions(scans);
   audioBus.preload();
@@ -1267,7 +1294,7 @@ async function boot() {
       if (data.type === "progress") {
         if (data.stage === "webgpu") {
           const mode = data.inferenceMode;
-          setText("webgpu-status", mode === "WebGPU" ? "Available" : "WASM fallback");
+          setText("webgpu-status", mode.startsWith("WebGPU") ? "Active" : "WASM");
           loadingScreen.step("webgpu", "done", mode);
           loadingScreen.progress(20, `Inference: ${mode}`);
           debugLog.info("inference configured", mode);
@@ -1305,7 +1332,7 @@ async function boot() {
   loadingScreen.step("catalog", "active", "Queued");
   setText("models-status", "Loading models");
 
-  scannerWorker.postMessage({ type: "init", manifest });
+  scannerWorker.postMessage({ type: "init", manifest, enableWebGpu: isWebGpuEnabled() });
   const inferenceMode = await scannerReady;
 
   setText("models-status", "Models ready");

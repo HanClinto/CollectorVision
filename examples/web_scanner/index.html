@@ -99,6 +99,25 @@
             <button class="sheet-close" id="settings-close" type="button">Close</button>
           </header>
 
+          <section class="panel panel--nested" id="webgpu-toggle-section" hidden>
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Experimental</p>
+                <h2>Inference Backend</h2>
+              </div>
+            </header>
+            <label class="toggle-row" for="webgpu-toggle">
+              <span class="toggle-row__label">Use WebGPU acceleration</span>
+              <input type="checkbox" id="webgpu-toggle" class="toggle-row__input" />
+            </label>
+            <p class="capture-hint">
+              Opt-in. WASM is the validated default on all platforms.
+              WebGPU is confirmed broken on Android ARM (issues&nbsp;#9,&nbsp;#12) but
+              may work on iOS (Metal) and desktop. Toggling reloads the page;
+              models stay cached in IndexedDB.
+            </p>
+          </section>
+
           <section class="panel panel--nested panel--capture">
             <header class="panel-header">
               <div>

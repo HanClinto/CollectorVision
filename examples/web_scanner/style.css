@@ -527,6 +527,31 @@ dd {
   line-height: 1.55;
 }
 
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem;
+  border-radius: 0.85rem;
+  background: var(--accent-soft);
+  cursor: pointer;
+  margin: 0 0 0.7rem;
+}
+
+.toggle-row__label {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.toggle-row__input {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--accent, #7c6e55);
+}
+
 .code {
   margin: 0;
   padding: 0.9rem;
