@@ -471,8 +471,11 @@ class WorkerRuntime {
 
     // Use as many threads as the device has cores, capped at 4.
     // NOTE: multi-threaded WASM requires SharedArrayBuffer / COOP+COEP headers.
-    // GitHub Pages does not set these, so ort-web silently falls back to 1 thread.
-    ort.env.wasm.numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
+    // Without them ort-web silently falls back to 1 thread.  The COI service
+    // worker (coi-serviceworker.js) injects these headers on GitHub Pages so
+    // that crossOriginIsolated becomes true and all threads are available.
+    const numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
+    ort.env.wasm.numThreads = numThreads;
     // EP selection: WASM is the safe default.
     // WebGPU is proven broken on Android ARM (issues #9 and #12) but may work
     // on iOS (Metal) and desktop.  The enableWebGpu flag in the init message
@@ -739,7 +742,7 @@ self.onmessage = async ({ data }) => {
         self.postMessage({ type: "progress", stage, ratio, loaded, total, cached });
       });
 
-      self.postMessage({ type: "ready", inferenceMode });
+      self.postMessage({ type: "ready", inferenceMode, numThreads });
 
     } else if (data.type === "frame") {
       await processFrame(data.bitmap, data.captureRequested ?? false);

@@ -19,6 +19,44 @@
         }
       })();
     </script>
+    <!-- COI service worker — injects COOP+COEP headers so SharedArrayBuffer
+         is available, which lets onnxruntime-web use multi-threaded WASM.
+         Must run synchronously before any module script so that the reload
+         (first visit only) happens before app.js starts booting. -->
+    <script>
+      (function () {
+        if (!("serviceWorker" in navigator)) return;
+        // Already cross-origin isolated — SW is working or headers are set
+        // server-side.  Don't register again.
+        if (self.crossOriginIsolated) return;
+
+        navigator.serviceWorker.register("./coi-serviceworker.js", { scope: "./" })
+          .then(function (reg) {
+            // If the SW is newly installed (first visit) it will claim the
+            // page and we need one reload to pick up the headers it injects.
+            // Reloads after that find crossOriginIsolated = true at the top
+            // of this block and skip completely.
+            if (reg.active && !navigator.serviceWorker.controller) {
+              // SW was already active but didn't control this client (e.g.
+              // hard refresh).  Reload once to get it controlling.
+              location.reload();
+            }
+            reg.addEventListener("updatefound", function () {
+              var newWorker = reg.installing;
+              if (!newWorker) return;
+              newWorker.addEventListener("statechange", function () {
+                if (newWorker.state === "activated") {
+                  location.reload();
+                }
+              });
+            });
+          })
+          .catch(function (err) {
+            // Non-fatal — scanner still works single-threaded.
+            console.warn("COI service worker registration failed:", err);
+          });
+      })();
+    </script>
     <link rel="stylesheet" href="./style.css?v=__BUILD_ID__" />
   </head>
   <body>
@@ -137,6 +175,10 @@
             <div>
               <dt>Build</dt>
               <dd id="settings-build">—</dd>
+            </div>
+            <div>
+              <dt>Inference threads</dt>
+              <dd id="settings-threads">—</dd>
             </div>
             <div>
               <dt>Detector (cornelius)</dt>

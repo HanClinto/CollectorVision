@@ -1319,7 +1319,7 @@ async function boot() {
         }
       } else if (data.type === "ready") {
         scannerWorker.removeEventListener("message", onInitMessage);
-        resolve(data.inferenceMode);
+        resolve({ inferenceMode: data.inferenceMode, numThreads: data.numThreads ?? 1 });
       } else if (data.type === "error") {
         scannerWorker.removeEventListener("message", onInitMessage);
         reject(new Error(data.message));
@@ -1336,7 +1336,12 @@ async function boot() {
   setText("models-status", "Loading models");
 
   scannerWorker.postMessage({ type: "init", manifest, enableWebGpu: isWebGpuEnabled() });
-  const inferenceMode = await scannerReady;
+  const { inferenceMode, numThreads } = await scannerReady;
+
+  const threadLabel = self.crossOriginIsolated
+    ? `${numThreads} (cross-origin isolated)`
+    : `1 of ${numThreads} (not isolated — COI SW pending?)`;
+  setText("settings-threads", threadLabel);
 
   setText("models-status", "Models ready");
   setText("catalog-status", `${manifest.catalog.rows} cards ready`);
