@@ -19,6 +19,8 @@ const ASSET_DB_NAME = "collectorvision-web-scanner";
 const ASSET_STORE_NAME = "assets";
 const WEBGPU_PREF_KEY = "cv_webgpu_enabled";
 const MATCH_SCORE_KEY = "cv_min_match_score";
+const MIN_MATCHES_DEFAULT = 2;
+const MATCHES_KEY = "cv_min_matches";
 
 const NOTES = [
   "The scanner now uses the real ONNX weights and the real MTG gallery bundle.",
@@ -601,7 +603,7 @@ class ScanBucket {
     if (this.candidate?.cardId === rec.cardId) {
       this.candidate.count += 1;
       this.candidate.rec = rec;
-      if (this.candidate.count >= this.fillAt) {
+      if (this.candidate.count >= getMinMatches()) {
         const confirmed = this.candidate.rec;
         this.cooldowns.set(rec.cardId, now + this.cooldownMs);
         this.candidate = null;
@@ -1017,6 +1019,11 @@ function getMinMatchScore() {
   return Number.isFinite(stored) ? stored : MIN_MATCH_SCORE_DEFAULT;
 }
 
+function getMinMatches() {
+  const stored = parseInt(localStorage.getItem(MATCHES_KEY), 10);
+  return Number.isFinite(stored) && stored >= 1 ? stored : MIN_MATCHES_DEFAULT;
+}
+
 function setupMatchScoreSlider() {
   const slider = document.getElementById("match-score-slider");
   const label = document.getElementById("match-score-value");
@@ -1029,6 +1036,21 @@ function setupMatchScoreSlider() {
     const value = Number.parseFloat(slider.value);
     label.textContent = value.toFixed(2);
     localStorage.setItem(MATCH_SCORE_KEY, value);
+  });
+}
+
+function setupMinMatchesSlider() {
+  const slider = document.getElementById("min-matches-slider");
+  const label = document.getElementById("min-matches-value");
+  if (!slider || !label) return;
+
+  slider.value = getMinMatches();
+  label.textContent = getMinMatches();
+
+  slider.addEventListener("input", () => {
+    const value = parseInt(slider.value, 10);
+    label.textContent = value;
+    localStorage.setItem(MATCHES_KEY, value);
   });
 }
 
@@ -1281,6 +1303,7 @@ async function boot() {
   setupSettingsSheet();
   setupWebGpuToggle();
   setupMatchScoreSlider();
+  setupMinMatchesSlider();
   setupViewToggle();
   setupActions(scans);
   audioBus.preload();
