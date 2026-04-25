@@ -1347,6 +1347,7 @@ async function boot() {
   setText("catalog-status", `${manifest.catalog.rows} cards ready`);
   loadingScreen.progress(100, "Scanner ready");
   debugLog.info("models and catalog ready", `${manifest.catalog.rows} rows`);
+  debugLog.info("wasm threads", threadLabel);
 
   // captureState is updated by the scanner result handler inside createScannerLoop.
   const captureState = { lastResult: null, lastDetectorBitmap: null, lastCropBitmap: null, pendingCapture: false, onCapture: null, inferenceMode };
