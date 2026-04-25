@@ -691,7 +691,7 @@ class CameraSurface {
     this.canvas = document.getElementById("camera-overlay");
     this.ctx = this.canvas.getContext("2d");
     this.badge = document.getElementById("camera-badge");
-    this.startButton = document.getElementById("camera-start");
+    this.badge.disabled = true;
     this.debugLog = debugLog;
     this.diag = diag;
     this.stream = null;
@@ -702,52 +702,39 @@ class CameraSurface {
   }
 
   bind(onStart, onStop) {
-    const startCamera = async () => {
-      try {
-        await this.start();
-        await onStart();
-        // Badge becomes a pause toggle once the camera is live.
-        this.badge.dataset.cameraLive = "true";
-        this.badge.addEventListener("click", toggleHandler);
-      } catch (error) {
-        this.debugLog.error("camera start failed", error);
-        this.badge.textContent = this.describeCameraError(error);
-        this.startButton.disabled = false;
-        delete this.badge.dataset.cameraLive;
-      }
-    };
-
-    const toggleHandler = async () => {
+    this.badge.addEventListener("click", async () => {
       if (this.stream) {
-        // Pause: stop stream and scan loop.
+        // Live → pause: stop stream and scan loop entirely.
         this.stop();
         onStop();
         this.badge.textContent = "Camera paused — tap to resume";
+        delete this.badge.dataset.cameraLive;
       } else {
-        // Resume: restart camera and scan loop.
-        this.badge.textContent = "Resuming…";
-        await startCamera();
+        // Start or resume.
+        this.badge.disabled = true;
+        try {
+          await this.start();
+          await onStart();
+          this.badge.dataset.cameraLive = "true";
+          this.badge.disabled = false;
+        } catch (error) {
+          this.debugLog.error("camera start failed", error);
+          this.badge.textContent = this.describeCameraError(error);
+          this.badge.disabled = false;
+        }
       }
-    };
-
-    this.startButton.addEventListener("click", async () => {
-      if (this.startButton.disabled) {
-        return;
-      }
-      this.startButton.disabled = true;
-      await startCamera();
     });
   }
 
   setLoading(message) {
     this.badge.textContent = message;
-    this.startButton.disabled = true;
+    this.badge.disabled = true;
     this.debugLog.info(message);
   }
 
   setReady() {
-    this.badge.textContent = "Ready to start camera";
-    this.startButton.disabled = false;
+    this.badge.textContent = "Tap to start";
+    this.badge.disabled = false;
     this.debugLog.info("scanner runtime loaded; camera can start");
   }
 
@@ -786,7 +773,6 @@ class CameraSurface {
     this.page.dataset.cameraReady = "true";
     this.badge.textContent = "Camera live";
     this.debugLog.info("camera stream is live", `${this.video.videoWidth}x${this.video.videoHeight}`);
-    this.startButton.hidden = true;
     this.resize();
     window.addEventListener("resize", this._resizeHandler);
     this.renderPreview();
@@ -1188,9 +1174,31 @@ function setupViewToggle() {
 }
 
 function setupActions(scans) {
+  const trigger = document.getElementById("scan-count");
+  const dropdown = document.getElementById("count-dropdown");
+
+  const closeMenu = () => {
+    dropdown.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+  };
+
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const isOpen = !dropdown.hidden;
+    if (isOpen) {
+      closeMenu();
+    } else {
+      dropdown.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
+    }
+  });
+
+  document.addEventListener("click", closeMenu);
+
   document.getElementById("copy-list").addEventListener("click", async () => {
     const text = buildTextExport(scans);
     await navigator.clipboard.writeText(text);
+    closeMenu();
   });
 
   document.getElementById("download-csv").addEventListener("click", () => {
@@ -1202,11 +1210,13 @@ function setupActions(scans) {
     link.download = "collectorvision-scans.csv";
     link.click();
     URL.revokeObjectURL(url);
+    closeMenu();
   });
 
   document.getElementById("clear-list").addEventListener("click", () => {
     scans.splice(0, scans.length);
     renderScanList(scans);
+    closeMenu();
   });
 }
 
@@ -1348,11 +1358,6 @@ function createScannerLoop(
           setText("camera-badge", error?.message || "Scan error");
         }
       }, SCAN_INTERVAL_MS);
-    },
-    runSample() {
-      debugLog.info("running bundled sample frame");
-      setText("camera-badge", "Running sample");
-      scannerWorker.postMessage({ type: "sample", url: `./assets/${manifest.sample_frame}` });
     },
   };
 }
@@ -1523,9 +1528,6 @@ async function boot() {
     },
   );
   camera.setReady();
-  document.getElementById("run-sample").addEventListener("click", () => {
-    loop.runSample();
-  });
   setupCaptureButton(camera, captureState);
   loadingScreen.finish();
 }

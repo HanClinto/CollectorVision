@@ -79,8 +79,8 @@
         <header class="app-bar">
           <h1 class="app-bar__title">CollectorVision</h1>
           <div class="app-bar__actions">
-            <button class="icon-button" id="settings-toggle" type="button" aria-label="Open settings">
-              Settings
+            <button class="icon-button icon-button--gear" id="settings-toggle" type="button" aria-label="Toggle settings">
+              ⚙
             </button>
           </div>
         </header>
@@ -92,10 +92,7 @@
               <canvas id="camera-preview" class="camera-preview"></canvas>
               <canvas id="camera-overlay" class="camera-canvas"></canvas>
               <div class="camera-overlay">
-                <button class="camera-badge" id="camera-badge" type="button" aria-label="Camera status — tap to pause">Camera idle</button>
-                <button class="camera-start" id="camera-start" type="button">
-                  Start Camera
-                </button>
+                <button class="camera-badge" id="camera-badge" type="button" aria-label="Camera status — tap to start">Camera idle</button>
               </div>
             </div>
           </div>
@@ -107,21 +104,21 @@
           </button>
         </div>
 
-        <section class="action-bar">
-          <button class="action-button" id="copy-list" type="button">Copy</button>
-          <button class="action-button" id="download-csv" type="button">CSV</button>
-          <button class="action-button action-button--accent" id="clear-list" type="button">
-            Clear
-          </button>
-        </section>
-
         <section class="panel panel--list">
           <header class="panel-header">
             <div>
               <p class="ledger-total" id="ledger-total">$0.00</p>
               <h2>Scanned Cards</h2>
             </div>
-            <span class="count-badge" id="scan-count">0 cards</span>
+            <div class="count-menu" id="count-menu">
+              <button class="count-badge count-badge--toggle" id="scan-count" type="button"
+                aria-haspopup="menu" aria-expanded="false">0 cards</button>
+              <div class="count-menu__dropdown" id="count-dropdown" hidden>
+                <button class="count-menu__item" id="copy-list" type="button">Copy</button>
+                <button class="count-menu__item" id="download-csv" type="button">CSV</button>
+                <button class="count-menu__item count-menu__item--danger" id="clear-list" type="button">Clear</button>
+              </div>
+            </div>
           </header>
 
           <ul class="scan-list" id="scan-list"></ul>
@@ -242,12 +239,6 @@
             </dl>
           </section>
 
-          <section class="panel panel--nested">
-            <h2>Local Smoke Test</h2>
-            <button class="action-button action-button--block" id="run-sample" type="button">
-              Run Bundled Sample
-            </button>
-          </section>
         </aside>
       </main>
 
