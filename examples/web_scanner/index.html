@@ -149,11 +149,8 @@
               <input type="checkbox" id="webgpu-toggle" class="toggle-row__input" />
             </label>
             <p class="capture-hint">
-              WASM is the safe default on all platforms. WebGPU may improve
-              performance on iOS and desktop but is known to produce wrong
-              results on Android ARM. If cards are being misidentified or
-              scores seem low, disable this and try again.
-              Toggling reloads the page; models stay cached in IndexedDB.
+              WASM is the safe default. WebGPU may improve performance but
+              produces wrong results on Android ARM.
             </p>
           </section>
 
@@ -185,11 +182,7 @@
             <input type="range" id="match-score-slider"
               class="threshold-slider"
               min="0.40" max="0.85" step="0.01" value="0.60" />
-            <p class="capture-hint">
-              Lower values confirm cards more readily but may produce false
-              positives. Higher values require a stronger match before
-              confirming. Default is 0.60.
-            </p>
+            <p class="capture-hint">Lower values accept weaker matches (more false positives); higher values require a stronger match. Default 0.60.</p>
             <label class="slider-row" for="min-matches-slider">
               <span class="slider-row__label">Matches needed</span>
               <span class="slider-row__value" id="min-matches-value">2</span>
@@ -197,10 +190,7 @@
             <input type="range" id="min-matches-slider"
               class="threshold-slider"
               min="1" max="4" step="1" value="2" />
-            <p class="capture-hint">
-              How many consecutive frames must agree before confirming a card.
-              1 = fastest but least reliable; 4 = more paranoid. Default is 2.
-            </p>
+            <p class="capture-hint">Consecutive frames that must agree before confirming. 1 = fastest; 4 = most reliable. Default 2.</p>
           </section>
 
           <dl class="settings-grid">
@@ -219,18 +209,6 @@
             <div>
               <dt>Embedder (milo)</dt>
               <dd id="settings-milo-hash">—</dd>
-            </div>
-            <div>
-              <dt>Catalog Cache</dt>
-              <dd>IndexedDB with model-hash versioning</dd>
-            </div>
-            <div>
-              <dt>Metadata</dt>
-              <dd>Live Scryfall enrichment after local recognition</dd>
-            </div>
-            <div>
-              <dt>Export</dt>
-              <dd>Clipboard text and CSV download</dd>
             </div>
           </dl>
 

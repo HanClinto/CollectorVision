@@ -1153,8 +1153,13 @@ function setupSettingsSheet() {
   const close = document.getElementById("settings-close");
 
   open.addEventListener("click", () => {
-    sheet.hidden = false;
-    page.dataset.sheetOpen = "true";
+    if (!sheet.hidden) {
+      sheet.hidden = true;
+      delete page.dataset.sheetOpen;
+    } else {
+      sheet.hidden = false;
+      page.dataset.sheetOpen = "true";
+    }
   });
 
   close.addEventListener("click", () => {
