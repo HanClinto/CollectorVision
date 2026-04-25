@@ -111,10 +111,11 @@
               <input type="checkbox" id="webgpu-toggle" class="toggle-row__input" />
             </label>
             <p class="capture-hint">
-              Opt-in. WASM is the validated default on all platforms.
-              WebGPU is confirmed broken on Android ARM (issues&nbsp;#9,&nbsp;#12) but
-              may work on iOS (Metal) and desktop. Toggling reloads the page;
-              models stay cached in IndexedDB.
+              WASM is the safe default on all platforms. WebGPU may improve
+              performance on iOS and desktop but is known to produce wrong
+              results on Android ARM. If cards are being misidentified or
+              scores seem low, disable this and try again.
+              Toggling reloads the page; models stay cached in IndexedDB.
             </p>
           </section>
 
