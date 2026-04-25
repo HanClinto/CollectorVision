@@ -300,10 +300,22 @@ h2 {
   min-height: 1.7rem;
   padding: 0.1rem 0.55rem;
   border-radius: 999px;
+  border: 0;
   background: rgba(255, 255, 255, 0.1);
   color: #faf7ef;
+  font: inherit;
   font-size: 0.78rem;
   font-weight: 600;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.camera-badge[data-camera-live="true"] {
+  cursor: pointer;
+}
+
+.camera-badge[data-camera-live="true"]:active {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .camera-start {

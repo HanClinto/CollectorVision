@@ -701,20 +701,41 @@ class CameraSurface {
     this._previewFrame = null;
   }
 
-  bind(onStart) {
+  bind(onStart, onStop) {
+    const startCamera = async () => {
+      try {
+        await this.start();
+        await onStart();
+        // Badge becomes a pause toggle once the camera is live.
+        this.badge.dataset.cameraLive = "true";
+        this.badge.addEventListener("click", toggleHandler);
+      } catch (error) {
+        this.debugLog.error("camera start failed", error);
+        this.badge.textContent = this.describeCameraError(error);
+        this.startButton.disabled = false;
+        delete this.badge.dataset.cameraLive;
+      }
+    };
+
+    const toggleHandler = async () => {
+      if (this.stream) {
+        // Pause: stop stream and scan loop.
+        this.stop();
+        onStop();
+        this.badge.textContent = "Camera paused — tap to resume";
+      } else {
+        // Resume: restart camera and scan loop.
+        this.badge.textContent = "Resuming…";
+        await startCamera();
+      }
+    };
+
     this.startButton.addEventListener("click", async () => {
       if (this.startButton.disabled) {
         return;
       }
       this.startButton.disabled = true;
-      try {
-        await this.start();
-        await onStart();
-      } catch (error) {
-        this.debugLog.error("camera start failed", error);
-        this.badge.textContent = this.describeCameraError(error);
-        this.startButton.disabled = false;
-      }
+      await startCamera();
     });
   }
 
@@ -770,6 +791,26 @@ class CameraSurface {
     window.addEventListener("resize", this._resizeHandler);
     this.renderPreview();
     this.setupTapToFocus();
+  }
+
+  stop() {
+    // Cancel the preview RAF loop.
+    if (this._previewFrame !== null) {
+      cancelAnimationFrame(this._previewFrame);
+      this._previewFrame = null;
+    }
+    // Stop all media tracks to release the camera hardware.
+    if (this.stream) {
+      for (const track of this.stream.getTracks()) {
+        track.stop();
+      }
+      this.stream = null;
+    }
+    this.video.srcObject = null;
+    this.page.dataset.cameraReady = "false";
+    window.removeEventListener("resize", this._resizeHandler);
+    this.clearOverlay();
+    this.debugLog.info("camera stopped");
   }
 
   resize() {
@@ -1275,6 +1316,12 @@ function createScannerLoop(
   });
 
   return {
+    stop() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    },
     start() {
       if (timer) {
         return;
@@ -1461,10 +1508,15 @@ async function boot() {
   const loop = createScannerLoop(
     camera, scannerWorker, enricherWorker, scans, audioBus, manifest, debugLog, diag, captureState,
   );
-  camera.bind(async () => {
-    debugLog.info("starting scan loop");
-    loop.start();
-  });
+  camera.bind(
+    async () => {
+      debugLog.info("starting scan loop");
+      loop.start();
+    },
+    () => {
+      loop.stop();
+    },
+  );
   camera.setReady();
   document.getElementById("run-sample").addEventListener("click", () => {
     loop.runSample();
