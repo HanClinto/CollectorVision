@@ -1,0 +1,274 @@
+<!doctype html>
+<!--
+  browser_test.html
+  -----------------
+  Self-contained WebGPU vs WASM regression test for onnxruntime-web.
+
+  Opens each test ONNX model with both the WASM EP and the WebGPU EP,
+  runs the same input through both, and compares the first 8 output
+  values against the numpy ground truth produced by create_minimal_model.py.
+
+  HOW TO USE
+  ----------
+  1. Run create_minimal_model.py first to generate the .onnx files and
+     print the expected output values.  Paste them into EXPECTED_OUTPUTS
+     below (replace the placeholder zeros).
+
+  2. Serve this directory over HTTP (required for module imports):
+       python -m http.server 8765
+       # or:
+       npx serve .
+
+  3. On your dev machine open Chrome DevTools → More tools → Remote devices.
+     Forward port 8765 to localhost:8765 on the Android device.
+
+  4. Open http://localhost:8765/browser_test.html in Chrome on the device.
+
+  5. The page runs automatically.  Each row shows:
+       ✓ PASS  — WASM and WebGPU both match expected
+       ✗ FAIL  — mismatch; the wrong values are shown
+       △ WARN  — WASM matches expected but WebGPU does not (the typical failure)
+
+  EXPECTED_OUTPUTS
+  ----------------
+  Replace the placeholder arrays with the values printed by
+  create_minimal_model.py.  Format: first 8 output values, float32.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ORT WebGPU / WASM Test</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; padding: 1rem; background: #111; color: #eee; }
+    h1   { font-size: 1.1rem; margin: 0 0 1rem; }
+    .row { margin: 0.75rem 0; padding: 0.75rem; border-radius: 0.5rem; background: #1e1e1e; }
+    .row.pass { border-left: 4px solid #4caf50; }
+    .row.fail { border-left: 4px solid #f44336; }
+    .row.warn { border-left: 4px solid #ff9800; }
+    .row.skip { border-left: 4px solid #555; }
+    .row.running { border-left: 4px solid #2196f3; }
+    .name  { font-weight: 700; margin-bottom: 0.25rem; }
+    .vals  { font: 0.78rem/1.4 monospace; color: #aaa; margin-top: 0.25rem; word-break: break-all; }
+    .badge { display:inline-block; padding: 0.1rem 0.5rem; border-radius: 999px;
+             font-size: 0.8rem; font-weight: 700; margin-right: 0.4rem; }
+    .badge.pass { background:#4caf50; color:#000; }
+    .badge.fail { background:#f44336; color:#fff; }
+    .badge.warn { background:#ff9800; color:#000; }
+    .badge.skip { background:#555; color:#ccc; }
+    #status { margin-bottom: 1rem; color: #aaa; }
+    #adapter { font-size: 0.85rem; color: #888; margin-bottom: 1rem; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <h1>ORT WebGPU vs WASM — Android ARM regression test</h1>
+  <div id="adapter">Adapter: detecting…</div>
+  <div id="status">Starting…</div>
+  <div id="results"></div>
+
+<script type="module">
+// ---------------------------------------------------------------------------
+// !! PASTE EXPECTED VALUES FROM create_minimal_model.py HERE !!
+// Replace each array with the "first 8 values (flat)" output of that model.
+// ---------------------------------------------------------------------------
+const EXPECTED_OUTPUTS = {
+  "test_single_conv.onnx":       [0, 0, 0, 0, 0, 0, 0, 0],  // TODO: replace
+  "test_conv_bn_relu.onnx":      [0, 0, 0, 0, 0, 0, 0, 0],  // TODO: replace
+  "test_two_conv.onnx":          [0, 0, 0, 0, 0, 0, 0, 0],  // TODO: replace
+  "test_global_avgpool_gemm.onnx":[0, 0, 0, 0, 0, 0, 0, 0], // TODO: replace
+};
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+// Tolerance for float32 comparison.  WASM and numpy should match to ~1e-5.
+// We use a looser tolerance for the "pass" check since there are minor
+// implementation differences between numpy and ort-wasm.
+const PASS_TOL  = 1e-3;
+// Warn threshold: if WebGPU is this far from expected, flag it.
+const WARN_TOL  = 5e-3;
+
+// Path to the ORT WebGPU bundle.  Adjust if you are serving from a different
+// directory or want to test a specific version from npm/unpkg.
+// Using the same bundle as the main app:
+const ORT_URL = "../../examples/web_scanner/vendor/onnxruntime-web/ort.webgpu.min.mjs";
+// Fallback: test with a specific version from unpkg
+// const ORT_URL = "https://unpkg.com/onnxruntime-web@1.24.3/dist/ort.webgpu.min.mjs";
+
+// Standard test input: 1×3×64×64, all values = 0.5
+const INPUT_SHAPE = [1, 3, 64, 64];
+const INPUT_DATA  = new Float32Array(1 * 3 * 64 * 64).fill(0.5);
+
+// ---------------------------------------------------------------------------
+// ORT import
+// ---------------------------------------------------------------------------
+
+let ort;
+try {
+  ort = await import(ORT_URL);
+} catch (e) {
+  setStatus(`Failed to import ORT from ${ORT_URL}: ${e.message}`);
+  throw e;
+}
+
+// ---------------------------------------------------------------------------
+// Adapter info
+// ---------------------------------------------------------------------------
+
+let adapterInfo = { vendor: "unknown", architecture: "unknown", device: "unknown" };
+if ("gpu" in navigator) {
+  try {
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    if (adapter) {
+      try {
+        // GPUAdapterInfo is Chrome 113+
+        const info = await adapter.info?.();
+        if (info) adapterInfo = info;
+      } catch { /* older Chrome */ }
+
+      // Wire up the same adapter config as the main app so this is comparable.
+      const maxStorage = Math.min(10, adapter.limits.maxStorageBuffersPerShaderStage ?? 8);
+      const orig = adapter.requestDevice.bind(adapter);
+      Object.defineProperty(adapter, "requestDevice", {
+        configurable: true,
+        value: (desc = {}) => orig({
+          ...desc,
+          requiredLimits: { ...(desc.requiredLimits ?? {}), maxStorageBuffersPerShaderStage: maxStorage },
+        }),
+      });
+      ort.env.webgpu.adapter  = adapter;
+      ort.env.webgpu.forceFp16 = false;
+    }
+  } catch (e) {
+    console.warn("adapter setup failed", e);
+  }
+}
+
+document.getElementById("adapter").textContent =
+  `Adapter: ${adapterInfo.vendor || "?"} / ${adapterInfo.architecture || "?"} / ${adapterInfo.device || "?"}`;
+
+// ---------------------------------------------------------------------------
+// Inference helpers
+// ---------------------------------------------------------------------------
+
+async function runSession(modelBuffer, ep) {
+  const session = await ort.InferenceSession.create(modelBuffer, {
+    executionProviders: [ep],
+  });
+  const inputName = session.inputNames[0];
+  const tensor    = new ort.Tensor("float32", INPUT_DATA, INPUT_SHAPE);
+  const out       = await session.run({ [inputName]: tensor });
+  return Array.from(out[session.outputNames[0]].data).slice(0, 8);
+}
+
+// ---------------------------------------------------------------------------
+// Comparison
+// ---------------------------------------------------------------------------
+
+function maxAbsDiff(a, b) {
+  let d = 0;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) d = Math.max(d, Math.abs(a[i] - b[i]));
+  return d;
+}
+
+function fmt(arr) {
+  return arr.map((v) => v.toFixed(6)).join(", ");
+}
+
+// ---------------------------------------------------------------------------
+// UI helpers
+// ---------------------------------------------------------------------------
+
+function setStatus(msg) {
+  document.getElementById("status").textContent = msg;
+}
+
+function addRow(state, name, html) {
+  const d = Object.assign(document.createElement("div"), { className: `row ${state}` });
+  d.innerHTML = html;
+  document.getElementById("results").appendChild(d);
+  return d;
+}
+
+// ---------------------------------------------------------------------------
+// Main test loop
+// ---------------------------------------------------------------------------
+
+const webgpuAvailable = "gpu" in navigator;
+
+setStatus(webgpuAvailable ? `WebGPU available — running ${Object.keys(EXPECTED_OUTPUTS).length} models…`
+                           : "WebGPU not available — WASM-only run");
+
+const summary = { pass: 0, fail: 0, warn: 0, skip: 0 };
+
+for (const [filename, expected] of Object.entries(EXPECTED_OUTPUTS)) {
+  const row = addRow("running", filename, `<div class="name">⏳ ${filename}</div>`);
+
+  let modelBuffer;
+  try {
+    const resp = await fetch(filename);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    modelBuffer = await resp.arrayBuffer();
+  } catch (e) {
+    row.className = "row skip";
+    row.innerHTML = `<div class="name"><span class="badge skip">SKIP</span>${filename}</div>
+<div class="vals">Could not fetch model: ${e.message}</div>`;
+    summary.skip++;
+    continue;
+  }
+
+  let wasmOut, webgpuOut, webgpuErr;
+
+  try { wasmOut   = await runSession(modelBuffer, "wasm");   } catch (e) { wasmOut   = null; }
+  try { webgpuOut = await runSession(modelBuffer, "webgpu"); } catch (e) { webgpuOut = null; webgpuErr = e.message; }
+
+  const wasmOk   = wasmOut   && maxAbsDiff(wasmOut, expected)   <= PASS_TOL;
+  const webgpuOk = webgpuOut && maxAbsDiff(webgpuOut, expected) <= WARN_TOL;
+
+  let state, badge, detail;
+
+  if (!webgpuAvailable || webgpuOut == null) {
+    // WASM-only
+    state = wasmOk ? "pass" : "fail";
+    badge = wasmOk ? "pass" : "fail";
+    detail = [
+      `Expected: ${fmt(expected)}`,
+      `WASM:     ${wasmOut ? fmt(wasmOut) : "error"} (diff ${wasmOut ? maxAbsDiff(wasmOut, expected).toExponential(2) : "—"})`,
+      webgpuErr ? `WebGPU:   ${webgpuErr}` : "WebGPU:   not available",
+    ].join("<br>");
+  } else if (wasmOk && webgpuOk) {
+    state = "pass"; badge = "pass";
+    detail = [
+      `Expected: ${fmt(expected)}`,
+      `WASM:     ${fmt(wasmOut)} ✓`,
+      `WebGPU:   ${fmt(webgpuOut)} ✓`,
+    ].join("<br>");
+  } else if (wasmOk && !webgpuOk) {
+    // The classic failure: WASM correct, WebGPU wrong
+    state = "warn"; badge = "warn";
+    detail = [
+      `Expected: ${fmt(expected)}`,
+      `WASM:     ${fmt(wasmOut)} ✓`,
+      `WebGPU:   ${webgpuOut ? fmt(webgpuOut) : webgpuErr} ✗ (diff ${webgpuOut ? maxAbsDiff(webgpuOut, expected).toExponential(2) : "—"})`,
+      `→ WebGPU EP produces wrong output for this model on this device.`,
+    ].join("<br>");
+  } else {
+    state = "fail"; badge = "fail";
+    detail = [
+      `Expected: ${fmt(expected)}`,
+      `WASM:     ${wasmOut ? fmt(wasmOut) + ` (diff ${maxAbsDiff(wasmOut, expected).toExponential(2)})` : "error"}`,
+      `WebGPU:   ${webgpuOut ? fmt(webgpuOut) + ` (diff ${maxAbsDiff(webgpuOut, expected).toExponential(2)})` : webgpuErr ?? "error"}`,
+    ].join("<br>");
+  }
+
+  summary[state === "warn" ? "warn" : state === "pass" ? "pass" : state === "skip" ? "skip" : "fail"]++;
+  row.className = `row ${state}`;
+  row.innerHTML = `<div class="name"><span class="badge ${badge}">${badge.toUpperCase()}</span>${filename}</div>
+<div class="vals">${detail}</div>`;
+}
+
+setStatus(`Done — ${summary.pass} pass, ${summary.warn} warn (WebGPU wrong), ${summary.fail} fail, ${summary.skip} skip`);
+</script>
+</body>
+</html>
