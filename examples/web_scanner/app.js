@@ -463,6 +463,10 @@ function updateCropPreview(cropBitmap) {
     cropBitmap.close?.();
     return;
   }
+  if (target.width !== cropBitmap.width || target.height !== cropBitmap.height) {
+    target.width = cropBitmap.width;
+    target.height = cropBitmap.height;
+  }
   const ctx = target.getContext("2d");
   ctx.drawImage(cropBitmap, 0, 0);
   cropBitmap.close?.();
@@ -475,6 +479,10 @@ function updateDetectorPreview(detectorBitmap) {
   if (!wrapper || !target) {
     detectorBitmap.close?.();
     return;
+  }
+  if (target.width !== detectorBitmap.width || target.height !== detectorBitmap.height) {
+    target.width = detectorBitmap.width;
+    target.height = detectorBitmap.height;
   }
   const ctx = target.getContext("2d");
   ctx.drawImage(detectorBitmap, 0, 0);
