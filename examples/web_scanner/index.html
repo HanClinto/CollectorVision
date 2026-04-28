@@ -26,6 +26,36 @@
     <script>
       (function () {
         if (!("serviceWorker" in navigator)) return;
+
+        var params = new URLSearchParams(location.search);
+        var skipFromQuery = params.get("coi") === "0" || params.get("skipCoi") === "1";
+        var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+          || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+        // iOS runs the scanner single-threaded to reduce WebKit memory pressure,
+        // so the COI service worker no longer buys us usable WASM threads there.
+        // Also keep a private ?coi=0 / ?skipCoi=1 diagnostic escape hatch.
+        if (isIOS || skipFromQuery) {
+          navigator.serviceWorker.getRegistration("./")
+            .then(function (reg) {
+              if (!reg) {
+                sessionStorage.removeItem("cv-coi-unregistered");
+                return;
+              }
+              return reg.unregister().then(function (removed) {
+                if (removed && navigator.serviceWorker.controller && !sessionStorage.getItem("cv-coi-unregistered")) {
+                  sessionStorage.setItem("cv-coi-unregistered", "1");
+                  location.reload();
+                }
+              });
+            })
+            .catch(function (err) {
+              console.warn("COI service worker unregister failed:", err);
+            });
+          return;
+        }
+        sessionStorage.removeItem("cv-coi-unregistered");
+
         // Already cross-origin isolated — SW is working or headers are set
         // server-side.  Don't register again.
         if (self.crossOriginIsolated) return;

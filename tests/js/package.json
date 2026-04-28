@@ -8,7 +8,7 @@
   },
   "private": true,
   "scripts": {
-    "test": "node test_pipeline.mjs"
+    "test": "node --input-type=module --check < ../../examples/web_scanner/app.js && node --check ../../examples/web_scanner/scanner.worker.mjs && node test_pipeline.mjs"
   },
   "dependencies": {
     "canvas": "^2.11.2",

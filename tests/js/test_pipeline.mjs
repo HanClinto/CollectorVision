@@ -341,6 +341,90 @@ await test('rejects quad with area too small', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Packed float16 catalog search tests
+// ---------------------------------------------------------------------------
+
+function float16ToFloat32(value) {
+  const sign = (value & 0x8000) >> 15;
+  const exponent = (value & 0x7c00) >> 10;
+  const fraction = value & 0x03ff;
+
+  if (exponent === 0) {
+    if (fraction === 0) return sign ? -0 : 0;
+    return (sign ? -1 : 1) * 2 ** (-14) * (fraction / 1024);
+  }
+  if (exponent === 0x1f) {
+    return fraction ? Number.NaN : (sign ? -Infinity : Infinity);
+  }
+  return (sign ? -1 : 1) * 2 ** (exponent - 15) * (1 + fraction / 1024);
+}
+
+function createFloat16LookupTable() {
+  const table = new Float32Array(65536);
+  for (let value = 0; value < table.length; value += 1) {
+    table[value] = float16ToFloat32(value);
+  }
+  return table;
+}
+
+function searchFloat32Catalog(query, catalog, rows, dims) {
+  let bestScore = -Infinity;
+  let bestIndex = -1;
+  for (let row = 0; row < rows; row += 1) {
+    const offset = row * dims;
+    let score = 0;
+    for (let col = 0; col < dims; col += 1) {
+      score += catalog[offset + col] * query[col];
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = row;
+    }
+  }
+  return { bestIndex, bestScore };
+}
+
+function searchPackedFloat16Catalog(query, packedCatalog, rows, dims, lookup) {
+  let bestScore = -Infinity;
+  let bestIndex = -1;
+  for (let row = 0; row < rows; row += 1) {
+    const offset = row * dims;
+    let score = 0;
+    for (let col = 0; col < dims; col += 1) {
+      score += lookup[packedCatalog[offset + col]] * query[col];
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = row;
+    }
+  }
+  return { bestIndex, bestScore };
+}
+
+console.log('\nPacked float16 catalog search');
+
+await test('matches decoded float32 search on packed float16 data', () => {
+  const dims = 4;
+  const rows = 3;
+  // Raw IEEE-754 half precision bit patterns:
+  // 1.0, 0.5, -0.5, 0.25, 0.75, -1.0, 1.5, 2.0, 0.125, 0.25, 0.375, 0.5
+  const packed = new Uint16Array([
+    0x3c00, 0x3800, 0xb800, 0x3400,
+    0x3a00, 0xbc00, 0x3e00, 0x4000,
+    0x3000, 0x3400, 0x3600, 0x3800,
+  ]);
+  const decoded = Float32Array.from(packed, float16ToFloat32);
+  const query = new Float32Array([0.2, -0.4, 0.6, 0.8]);
+  const expected = searchFloat32Catalog(query, decoded, rows, dims);
+  const actual = searchPackedFloat16Catalog(query, packed, rows, dims, createFloat16LookupTable());
+
+  assert(actual.bestIndex === expected.bestIndex,
+    `Expected best row ${expected.bestIndex}, got ${actual.bestIndex}`);
+  assert(Math.abs(actual.bestScore - expected.bestScore) < 1e-7,
+    `Expected score ${expected.bestScore}, got ${actual.bestScore}`);
+});
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 
