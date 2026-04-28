@@ -491,7 +491,7 @@ function updateDetectorPreview(detectorBitmap) {
 }
 
 function wantsDebugBitmaps() {
-  return document.getElementById("settings-sheet")?.hidden === false;
+  return document.getElementById("debug-dock")?.hidden === false;
 }
 
 function shouldRequestDebugBitmaps(captureRequested) {
@@ -1550,6 +1550,40 @@ function setupSettingsSheet() {
   });
 }
 
+function setupDebugDock() {
+  const shell = document.querySelector(".app-shell");
+  const dock = document.getElementById("debug-dock");
+  const toggle = document.getElementById("debug-toggle");
+  const hide = document.getElementById("debug-hide");
+  const desktopQuery = window.matchMedia?.("(min-width: 1100px)");
+  if (!shell || !dock || !toggle) {
+    return;
+  }
+
+  function setOpen(open) {
+    const canOpen = desktopQuery?.matches ?? true;
+    const nextOpen = open && canOpen;
+    dock.hidden = !nextOpen;
+    toggle.setAttribute("aria-expanded", String(nextOpen));
+    toggle.setAttribute("aria-label", nextOpen ? "Hide debug panel" : "Show debug panel");
+    toggle.textContent = nextOpen ? "Hide Debug" : "Debug";
+    if (nextOpen) {
+      shell.dataset.debugOpen = "true";
+    } else {
+      delete shell.dataset.debugOpen;
+    }
+  }
+
+  toggle.addEventListener("click", () => setOpen(dock.hidden));
+  hide?.addEventListener("click", () => setOpen(false));
+  desktopQuery?.addEventListener?.("change", () => {
+    if (!desktopQuery.matches) {
+      setOpen(false);
+    }
+  });
+  setOpen(false);
+}
+
 function setupViewToggle() {
   const page = document.querySelector(".page");
   const button = document.getElementById("view-toggle");
@@ -1852,6 +1886,7 @@ async function boot() {
   renderBuildId();
   renderScanList(scans);
   setupSettingsSheet();
+  setupDebugDock();
   setupWebGpuToggle();
   setupMatchScoreSlider();
   setupMinMatchesSlider();

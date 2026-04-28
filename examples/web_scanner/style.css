@@ -146,6 +146,12 @@ body[data-loading="true"] .loading-screen {
   display: none;
 }
 
+.icon-button--debug {
+  display: none;
+  min-width: auto;
+  padding-inline: 0.85rem;
+}
+
 .app-bar {
   display: flex;
   align-items: center;
@@ -760,7 +766,8 @@ dd {
   border-color: var(--line);
 }
 
-.debug-dock__clear {
+.debug-dock__clear,
+.debug-dock__hide {
   color: var(--ink);
   background: var(--accent-soft);
 }
@@ -791,15 +798,23 @@ dd {
 @media (min-width: 1100px) {
   .app-shell {
     display: grid;
-    grid-template-columns: minmax(0, 27rem) minmax(20rem, 24rem);
+    grid-template-columns: minmax(0, 27rem);
     justify-content: center;
     gap: 1rem;
     padding: 0 1rem;
   }
 
+  .app-shell[data-debug-open="true"] {
+    grid-template-columns: minmax(0, 27rem) minmax(20rem, 24rem);
+  }
+
   .page {
     width: 27rem;
     margin: 0;
+  }
+
+  .icon-button--debug {
+    display: inline-flex;
   }
 
   .debug-dock {
@@ -811,5 +826,9 @@ dd {
     padding: 1rem 1rem 1.25rem;
     border-left: 1px solid var(--line);
     background: color-mix(in srgb, var(--paper) 94%, white);
+  }
+
+  .debug-dock[hidden] {
+    display: none;
   }
 }

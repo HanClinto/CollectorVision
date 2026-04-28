@@ -109,6 +109,9 @@
         <header class="app-bar">
           <h1 class="app-bar__title">CollectorVision</h1>
           <div class="app-bar__actions">
+            <button class="icon-button icon-button--debug" id="debug-toggle" type="button" aria-label="Show debug panel" aria-expanded="false">
+              Debug
+            </button>
             <button class="icon-button icon-button--gear" id="settings-toggle" type="button" aria-label="Toggle settings">
               ⚙
             </button>
@@ -297,13 +300,14 @@
         </aside>
       </main>
 
-      <aside class="debug-dock" aria-label="Runtime debug log">
+      <aside class="debug-dock" id="debug-dock" aria-label="Runtime debug log" hidden>
         <header class="debug-dock__header">
           <div>
             <p class="section-kicker">Debug</p>
             <h2>Runtime Log</h2>
           </div>
           <div class="debug-dock__actions">
+            <button class="icon-button debug-dock__hide" id="debug-hide" type="button">Hide</button>
             <button class="icon-button debug-dock__clear" id="clear-debug" type="button">Clear</button>
           </div>
         </header>
