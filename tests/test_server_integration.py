@@ -12,6 +12,8 @@ from pathlib import Path
 import pytest
 
 fastapi = pytest.importorskip("fastapi", reason="fastapi not installed — skipping server tests")
+pytest.importorskip("httpx", reason="httpx not installed — skipping server tests")
+pytest.importorskip("multipart", reason="python-multipart not installed — skipping server tests")
 from fastapi.testclient import TestClient  # noqa: E402
 
 pytestmark = pytest.mark.hf
