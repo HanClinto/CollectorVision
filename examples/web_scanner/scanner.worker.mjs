@@ -410,12 +410,8 @@ async function configureWebGpu() {
 // Tensor preparation (uses OffscreenCanvas instead of HTMLCanvasElement)
 // ---------------------------------------------------------------------------
 
-function fillInputTensor(canvas, size) {
-  const scratch = new OffscreenCanvas(size, size);
-  const ctx = scratch.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(canvas, 0, 0, size, size);
+function fillInputTensorFromContext(ctx, size, tensor) {
   const { data } = ctx.getImageData(0, 0, size, size);
-  const tensor = new Float32Array(1 * 3 * size * size);
   const plane = size * size;
 
   for (let i = 0; i < size * size; i += 1) {
@@ -428,6 +424,10 @@ function fillInputTensor(canvas, size) {
   }
 
   return tensor;
+}
+
+function createInputTensor(size) {
+  return new Float32Array(1 * 3 * size * size);
 }
 
 function isIOS() {
@@ -451,10 +451,15 @@ class WorkerRuntime {
     this.cardIds = null;
     this.dewarpCanvas = new OffscreenCanvas(DEWARP_W, DEWARP_H);
     this.dewarpCtx = this.dewarpCanvas.getContext("2d", { willReadFrequently: true });
+    this.dewarpImageData = this.dewarpCtx.createImageData(DEWARP_W, DEWARP_H);
     // Reusable 384×384 scratch canvas — what was fed to the detector.
     // Transferred to the main thread as a debug bitmap on each result.
     this.detectorScratchCanvas = new OffscreenCanvas(DETECTOR_SIZE, DETECTOR_SIZE);
     this.detectorScratchCtx = this.detectorScratchCanvas.getContext("2d", { willReadFrequently: true });
+    this.detectorInputTensor = createInputTensor(DETECTOR_SIZE);
+    this.embedderScratchCanvas = new OffscreenCanvas(EMBEDDER_SIZE, EMBEDDER_SIZE);
+    this.embedderScratchCtx = this.embedderScratchCanvas.getContext("2d", { willReadFrequently: true });
+    this.embedderInputTensor = createInputTensor(EMBEDDER_SIZE);
     this._lastRawCorners = null;
     this._lastDetectorInput = null;
   }
@@ -530,7 +535,11 @@ class WorkerRuntime {
     this.detectorScratchCtx.drawImage(frameCanvas, 0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
     this._lastDetectorInput = `${vw}×${vh} → squash ${DETECTOR_SIZE}×${DETECTOR_SIZE}`;
 
-    const input = fillInputTensor(frameCanvas, DETECTOR_SIZE);
+    const input = fillInputTensorFromContext(
+      this.detectorScratchCtx,
+      DETECTOR_SIZE,
+      this.detectorInputTensor,
+    );
     const outputs = await this.detector.run({
       [this.inputNames.detector]: new ort.Tensor("float32", input, [1, 3, DETECTOR_SIZE, DETECTOR_SIZE]),
     });
@@ -587,7 +596,7 @@ class WorkerRuntime {
     ];
     const inverse = computeHomography(targetPoints, sourcePoints);
     const srcData = frameCanvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, width, height);
-    const dstData = this.dewarpCtx.createImageData(DEWARP_W, DEWARP_H);
+    const dstData = this.dewarpImageData;
 
     for (let y = 0; y < DEWARP_H; y += 1) {
       for (let x = 0; x < DEWARP_W; x += 1) {
@@ -605,7 +614,12 @@ class WorkerRuntime {
   }
 
   async embed(cropCanvas) {
-    const input = fillInputTensor(cropCanvas, EMBEDDER_SIZE);
+    this.embedderScratchCtx.drawImage(cropCanvas, 0, 0, EMBEDDER_SIZE, EMBEDDER_SIZE);
+    const input = fillInputTensorFromContext(
+      this.embedderScratchCtx,
+      EMBEDDER_SIZE,
+      this.embedderInputTensor,
+    );
     const outputs = await this.embedder.run({
       [this.inputNames.embedder]: new ort.Tensor("float32", input, [1, 3, EMBEDDER_SIZE, EMBEDDER_SIZE]),
     });
