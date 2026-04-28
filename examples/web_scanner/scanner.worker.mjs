@@ -238,13 +238,18 @@ function float16ToFloat32(value) {
   return (sign ? -1 : 1) * 2 ** (exponent - 15) * (1 + fraction / 1024);
 }
 
-function decodeFloat16Buffer(buffer) {
-  const source = new Uint16Array(buffer);
-  const out = new Float32Array(source.length);
-  for (let i = 0; i < source.length; i += 1) {
-    out[i] = float16ToFloat32(source[i]);
+function createFloat16LookupTable() {
+  const table = new Float32Array(65536);
+  for (let value = 0; value < table.length; value += 1) {
+    table[value] = float16ToFloat32(value);
   }
-  return out;
+  return table;
+}
+
+const FLOAT16_LOOKUP = createFloat16LookupTable();
+
+function wrapFloat16Buffer(buffer) {
+  return new Uint16Array(buffer);
 }
 
 // ---------------------------------------------------------------------------
@@ -509,7 +514,11 @@ class WorkerRuntime {
       version,
       (ratio, loaded, total, cached) => onStage?.("catalog", 0.92 + ratio * 0.08, loaded, total, cached),
     );
-    this.embeddings = decodeFloat16Buffer(embeddingBuffer);
+    // Keep the catalog in its packed float16 form.  Expanding the full MTG
+    // matrix to Float32Array roughly doubles steady-state catalog memory and
+    // can push iOS WebKit into tab reloads.  Search converts individual values
+    // through a 256 KB lookup table instead.
+    this.embeddings = wrapFloat16Buffer(embeddingBuffer);
     this.cardIds = ids;
   }
 
@@ -613,7 +622,7 @@ class WorkerRuntime {
       const offset = row * dims;
       let score = 0;
       for (let col = 0; col < dims; col += 1) {
-        score += this.embeddings[offset + col] * query[col];
+        score += FLOAT16_LOOKUP[this.embeddings[offset + col]] * query[col];
       }
       if (score > bestScore) {
         bestScore = score;
