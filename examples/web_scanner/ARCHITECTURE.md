@@ -36,7 +36,8 @@ Primary path only:
 - Convert normalized corners to pixel coordinates.
 - Solve the perspective transform in JS.
 - Warp the crop in JS into the canonical output.
-- Emit the canonical `252x352` crop.
+- Emit the embedder-ready `448x448` crop directly so the browser path avoids
+  an extra dewarp-to-rectangle then resize-to-square interpolation step.
 
 ### 4. Embedding
 

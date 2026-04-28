@@ -34,7 +34,7 @@ Pipeline:
 
 1. `getUserMedia()` captures a frame from the back camera.
 2. Cornelius predicts normalized card corners.
-3. Local JS dewarp warps into the canonical `252x352` crop.
+3. Local JS dewarp warps directly into Milo's `448x448` input crop.
 4. Milo emits a `128`-d embedding.
 5. Browser code runs cosine search against a local embedding gallery.
 6. The winning `card_id` is enriched with static metadata and optional live

@@ -24,8 +24,8 @@ import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs";
 
 const DETECTOR_SIZE = 384;
 const EMBEDDER_SIZE = 448;
-const DEWARP_W = 252;
-const DEWARP_H = 352;
+const DEWARP_W = EMBEDDER_SIZE;
+const DEWARP_H = EMBEDDER_SIZE;
 const MIN_SHARPNESS = 0.02;
 const IMAGENET_MEAN = [0.485, 0.456, 0.406];
 const IMAGENET_STD = [0.229, 0.224, 0.225];
