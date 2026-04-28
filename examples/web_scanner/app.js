@@ -310,10 +310,12 @@ function updateCropPreview(cropBitmap) {
   const wrapper = document.getElementById("crop-preview");
   const target = document.getElementById("crop-canvas");
   if (!wrapper || !target) {
+    cropBitmap.close?.();
     return;
   }
   const ctx = target.getContext("2d");
   ctx.drawImage(cropBitmap, 0, 0);
+  cropBitmap.close?.();
   wrapper.hidden = false;
 }
 
@@ -321,11 +323,38 @@ function updateDetectorPreview(detectorBitmap) {
   const wrapper = document.getElementById("detector-preview");
   const target = document.getElementById("detector-canvas");
   if (!wrapper || !target) {
+    detectorBitmap.close?.();
     return;
   }
   const ctx = target.getContext("2d");
   ctx.drawImage(detectorBitmap, 0, 0);
+  detectorBitmap.close?.();
   wrapper.hidden = false;
+}
+
+function wantsDebugBitmaps() {
+  return document.getElementById("settings-sheet")?.hidden === false;
+}
+
+function shouldRequestDebugBitmaps(captureRequested) {
+  if (captureRequested) {
+    return true;
+  }
+  if (!wantsDebugBitmaps()) {
+    return false;
+  }
+  // The detector/crop previews are useful for desktop debugging, but they are
+  // not part of the normal mobile scanner UX.  Avoid per-frame ImageBitmap
+  // transfers on touch/mobile browsers unless the user explicitly requests a
+  // debug bundle; iOS WebKit is especially aggressive about reloading pages
+  // under GPU/process memory pressure.
+  if (window.matchMedia?.("(hover: none), (pointer: coarse)").matches) {
+    return false;
+  }
+  if ((navigator.maxTouchPoints ?? 0) > 1) {
+    return false;
+  }
+  return true;
 }
 
 // Collect browser / device / camera environment info for the capture bundle
@@ -478,6 +507,7 @@ function setupCaptureButton(camera, captureState) {
             detInputBinary += String.fromCharCode(detInputBytes[i]);
           }
           detectorInputRgba = btoa(detInputBinary);
+          data.detectorBitmap.close?.();
         }
 
         const systemInfo = collectSystemInfo(camera);
@@ -1339,12 +1369,21 @@ function createScannerLoop(
     // Cache state for the capture button and update debug previews.
     captureState.lastResult = data;
     if (data.detectorBitmap) {
-      captureState.lastDetectorBitmap = data.detectorBitmap;
-      updateDetectorPreview(data.detectorBitmap);
+      if (data.captureRequested) {
+        captureState.lastDetectorBitmap = null;
+      } else {
+        captureState.lastDetectorBitmap = null;
+        updateDetectorPreview(data.detectorBitmap);
+      }
     }
     if (data.cropBitmap) {
-      captureState.lastCropBitmap = data.cropBitmap;
-      updateCropPreview(data.cropBitmap);
+      if (data.captureRequested) {
+        data.cropBitmap.close?.();
+        captureState.lastCropBitmap = null;
+      } else {
+        captureState.lastCropBitmap = null;
+        updateCropPreview(data.cropBitmap);
+      }
     }
 
     diag.set("diag-detector-input", data.detectorInput ?? "—");
@@ -1418,8 +1457,9 @@ function createScannerLoop(
         try {
           const captureRequested = captureState.pendingCapture;
           if (captureRequested) captureState.pendingCapture = false;
+          const includeDebugBitmaps = shouldRequestDebugBitmaps(captureRequested);
           const bitmap = await createImageBitmap(camera.processCanvas);
-          scannerWorker.postMessage({ type: "frame", bitmap, captureRequested }, [bitmap]);
+          scannerWorker.postMessage({ type: "frame", bitmap, captureRequested, includeDebugBitmaps }, [bitmap]);
         } catch (error) {
           workerBusy = false;
           debugLog.error("scan tick failed", error);

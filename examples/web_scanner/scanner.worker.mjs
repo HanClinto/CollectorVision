@@ -425,6 +425,11 @@ function fillInputTensor(canvas, size) {
   return tensor;
 }
 
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
 // ---------------------------------------------------------------------------
 // WorkerRuntime — BrowserRuntime ported to run inside a web worker.
 // All canvas operations use OffscreenCanvas.
@@ -473,7 +478,10 @@ class WorkerRuntime {
     // Without them ort-web silently falls back to 1 thread.  The COI service
     // worker (coi-serviceworker.js) injects these headers on GitHub Pages so
     // that crossOriginIsolated becomes true and all threads are available.
-    const numThreads = Math.min(navigator.hardwareConcurrency || 1, 4);
+    // iOS WebKit is prone to killing memory-heavy WASM pages.  Keep the iOS
+    // path single-threaded to avoid the extra worker/SAB overhead; other
+    // platforms keep the capped multi-threaded fast path.
+    const numThreads = isIOS() ? 1 : Math.min(navigator.hardwareConcurrency || 1, 4);
     ort.env.wasm.numThreads = numThreads;
     this.numThreads = numThreads;
     // EP selection: WASM is the safe default.
@@ -629,7 +637,7 @@ let runtime = null;
 let frameCanvas = null;
 let frameCtx = null;
 
-async function processFrame(bitmap, captureRequested = false) {
+async function processFrame(bitmap, captureRequested = false, includeDebugBitmaps = false) {
   if (!frameCanvas || frameCanvas.width !== bitmap.width || frameCanvas.height !== bitmap.height) {
     frameCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     frameCtx = frameCanvas.getContext("2d", { willReadFrequently: true });
@@ -673,14 +681,17 @@ async function processFrame(bitmap, captureRequested = false) {
     return;
   }
 
-  // Transfer the detector scratch canvas to the main thread for debug preview.
-  // transferToImageBitmap() leaves the canvas with a fresh blank bitmap, so
-  // the next detect() call will fill it again before we read it.
-  const detectorBitmap = runtime.detectorScratchCanvas.transferToImageBitmap();
+  // Transfer debug bitmaps only when the settings preview is open or an
+  // explicit capture is requested.  On mobile Safari, transferring ImageBitmap
+  // objects every successful frame can put enough pressure on WebKit's GPU
+  // process to reload the page.
+  const detectorBitmap = includeDebugBitmaps
+    ? runtime.detectorScratchCanvas.transferToImageBitmap()
+    : null;
   const cornersValid = isUsableQuad(detection.corners);
 
   if (!cornersValid) {
-    const transfer1 = [detectorBitmap];
+    const transfer1 = detectorBitmap ? [detectorBitmap] : [];
     if (captureFrameBitmap) transfer1.push(captureFrameBitmap);
     self.postMessage({
       type: "result",
@@ -711,9 +722,11 @@ async function processFrame(bitmap, captureRequested = false) {
   const t6 = performance.now();
 
   // Transfer the dewarp canvas bitmap (zero-copy) then it gets a fresh blank.
-  const cropBitmap = cropCanvas.transferToImageBitmap();
+  const cropBitmap = includeDebugBitmaps ? cropCanvas.transferToImageBitmap() : null;
 
-  const transfer2 = [detectorBitmap, cropBitmap];
+  const transfer2 = [];
+  if (detectorBitmap) transfer2.push(detectorBitmap);
+  if (cropBitmap) transfer2.push(cropBitmap);
   if (captureFrameBitmap) transfer2.push(captureFrameBitmap);
   self.postMessage({
     type: "result",
@@ -762,7 +775,11 @@ self.onmessage = async ({ data }) => {
       self.postMessage({ type: "ready", inferenceMode, numThreads: runtime.numThreads ?? 1 });
 
     } else if (data.type === "frame") {
-      await processFrame(data.bitmap, data.captureRequested ?? false);
+      await processFrame(
+        data.bitmap,
+        data.captureRequested ?? false,
+        data.includeDebugBitmaps ?? false,
+      );
     }
   } catch (error) {
     self.postMessage({ type: "error", message: error?.message ?? String(error) });
