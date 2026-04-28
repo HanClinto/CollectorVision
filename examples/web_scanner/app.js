@@ -8,6 +8,7 @@ const DETECTOR_SIZE = 384;
 const MIN_MATCH_SCORE_DEFAULT = 0.60;
 const PREVIEW_ASPECT = 16 / 9;
 const SCAN_INTERVAL_MS = 900;
+const MOBILE_PREVIEW_INTERVAL_MS = 1000 / 15;
 
 const SOUND_PATHS = {
   scanConfirmed: "./sounds/scan.wav",
@@ -55,6 +56,15 @@ function describeValue(value) {
   } catch {
     return String(value);
   }
+}
+
+function isTouchLikeDevice() {
+  return window.matchMedia?.("(hover: none), (pointer: coarse)").matches
+    || (navigator.maxTouchPoints ?? 0) > 1;
+}
+
+function getPreviewIntervalMs() {
+  return isTouchLikeDevice() ? MOBILE_PREVIEW_INTERVAL_MS : 0;
 }
 
 function createDebugLog() {
@@ -348,10 +358,7 @@ function shouldRequestDebugBitmaps(captureRequested) {
   // transfers on touch/mobile browsers unless the user explicitly requests a
   // debug bundle; iOS WebKit is especially aggressive about reloading pages
   // under GPU/process memory pressure.
-  if (window.matchMedia?.("(hover: none), (pointer: coarse)").matches) {
-    return false;
-  }
-  if ((navigator.maxTouchPoints ?? 0) > 1) {
+  if (isTouchLikeDevice()) {
     return false;
   }
   return true;
@@ -731,6 +738,7 @@ class CameraSurface {
     this.frameCtx = this.frameCanvas.getContext("2d", { willReadFrequently: true });
     this._resizeHandler = () => this.resize();
     this._previewFrame = null;
+    this._lastPreviewRenderAt = 0;
     this._wasLive = false;
   }
 
@@ -857,6 +865,7 @@ class CameraSurface {
       cancelAnimationFrame(this._previewFrame);
       this._previewFrame = null;
     }
+    this._lastPreviewRenderAt = 0;
     // Stop all media tracks to release the camera hardware.
     if (this.stream) {
       for (const track of this.stream.getTracks()) {
@@ -945,10 +954,20 @@ class CameraSurface {
     return this.frameCanvas;
   }
 
-  renderPreview() {
+  renderPreview(timestamp = performance.now()) {
     if (!this.stream) {
       return;
     }
+    const previewIntervalMs = getPreviewIntervalMs();
+    if (
+      previewIntervalMs > 0
+      && this._lastPreviewRenderAt > 0
+      && timestamp - this._lastPreviewRenderAt < previewIntervalMs
+    ) {
+      this._previewFrame = requestAnimationFrame((nextTimestamp) => this.renderPreview(nextTimestamp));
+      return;
+    }
+    this._lastPreviewRenderAt = timestamp;
     this.resize();
     const { sx, sy, sw, sh } = this.sourceCrop();
     this.diag.set("diag-source-crop", `${Math.round(sx)},${Math.round(sy)} → ${Math.round(sw)}×${Math.round(sh)}`);
@@ -975,7 +994,7 @@ class CameraSurface {
         drawHeight,
       );
     }
-    this._previewFrame = requestAnimationFrame(() => this.renderPreview());
+    this._previewFrame = requestAnimationFrame((nextTimestamp) => this.renderPreview(nextTimestamp));
   }
 
   clearOverlay() {
@@ -1449,6 +1468,7 @@ function createScannerLoop(
         return;
       }
       setText("camera-badge", "Scanning");
+      debugLog.info("scan interval", `${SCAN_INTERVAL_MS}ms`);
       timer = setInterval(async () => {
         if (workerBusy || !camera.stream) {
           return;
