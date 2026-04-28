@@ -1086,8 +1086,19 @@ class CameraSurface {
     const frameAspect = (vw && vh) ? vw / vh : PREVIEW_ASPECT;
     const nextDisplayWidth = Math.round(width * dpr);
     const nextDisplayHeight = Math.round(height * dpr);
-    const nextProcessWidth = Math.round(Math.max(width, height * frameAspect) * dpr);
-    const nextProcessHeight = Math.round(nextProcessWidth / frameAspect);
+    // The display/overlay canvases are sized for crisp UI at device DPR, but
+    // the worker process canvas should represent camera pixels, not CSS pixels.
+    // Upscaling a 1280×720 sensor frame to a larger DPR-sized canvas wastes
+    // memory/bandwidth and gives the detector/dewarp stages interpolated pixels
+    // rather than more real detail.  Once metadata is available, keep the
+    // process canvas at the native video frame size; only fall back to the old
+    // layout-derived size before the stream reports dimensions.
+    const nextProcessWidth = vw
+      ? Math.round(vw)
+      : Math.round(Math.max(width, height * frameAspect));
+    const nextProcessHeight = vh
+      ? Math.round(vh)
+      : Math.round(nextProcessWidth / frameAspect);
     let dimensionsChanged = false;
     if (this.preview.width !== nextDisplayWidth || this.preview.height !== nextDisplayHeight) {
       this.preview.width = nextDisplayWidth;
