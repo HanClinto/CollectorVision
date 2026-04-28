@@ -23,6 +23,7 @@ const MATCH_SCORE_KEY = "cv_min_match_score";
 const MIN_MATCHES_DEFAULT = 2;
 const MATCHES_KEY = "cv_min_matches";
 const SCANS_KEY = "cv_scans";
+const PERF_OVERLAY_KEY = "cv_perf_overlay_enabled";
 const DEBUG_MODE = new URLSearchParams(location.search).get("debug") === "1";
 const BOOT_TRACE_KEY = "cv_boot_trace";
 const BOOT_TRACE_LIMIT = DEBUG_MODE ? 160 : 48;
@@ -68,6 +69,46 @@ function isTouchLikeDevice() {
 
 function getPreviewIntervalMs() {
   return isTouchLikeDevice() ? MOBILE_PREVIEW_INTERVAL_MS : 0;
+}
+
+function getQueryFlag(...names) {
+  const wanted = new Set(names.map((name) => name.toLowerCase()));
+  const params = new URLSearchParams(location.search);
+  for (const [key, value] of params.entries()) {
+    if (!wanted.has(key.toLowerCase())) continue;
+    if (["0", "false", "off", "no"].includes(value.toLowerCase())) return false;
+    return true;
+  }
+  return null;
+}
+
+function initializePerfOverlayPreference() {
+  const queryValue = getQueryFlag("fps", "perf", "performance");
+  if (queryValue !== null) {
+    localStorage.setItem(PERF_OVERLAY_KEY, queryValue ? "true" : "false");
+  }
+}
+
+function isPerfOverlayEnabled() {
+  return localStorage.getItem(PERF_OVERLAY_KEY) === "true";
+}
+
+function formatMs(value) {
+  return Number.isFinite(value) ? `${Math.round(value)}ms` : "—";
+}
+
+function formatMiB(value) {
+  return Number.isFinite(value) ? `${(value / (1024 * 1024)).toFixed(1)} MiB` : "—";
+}
+
+function estimateCatalogBytes(manifest) {
+  const rows = manifest?.catalog?.rows;
+  const dims = manifest?.catalog?.dims;
+  if (!Number.isFinite(rows) || !Number.isFinite(dims)) {
+    return null;
+  }
+  // The scanner worker keeps the embedding matrix packed as float16.
+  return rows * dims * 2;
 }
 
 let currentBootTrace = null;
@@ -1394,6 +1435,80 @@ function setupMinMatchesSlider() {
   });
 }
 
+class PerformanceOverlay {
+  constructor(manifest, captureState) {
+    this.el = document.getElementById("perf-overlay");
+    this.manifest = manifest;
+    this.captureState = captureState;
+    this.visible = false;
+    this.lastResultAt = null;
+    this.resultCount = 0;
+    this.lastData = null;
+    this.catalogBytes = estimateCatalogBytes(manifest);
+  }
+
+  setVisible(visible) {
+    this.visible = visible;
+    if (this.el) {
+      this.el.hidden = !visible;
+    }
+    if (visible) {
+      this.render();
+    }
+  }
+
+  update(data) {
+    const now = performance.now();
+    const resultGapMs = this.lastResultAt === null ? null : now - this.lastResultAt;
+    this.lastResultAt = now;
+    this.resultCount += 1;
+    this.lastData = { ...data, resultGapMs };
+    this.render();
+  }
+
+  memoryLine() {
+    const memory = performance.memory;
+    if (memory?.usedJSHeapSize) {
+      return `heap ${formatMiB(memory.usedJSHeapSize)} / ${formatMiB(memory.jsHeapSizeLimit)}`;
+    }
+    const deviceMemory = navigator.deviceMemory ? `${navigator.deviceMemory} GB device` : "heap n/a";
+    return deviceMemory;
+  }
+
+  render() {
+    if (!this.visible || !this.el) {
+      return;
+    }
+    const data = this.lastData;
+    const timing = data?.timing ?? {};
+    const threads = this.captureState?.numThreads ?? "—";
+    const mode = this.captureState?.inferenceMode ?? "—";
+    const resultGap = data?.resultGapMs ? formatMs(data.resultGapMs) : "—";
+    const score = Number.isFinite(data?.score) ? data.score.toFixed(3) : "—";
+    const card = data?.cardPresent ? (data.cornersValid ? "card" : "bad-quad") : "no-card";
+    this.el.textContent = [
+      `scan ${SCAN_INTERVAL_MS}ms  result ${resultGap}`,
+      `total ${formatMs(timing.totalMs)}  det ${formatMs(timing.detectMs)}`,
+      `dew ${formatMs(timing.dewarpMs)}  emb ${formatMs(timing.embedMs)}  lookup ${formatMs(timing.searchMs)}`,
+      `${mode}  threads ${threads}  ${card}  score ${score}`,
+      `${this.memoryLine()}  catalog ${formatMiB(this.catalogBytes)}`,
+    ].join("\n");
+  }
+}
+
+function setupPerfOverlayToggle(perfOverlay) {
+  const checkbox = document.getElementById("perf-overlay-toggle");
+  if (!checkbox || !perfOverlay) {
+    return;
+  }
+  checkbox.checked = isPerfOverlayEnabled();
+  perfOverlay.setVisible(checkbox.checked);
+  checkbox.addEventListener("change", () => {
+    localStorage.setItem(PERF_OVERLAY_KEY, checkbox.checked ? "true" : "false");
+    perfOverlay.setVisible(checkbox.checked);
+  });
+}
+
 function setupSettingsSheet() {
   const page = document.querySelector(".page");
   const sheet = document.getElementById("settings-sheet");
@@ -1494,7 +1609,7 @@ function setupActions(scans) {
 // captureState is a shared object updated on every result message:
 //   { lastResult, lastDetectorBitmap, lastCropBitmap }
 function createScannerLoop(
-  camera, scannerWorker, enricherWorker, scans, audioBus, manifest, debugLog, diag, captureState,
+  camera, scannerWorker, enricherWorker, scans, audioBus, manifest, debugLog, diag, captureState, perfOverlay,
 ) {
   const bucket = new ScanBucket();
   let timer = null;
@@ -1533,6 +1648,7 @@ function createScannerLoop(
       score: data.score,
       timing: data.timing,
     }, { debugOnly: true });
+    perfOverlay?.update(data);
 
     // Dispatch pending capture callback before any early returns.
     if (data.captureRequested && captureState.onCapture) {
@@ -1684,6 +1800,7 @@ function formatBytes(value) {
 
 async function boot() {
   const previousBootTrace = readStoredBootTrace();
+  initializePerfOverlayPreference();
   const scans = loadScans();
   const audioBus = createAudioBus();
   const debugLog = createDebugLog();
@@ -1828,9 +1945,11 @@ async function boot() {
 
   // captureState is updated by the scanner result handler inside createScannerLoop.
   const captureState = { lastResult: null, lastDetectorBitmap: null, lastCropBitmap: null, pendingCapture: false, onCapture: null, inferenceMode, numThreads };
+  const perfOverlay = new PerformanceOverlay(manifest, captureState);
+  setupPerfOverlayToggle(perfOverlay);
 
   const loop = createScannerLoop(
-    camera, scannerWorker, enricherWorker, scans, audioBus, manifest, debugLog, diag, captureState,
+    camera, scannerWorker, enricherWorker, scans, audioBus, manifest, debugLog, diag, captureState, perfOverlay,
   );
   camera.bind(
     async () => {

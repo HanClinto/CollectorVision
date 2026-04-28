@@ -91,6 +91,7 @@
               <video id="camera-video" class="camera-video" playsinline muted></video>
               <canvas id="camera-preview" class="camera-preview"></canvas>
               <canvas id="camera-overlay" class="camera-canvas"></canvas>
+              <div class="perf-overlay" id="perf-overlay" hidden aria-live="polite"></div>
               <div class="camera-overlay">
                 <button class="camera-badge" id="camera-badge" type="button" aria-label="Camera status — tap to start">Camera idle</button>
               </div>
@@ -173,6 +174,20 @@
               <button class="action-button action-button--block" id="capture-frame" type="button">⬇ Download Debug Bundle</button>
               <a class="action-button action-button--block capture-report-link" id="report-issue" target="_blank" rel="noopener noreferrer" hidden>↗ Open GitHub Issue</a>
             </div>
+          </section>
+
+          <section class="panel panel--nested">
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Diagnostics</p>
+                <h2>Performance Overlay</h2>
+              </div>
+            </header>
+            <label class="toggle-row" for="perf-overlay-toggle">
+              <span class="toggle-row__label">Show scan timing overlay</span>
+              <input type="checkbox" id="perf-overlay-toggle" class="toggle-row__input" />
+            </label>
+            <p class="capture-hint">Shows detector, dewarp, embed, lookup, thread, and memory estimates in the camera corner. You can also enable it with <code>?fps=1</code>.</p>
           </section>
 
           <section class="panel panel--nested">
