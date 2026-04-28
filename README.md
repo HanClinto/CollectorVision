@@ -58,7 +58,7 @@ detector = cvg.NeuralCornerDetector()
 detection = detector.detect(image)
 
 # 2. Dewarp to aligned crop
-crop = detection.dewarp(image)          # PIL Image, 252×352 px
+crop = detection.dewarp(image)          # PIL Image, 448×448 px
 
 # 3. Embed + search
 emb = catalog.embedder.embed(crop)      # (128,) float32

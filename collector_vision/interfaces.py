@@ -17,9 +17,12 @@ import numpy as np
 if TYPE_CHECKING:
     from PIL import Image
 
-# Dewarped card output size — card aspect ratio ~63.5 × 88.9 mm
-_DEWARP_W = 252  # 4 × 63
-_DEWARP_H = 352  # 4 × 88
+# Dewarped card output size — match Milo's native embedder input.
+# Keep this square and raw: callers who want a card-aspect preview can resize
+# or crop user-side, but the pipeline should not add an intermediate resample
+# before embedding.
+_DEWARP_W = 448
+_DEWARP_H = 448
 
 
 @runtime_checkable
@@ -63,7 +66,7 @@ class DetectionResult:
 
         Returns
         -------
-        PIL Image (RGB) of the dewarped card, sized ``252 × 352`` px.
+        PIL Image (RGB) of the dewarped card, sized ``448 × 448`` px.
         Raises ``ValueError`` if no card was detected (``card_present`` is False
         or ``corners`` is None).
         """

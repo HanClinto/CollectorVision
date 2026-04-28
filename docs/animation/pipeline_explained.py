@@ -119,7 +119,7 @@ def _img_or_rect(path, height, fill_color=BLUE_D):
         mob = ImageMobject(str(path))
         mob.height = height
         return mob
-    aspect = 9 / 6.3 if height > 3 else 252 / 352
+    aspect = 9 / 6.3 if height > 3 else 1
     return Rectangle(
         width=height / aspect,
         height=height,
@@ -312,7 +312,7 @@ def play_dewarp(s: Scene) -> None:
     dewarped.move_to(RIGHT * 3.0)
 
     card_label = Text(
-        "252 × 352 px\nalways the same size", font_size=18, color=DIM_WHITE, line_spacing=1.2
+        "448 × 448 px\nembedder input", font_size=18, color=DIM_WHITE, line_spacing=1.2
     )
     card_label.next_to(dewarped, DOWN, buff=0.2)
 

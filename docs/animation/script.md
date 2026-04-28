@@ -53,11 +53,11 @@
 
 **Visuals:**
 1. The skewed quadrilateral from Scene 3 animates — corners labeled TL/TR/BR/BL
-2. A perspective transform morphs the quad into a flat rectangle (252 × 352 px target)
+2. A perspective transform morphs the quad into Milo's square input crop (448 × 448 px target)
    - The transform should look like the card is being "pressed flat"
    - Use a smooth warp animation: each corner traces an arc to its destination
 3. The dewarped card image appears, clean and rectangular
-4. Small text: "252 × 352 px — always the same size, regardless of camera angle"
+4. Small text: "448 × 448 px — exactly what the embedder sees"
 
 **Cut text:**
 - *"Using the four corners, we apply a perspective transform — the same math used in map projections."*
