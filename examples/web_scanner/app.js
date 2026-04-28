@@ -23,6 +23,9 @@ const MATCH_SCORE_KEY = "cv_min_match_score";
 const MIN_MATCHES_DEFAULT = 2;
 const MATCHES_KEY = "cv_min_matches";
 const SCANS_KEY = "cv_scans";
+const DEBUG_MODE = new URLSearchParams(location.search).get("debug") === "1";
+const BOOT_TRACE_KEY = "cv_boot_trace";
+const BOOT_TRACE_LIMIT = DEBUG_MODE ? 160 : 48;
 
 const NOTES = [
   "The scanner now uses the real ONNX weights and the real MTG gallery bundle.",
@@ -67,6 +70,97 @@ function getPreviewIntervalMs() {
   return isTouchLikeDevice() ? MOBILE_PREVIEW_INTERVAL_MS : 0;
 }
 
+let currentBootTrace = null;
+
+function readStoredBootTrace() {
+  try {
+    const raw = localStorage.getItem(BOOT_TRACE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeBootTrace() {
+  if (!currentBootTrace) return;
+  try {
+    localStorage.setItem(BOOT_TRACE_KEY, JSON.stringify(currentBootTrace));
+  } catch {
+    // Ignore private-browsing/quota failures; debug logging is best-effort.
+  }
+}
+
+function compactTraceDetails(details) {
+  if (!details || typeof details !== "object") {
+    return details ?? null;
+  }
+  const compact = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (value === undefined) continue;
+    if (typeof value === "number") {
+      compact[key] = Number.isFinite(value) ? Math.round(value * 1000) / 1000 : String(value);
+    } else if (typeof value === "string" && value.length > 180) {
+      compact[key] = value.slice(0, 180) + "…";
+    } else {
+      compact[key] = value;
+    }
+  }
+  return compact;
+}
+
+function startBootTrace(previousTrace) {
+  currentBootTrace = {
+    sessionId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    buildId: BUILD_ID,
+    debugMode: DEBUG_MODE,
+    startedAt: new Date().toISOString(),
+    completed: false,
+    lastStage: "boot:start",
+    previous: previousTrace ? {
+      sessionId: previousTrace.sessionId,
+      buildId: previousTrace.buildId,
+      startedAt: previousTrace.startedAt,
+      completed: previousTrace.completed === true,
+      lastStage: previousTrace.lastStage ?? null,
+      lastEntry: previousTrace.entries?.at?.(-1) ?? null,
+    } : null,
+    entries: [],
+  };
+  recordBootTrace("boot:start", {
+    userAgent: navigator.userAgent,
+    touch: isTouchLikeDevice(),
+    debugMode: DEBUG_MODE,
+  });
+}
+
+function recordBootTrace(stage, details = null, options = {}) {
+  if (!currentBootTrace) return;
+  if (options.debugOnly && !DEBUG_MODE) return;
+  const entry = {
+    t: Math.round(performance.now()),
+    at: new Date().toISOString(),
+    stage,
+    details: compactTraceDetails(details),
+  };
+  currentBootTrace.lastStage = stage;
+  currentBootTrace.entries.push(entry);
+  while (currentBootTrace.entries.length > BOOT_TRACE_LIMIT) {
+    currentBootTrace.entries.shift();
+  }
+  writeBootTrace();
+}
+
+function completeBootTrace() {
+  if (!currentBootTrace) return;
+  currentBootTrace.completed = true;
+  currentBootTrace.completedAt = new Date().toISOString();
+  recordBootTrace("boot:ready");
+}
+
+function getBootTraceSnapshot() {
+  return currentBootTrace ? JSON.parse(JSON.stringify(currentBootTrace)) : null;
+}
+
 function createDebugLog() {
   const list = document.getElementById("debug-log");
   const limit = 200;
@@ -95,10 +189,15 @@ function createDebugLog() {
   });
 
   window.addEventListener("error", (event) => {
+    recordBootTrace("window:error", { message: event.message, filename: event.filename, lineno: event.lineno });
     push("error", event.message);
   });
   window.addEventListener("unhandledrejection", (event) => {
+    recordBootTrace("window:unhandledrejection", { reason: describeValue(event.reason) });
     push("error", "Unhandled promise rejection", event.reason);
+  });
+  window.addEventListener("pagehide", (event) => {
+    recordBootTrace("page:hide", { persisted: event.persisted });
   });
 
   return {
@@ -447,6 +546,61 @@ function buildIssueUrl(captureId, systemInfo) {
   return `https://github.com/${GITHUB_REPO}/issues/new?${params}`;
 }
 
+function collectDebugLogEntries() {
+  return Array.from(
+    document.querySelectorAll("#debug-log .debug-entry"),
+  ).reverse().map((el) => ({
+    level: el.dataset.level,
+    meta: el.querySelector(".debug-entry__meta")?.textContent ?? "",
+    message: el.querySelector(".debug-entry__message")?.textContent ?? "",
+  }));
+}
+
+function downloadJson(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function setupLogDownloadButton(camera) {
+  const btn = document.getElementById("download-logs");
+  if (!btn) {
+    return;
+  }
+
+  btn.addEventListener("click", () => {
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const logId = `cv_logs_${ts}`;
+    try {
+      const systemInfo = collectSystemInfo(camera);
+      downloadJson(`${logId}.json`, {
+        logId,
+        buildId: BUILD_ID,
+        debugMode: DEBUG_MODE,
+        timestamp: new Date().toISOString(),
+        url: location.href,
+        visibilityState: document.visibilityState,
+        crossOriginIsolated: self.crossOriginIsolated ?? false,
+        bootTrace: getBootTraceSnapshot(),
+        systemInfo,
+        consoleLog: collectDebugLogEntries(),
+      });
+      btn.textContent = "Saved!";
+      setTimeout(() => { btn.textContent = "⬇ Download Logs"; }, 2000);
+    } catch (err) {
+      btn.textContent = "Error";
+      console.error("log download failed", err);
+      setTimeout(() => { btn.textContent = "⬇ Download Logs"; }, 2000);
+    }
+  });
+}
+
 // captureState is an object maintained by createScannerLoop:
 //   { lastResult, lastDetectorBitmap, lastCropBitmap }
 // lastDetectorBitmap / lastCropBitmap are ImageBitmaps transferred from the
@@ -482,13 +636,7 @@ function setupCaptureButton(camera, captureState) {
         snapshotCanvas.getContext("2d").drawImage(frameBitmap, 0, 0);
         frameBitmap.close();
 
-        const logEntries = Array.from(
-          document.querySelectorAll("#debug-log .debug-entry"),
-        ).reverse().map((el) => ({
-          level: el.dataset.level,
-          meta: el.querySelector(".debug-entry__meta")?.textContent ?? "",
-          message: el.querySelector(".debug-entry__message")?.textContent ?? "",
-        }));
+        const logEntries = collectDebugLogEntries();
 
         // Full-resolution frame — what Python uses to re-run the pipeline.
         const dataUrl = snapshotCanvas.toDataURL("image/png");
@@ -522,6 +670,7 @@ function setupCaptureButton(camera, captureState) {
         const bundle = {
           captureId,
           buildId: BUILD_ID,
+          debugMode: DEBUG_MODE,
           timestamp: new Date().toISOString(),
           // Expected Scryfall card ID — null until manually identified by a developer.
           // Set this field when filing a regression capture so the test suite can
@@ -552,6 +701,7 @@ function setupCaptureButton(camera, captureState) {
           timing: data.timing ?? null,
           crossOriginIsolated: self.crossOriginIsolated ?? false,
           numThreads: captureState.numThreads ?? null,
+          bootTrace: getBootTraceSnapshot(),
           consoleLog: logEntries,
           // Python: cv2.imdecode(np.frombuffer(base64.b64decode(bundle["framePng"]), np.uint8), cv2.IMREAD_COLOR)
           framePng,
@@ -1377,6 +1527,12 @@ function createScannerLoop(
     }
 
     workerBusy = false;
+    recordBootTrace("scan:result", {
+      cardPresent: data.cardPresent,
+      cornersValid: data.cornersValid,
+      score: data.score,
+      timing: data.timing,
+    }, { debugOnly: true });
 
     // Dispatch pending capture callback before any early returns.
     if (data.captureRequested && captureState.onCapture) {
@@ -1479,9 +1635,16 @@ function createScannerLoop(
           if (captureRequested) captureState.pendingCapture = false;
           const includeDebugBitmaps = shouldRequestDebugBitmaps(captureRequested);
           const bitmap = await createImageBitmap(camera.processCanvas);
+          recordBootTrace("scan:frame-sent", {
+            width: bitmap.width,
+            height: bitmap.height,
+            captureRequested,
+            includeDebugBitmaps,
+          }, { debugOnly: true });
           scannerWorker.postMessage({ type: "frame", bitmap, captureRequested, includeDebugBitmaps }, [bitmap]);
         } catch (error) {
           workerBusy = false;
+          recordBootTrace("scan:tick-error", { message: error?.message ?? String(error) });
           debugLog.error("scan tick failed", error);
           setText("camera-badge", error?.message || "Scan error");
         }
@@ -1520,9 +1683,25 @@ function formatBytes(value) {
 }
 
 async function boot() {
+  const previousBootTrace = readStoredBootTrace();
   const scans = loadScans();
   const audioBus = createAudioBus();
   const debugLog = createDebugLog();
+  startBootTrace(previousBootTrace);
+  const previousLastStage = previousBootTrace?.lastStage ?? null;
+  const previousEndedCleanly = previousLastStage === "page:hide" || previousLastStage === "boot:stale-build";
+  if (previousBootTrace && !previousEndedCleanly) {
+    debugLog.warn(
+      "previous scanner run may have ended abruptly",
+      previousLastStage ?? "unknown stage",
+      previousBootTrace.entries?.at?.(-1) ?? "no entries",
+    );
+  } else if (DEBUG_MODE && previousBootTrace) {
+    debugLog.info("previous scanner run", previousBootTrace.lastStage ?? "unknown stage", previousBootTrace.entries?.at?.(-1) ?? "no entries");
+  }
+  if (DEBUG_MODE) {
+    debugLog.info("debug mode enabled", "persistent boot breadcrumbs active");
+  }
   const diag = createDiagnostics();
   const loadingScreen = createLoadingScreen();
   const camera = new CameraSurface(debugLog, diag);
@@ -1555,6 +1734,7 @@ async function boot() {
     const canary = await fetch(`./build.json?_=${Date.now()}`, { cache: "no-store" })
       .then((r) => r.json());
     if (canary.buildId && canary.buildId !== BUILD_ID) {
+      recordBootTrace("boot:stale-build", { liveBuildId: canary.buildId, pageBuildId: BUILD_ID });
       const params = new URLSearchParams(location.search);
       params.set("v", canary.buildId);
       location.replace(location.pathname + "?" + params.toString() + location.hash);
@@ -1567,6 +1747,7 @@ async function boot() {
   // Load the manifest on the main thread first — it drives both the loading
   // screen text and the worker init message.
   const manifest = await loadManifest();
+  recordBootTrace("boot:manifest", { version: manifest.version, rows: manifest.catalog?.rows, dims: manifest.catalog?.dims });
   renderManifestContract(manifest);
   loadingScreen.step("manifest", "done", `v${manifest.version}`);
   loadingScreen.progress(14, "Manifest loaded");
@@ -1581,11 +1762,13 @@ async function boot() {
   const scannerWorker = new Worker(scannerWorkerUrl, { type: "module" });
   const enricherWorkerUrl = new URL(`./enricher.worker.mjs?v=${BUILD_ID}`, import.meta.url);
   const enricherWorker = new Worker(enricherWorkerUrl, { type: "module" });
+  recordBootTrace("boot:workers-created");
 
   // Wire up init-phase progress messages before posting 'init'.
   const scannerReady = new Promise((resolve, reject) => {
     function onInitMessage({ data }) {
       if (data.type === "progress") {
+        recordBootTrace("worker:progress", data, { debugOnly: data.ratio < 1 });
         if (data.stage === "webgpu") {
           const mode = data.inferenceMode;
           setText("webgpu-status", mode.startsWith("WebGPU") ? "Active" : "WASM");
@@ -1609,9 +1792,11 @@ async function boot() {
           setPhase(data.stage, percent, label, note, data.ratio >= 1 ? "done" : "active");
         }
       } else if (data.type === "ready") {
+        recordBootTrace("worker:ready", { inferenceMode: data.inferenceMode, numThreads: data.numThreads ?? 1 });
         scannerWorker.removeEventListener("message", onInitMessage);
         resolve({ inferenceMode: data.inferenceMode, numThreads: data.numThreads ?? 1 });
       } else if (data.type === "error") {
+        recordBootTrace("worker:error", { message: data.message });
         scannerWorker.removeEventListener("message", onInitMessage);
         reject(new Error(data.message));
       }
@@ -1627,6 +1812,7 @@ async function boot() {
   setText("models-status", "Loading models");
 
   scannerWorker.postMessage({ type: "init", manifest, enableWebGpu: isWebGpuEnabled() });
+  recordBootTrace("worker:init-posted", { enableWebGpu: isWebGpuEnabled() });
   const { inferenceMode, numThreads } = await scannerReady;
 
   const threadLabel = self.crossOriginIsolated
@@ -1656,11 +1842,14 @@ async function boot() {
     },
   );
   camera.setReady();
+  setupLogDownloadButton(camera);
   setupCaptureButton(camera, captureState);
+  completeBootTrace();
   loadingScreen.finish();
 }
 
 boot().catch((error) => {
+  recordBootTrace("boot:error", { message: error?.message ?? String(error), stack: error?.stack });
   console.error(error);
   setText("webgpu-status", error.message);
   document.body.dataset.loading = "true";
