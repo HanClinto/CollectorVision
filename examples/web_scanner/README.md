@@ -123,6 +123,11 @@ If you are testing on desktop before camera permissions or mobile WebGPU are
 sorted out, use `Run Bundled Sample` from the settings sheet to exercise the
 real inference path on a known card image.
 
+For raw model latency, open Settings → Model Benchmark or visit
+`http://localhost:8040/model_benchmark.html`.  The benchmark page can also run,
+download its JSON report, and return to the scanner with
+`http://localhost:8040/model_benchmark.html?autorun=1&download=1&return=1`.
+
 ## Nice To Have Later
 
 - use `sounds/scan.wav` for successful scan confirmation

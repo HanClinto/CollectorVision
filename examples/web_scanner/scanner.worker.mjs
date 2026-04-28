@@ -528,21 +528,25 @@ class WorkerRuntime {
   }
 
   async detect(frameCanvas) {
+    const t0 = performance.now();
     const vw = frameCanvas.width;
     const vh = frameCanvas.height;
 
     // Save a copy of what we fed the model for the debug preview bitmap.
     this.detectorScratchCtx.drawImage(frameCanvas, 0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
     this._lastDetectorInput = `${vw}×${vh} → squash ${DETECTOR_SIZE}×${DETECTOR_SIZE}`;
+    const t1 = performance.now();
 
     const input = fillInputTensorFromContext(
       this.detectorScratchCtx,
       DETECTOR_SIZE,
       this.detectorInputTensor,
     );
+    const t2 = performance.now();
     const outputs = await this.detector.run({
       [this.inputNames.detector]: new ort.Tensor("float32", input, [1, 3, DETECTOR_SIZE, DETECTOR_SIZE]),
     });
+    const t3 = performance.now();
     const cornersRaw = Array.from(outputs[this.detector.outputNames[0]].data).slice(0, 8);
     const presenceLogit = outputs[this.detector.outputNames[1]].data[0];
     const sharpness = this.detector.outputNames[2]
@@ -558,16 +562,25 @@ class WorkerRuntime {
     }
 
     this._lastRawCorners = points.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("  ");
+    const t4 = performance.now();
 
     return {
       corners: orderCorners(points),
       sharpness,
       confidence: sharpness ?? sigmoid(presenceLogit),
       cardPresent: (sharpness ?? sigmoid(presenceLogit)) >= MIN_SHARPNESS,
+      timing: {
+        detectorDrawMs: t1 - t0,
+        detectorInputMs: t2 - t1,
+        detectorRunMs: t3 - t2,
+        detectorPostMs: t4 - t3,
+        detectMs: t4 - t0,
+      },
     };
   }
 
   dewarp(frameCanvas, corners) {
+    const t0 = performance.now();
     const width = frameCanvas.width;
     const height = frameCanvas.height;
     const srcPts = [
@@ -595,8 +608,10 @@ class WorkerRuntime {
       [dstPts[6], dstPts[7]],
     ];
     const inverse = computeHomography(targetPoints, sourcePoints);
+    const t1 = performance.now();
     const srcData = frameCanvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, width, height);
     const dstData = this.dewarpImageData;
+    const t2 = performance.now();
 
     for (let y = 0; y < DEWARP_H; y += 1) {
       for (let x = 0; x < DEWARP_W; x += 1) {
@@ -609,21 +624,45 @@ class WorkerRuntime {
       }
     }
 
+    const t3 = performance.now();
     this.dewarpCtx.putImageData(dstData, 0, 0);
+    const t4 = performance.now();
+    this._lastDewarpTiming = {
+      dewarpSetupMs: t1 - t0,
+      dewarpReadMs: t2 - t1,
+      dewarpWarpMs: t3 - t2,
+      dewarpWriteMs: t4 - t3,
+      dewarpMs: t4 - t0,
+    };
     return this.dewarpCanvas;
   }
 
   async embed(cropCanvas) {
+    const t0 = performance.now();
     this.embedderScratchCtx.drawImage(cropCanvas, 0, 0, EMBEDDER_SIZE, EMBEDDER_SIZE);
+    const t1 = performance.now();
     const input = fillInputTensorFromContext(
       this.embedderScratchCtx,
       EMBEDDER_SIZE,
       this.embedderInputTensor,
     );
+    const t2 = performance.now();
     const outputs = await this.embedder.run({
       [this.inputNames.embedder]: new ort.Tensor("float32", input, [1, 3, EMBEDDER_SIZE, EMBEDDER_SIZE]),
     });
-    return normalizeEmbedding(Float32Array.from(outputs[this.embedder.outputNames[0]].data));
+    const t3 = performance.now();
+    const embedding = normalizeEmbedding(Float32Array.from(outputs[this.embedder.outputNames[0]].data));
+    const t4 = performance.now();
+    return {
+      embedding,
+      timing: {
+        embedDrawMs: t1 - t0,
+        embedInputMs: t2 - t1,
+        embedRunMs: t3 - t2,
+        embedPostMs: t4 - t3,
+        embedMs: t4 - t0,
+      },
+    };
   }
 
   search(query) {
@@ -661,14 +700,14 @@ let frameCanvas = null;
 let frameCtx = null;
 
 async function processFrame(bitmap, captureRequested = false, includeDebugBitmaps = false) {
+  const tFrameStart = performance.now();
   if (!frameCanvas || frameCanvas.width !== bitmap.width || frameCanvas.height !== bitmap.height) {
     frameCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     frameCtx = frameCanvas.getContext("2d", { willReadFrequently: true });
   }
   frameCtx.drawImage(bitmap, 0, 0);
   bitmap.close();
-
-  const t0 = performance.now();
+  const tFrameReady = performance.now();
 
   // Snapshot the frame for the capture bundle (zero-copy, worker → main).
   let captureFrameBitmap = null;
@@ -677,10 +716,14 @@ async function processFrame(bitmap, captureRequested = false, includeDebugBitmap
     snap.getContext("2d").drawImage(frameCanvas, 0, 0);
     captureFrameBitmap = snap.transferToImageBitmap();
   }
+  const tCaptureReady = performance.now();
 
-  const t1 = performance.now();
   const detection = await runtime.detect(frameCanvas);
-  const t2 = performance.now();
+  const baseTiming = {
+    frameDrawMs: tFrameReady - tFrameStart,
+    captureMs: tCaptureReady - tFrameReady,
+    ...detection.timing,
+  };
 
   if (!detection.cardPresent) {
     const transfer0 = captureFrameBitmap ? [captureFrameBitmap] : [];
@@ -699,7 +742,7 @@ async function processFrame(bitmap, captureRequested = false, includeDebugBitmap
       detectorInput: runtime._lastDetectorInput,
       detectorBitmap: null,
       cropBitmap: null,
-      timing: { detectMs: Math.round(t2 - t1), dewarpMs: 0, embedMs: 0, searchMs: 0, totalMs: Math.round(t2 - t0) },
+      timing: roundTiming({ ...baseTiming, dewarpMs: 0, embedMs: 0, searchMs: 0, totalMs: performance.now() - tFrameStart }),
     }, transfer0);
     return;
   }
@@ -731,18 +774,16 @@ async function processFrame(bitmap, captureRequested = false, includeDebugBitmap
       detectorInput: runtime._lastDetectorInput,
       detectorBitmap,
       cropBitmap: null,
-      timing: { detectMs: Math.round(t2 - t1), dewarpMs: 0, embedMs: 0, searchMs: 0, totalMs: Math.round(t2 - t0) },
+      timing: roundTiming({ ...baseTiming, dewarpMs: 0, embedMs: 0, searchMs: 0, totalMs: performance.now() - tFrameStart }),
     }, transfer1);
     return;
   }
 
-  const t3 = performance.now();
   const cropCanvas = runtime.dewarp(frameCanvas, detection.corners);
-  const t4 = performance.now();
-  const embedding = await runtime.embed(cropCanvas);
-  const t5 = performance.now();
+  const { embedding, timing: embedTiming } = await runtime.embed(cropCanvas);
+  const tSearchStart = performance.now();
   const best = runtime.search(embedding);
-  const t6 = performance.now();
+  const tSearchEnd = performance.now();
 
   // Transfer the dewarp canvas bitmap (zero-copy) then it gets a fresh blank.
   const cropBitmap = includeDebugBitmaps ? cropCanvas.transferToImageBitmap() : null;
@@ -766,14 +807,21 @@ async function processFrame(bitmap, captureRequested = false, includeDebugBitmap
     detectorInput: runtime._lastDetectorInput,
     detectorBitmap,
     cropBitmap,
-    timing: {
-      detectMs: Math.round(t2 - t1),
-      dewarpMs: Math.round(t4 - t3),
-      embedMs: Math.round(t5 - t4),
-      searchMs: Math.round(t6 - t5),
-      totalMs: Math.round(t6 - t0),
-    },
+    timing: roundTiming({
+      ...baseTiming,
+      ...runtime._lastDewarpTiming,
+      ...embedTiming,
+      searchMs: tSearchEnd - tSearchStart,
+      totalMs: tSearchEnd - tFrameStart,
+    }),
   }, transfer2);
+}
+
+function roundTiming(timing) {
+  return Object.fromEntries(Object.entries(timing).map(([key, value]) => [
+    key,
+    Math.round((Number(value) || 0) * 10) / 10,
+  ]));
 }
 
 // ---------------------------------------------------------------------------

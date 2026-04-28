@@ -1507,8 +1507,9 @@ class PerformanceOverlay {
     const card = data?.cardPresent ? (data.cornersValid ? "card" : "bad-quad") : "no-card";
     this.el.textContent = [
       `scan ${SCAN_INTERVAL_MS}ms  result ${resultGap}`,
-      `total ${formatMs(timing.totalMs)}  det ${formatMs(timing.detectMs)}`,
-      `dew ${formatMs(timing.dewarpMs)}  emb ${formatMs(timing.embedMs)}  lookup ${formatMs(timing.searchMs)}`,
+      `total ${formatMs(timing.totalMs)}  det ${formatMs(timing.detectMs)} (run ${formatMs(timing.detectorRunMs)})`,
+      `dew ${formatMs(timing.dewarpMs)} (warp ${formatMs(timing.dewarpWarpMs)})  emb ${formatMs(timing.embedMs)} (run ${formatMs(timing.embedRunMs)})`,
+      `prep det ${formatMs(timing.detectorInputMs)}  prep emb ${formatMs(timing.embedInputMs)}  lookup ${formatMs(timing.searchMs)}`,
       `${mode}  threads ${threads}  ${card}  score ${score}`,
       `${this.memoryLine()}  catalog ${formatMiB(this.catalogBytes)}`,
     ].join("\n");
@@ -1736,7 +1737,7 @@ function createScannerLoop(
 
     if (data.timing) {
       const t = data.timing;
-      diag.set("diag-timing", `${t.totalMs}ms  (det ${t.detectMs} + dew ${t.dewarpMs} + emb ${t.embedMs} + search ${t.searchMs})`);
+      diag.set("diag-timing", `${t.totalMs}ms  (det ${t.detectMs}/run ${t.detectorRunMs} + dew ${t.dewarpMs}/warp ${t.dewarpWarpMs} + emb ${t.embedMs}/run ${t.embedRunMs} + search ${t.searchMs})`);
     }
 
     if (!data.cardPresent) {
