@@ -14,6 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 IMAGES_DIR = ROOT / "examples" / "images"
 _UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
+# Some samples intentionally obscure edition-specific text.  For those images,
+# the embedding model can correctly identify the card while choosing a visually
+# indistinguishable reprint from another set.  Keep the strict ID check for most
+# samples, but allow known equivalent-print IDs for those ambiguous captures.
+_ACCEPTED_EQUIVALENT_PRINTS = {
+    "d0def54b-9f0a-4ab1-9df9-25506a06350c": {
+        # Rush of Adrenaline — The List reprint of SOI #177, same oracle/art.
+        "78fa3708-c56c-41fd-9e1b-5c61996d5dac",
+    },
+}
+
 
 class _FakeResponse:
     def __init__(self, payload: dict) -> None:
@@ -110,10 +121,11 @@ class SampleImagesIntegrationTests(unittest.TestCase):
         hits = self.catalog.search(emb, top_k=1)
         _, top_id = hits[0]
 
-        self.assertEqual(
+        accepted_ids = {expected_id, *_ACCEPTED_EQUIVALENT_PRINTS.get(expected_id, set())}
+        self.assertIn(
             top_id,
-            expected_id,
-            f"{filename}: expected {expected_id}, got {top_id}",
+            accepted_ids,
+            f"{filename}: expected one of {sorted(accepted_ids)}, got {top_id}",
         )
 
     def test_sample_image(self) -> None:
