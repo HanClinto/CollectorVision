@@ -26,7 +26,11 @@
             <h2>Card handler JavaScript</h2>
             <p>Start with the Scryfall example, or change the rows, logs, and fetches to fit your own page.</p>
           </div>
-          <div id="handler-code" class="editor-shell language-javascript" aria-label="JavaScript card handler editor"></div>
+          <div class="handler-frame" aria-label="Card scan handler function">
+            <pre class="function-signature"><code>async function onCardScanned(card, mygui) {</code></pre>
+            <div id="handler-code" class="editor-shell language-javascript" aria-label="Editable JavaScript function body"></div>
+            <pre class="function-signature"><code>}</code></pre>
+          </div>
           <div class="editor-meta">
             <span class="pill">Available: <code>card</code></span>
             <span class="pill">Helpers: <code>mygui.addRow()</code> <code>mygui.log()</code> <code>mygui.fetchJson()</code></span>
@@ -57,12 +61,7 @@
       import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanner-applet.mjs";
 
       const CODE_KEY = "collectorvision_applet_example_code";
-      const DEFAULT_HANDLER = `// Runs whenever CollectorVision confirms a card.
-// Available variables:
-//   card.cardId, card.score, card.detectedAt, card.raw
-//   mygui.addRow(object), mygui.log(...), mygui.fetchJson(url), mygui.clear()
-
-mygui.log("Looking up", card.cardId, "score", card.score.toFixed(3));
+      const DEFAULT_HANDLER = `mygui.log("Looking up", card.cardId, "score", card.score.toFixed(3));
 
 const scryfall = await mygui.fetchJson(` + "`https://api.scryfall.com/cards/${card.cardId}`" + `);
 
@@ -139,7 +138,7 @@ mygui.addRow({
       function compileHandler() {
         const source = codeEditor.toString();
         localStorage.setItem(CODE_KEY, source);
-        handleCard = new Function("card", "mygui", `"use strict"; return (async () => {\n${source}\n})();`);
+        handleCard = new Function("card", "mygui", `"use strict"; async function onCardScanned(card, mygui) {\n${source}\n}\nreturn onCardScanned(card, mygui);`);
         log("Handler applied. Scan a card to run it.");
       }
 
