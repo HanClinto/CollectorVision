@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CollectorVision ONNX Model Benchmark</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { margin: 0; padding: 24px; background: #0d1117; color: #e6edf3; }
+      main { max-width: 980px; margin: 0 auto; }
+      h1 { margin-top: 0; }
+      fieldset { border: 1px solid #30363d; border-radius: 12px; padding: 16px; margin: 16px 0; }
+      label { display: inline-flex; flex-direction: column; gap: 6px; margin: 8px 16px 8px 0; color: #c9d1d9; }
+      input, select, button { font: inherit; border-radius: 8px; border: 1px solid #30363d; padding: 8px 10px; background: #161b22; color: #e6edf3; }
+      button { cursor: pointer; background: #238636; border-color: #2ea043; font-weight: 700; }
+      button:disabled { cursor: wait; opacity: 0.65; }
+      table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+      th, td { border-bottom: 1px solid #30363d; padding: 8px; text-align: right; }
+      th:first-child, td:first-child { text-align: left; }
+      pre { overflow: auto; border: 1px solid #30363d; border-radius: 12px; padding: 16px; background: #010409; }
+      .muted { color: #8b949e; }
+      .error { color: #ff7b72; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>CollectorVision ONNX Model Benchmark</h1>
+      <p class="muted">
+        Serve this directory with <code>./scripts/run_web_scanner_local.sh</code>, then open this page on the target device.
+        It measures raw ONNX inference latency with synthetic tensors, which isolates model/runtime cost from camera and dewarp work.
+      </p>
+
+      <fieldset>
+        <legend>Settings</legend>
+        <label>
+          Backend
+          <select id="backend">
+            <option value="wasm" selected>WASM</option>
+            <option value="webgpu">WebGPU</option>
+          </select>
+        </label>
+        <label>
+          Threads
+          <input id="threads" type="number" min="1" max="8" value="4" />
+        </label>
+        <label>
+          Warmup runs
+          <input id="warmup" type="number" min="0" max="100" value="10" />
+        </label>
+        <label>
+          Measured runs
+          <input id="runs" type="number" min="1" max="500" value="50" />
+        </label>
+        <button id="run">Run benchmark</button>
+        <button id="download" type="button" disabled>Download JSON</button>
+        <button id="back" type="button">Back to scanner</button>
+        <p class="muted">
+          Safer separate runs:
+          <a href="./model_benchmark.html?backend=wasm&amp;autorun=1&amp;download=1">WASM only</a>
+          ·
+          <a href="./model_benchmark.html?backend=webgpu&amp;autorun=1&amp;download=1">WebGPU only</a>
+        </p>
+      </fieldset>
+
+      <div id="status" class="muted">Idle.</div>
+      <div id="results"></div>
+      <h2>JSON report</h2>
+      <pre id="json">{}</pre>
+    </main>
+
+    <script type="module">
+      import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs";
+
+      const MODELS = [
+        { name: "cornelius", path: "./assets/models/cornelius.onnx", shape: [1, 3, 384, 384] },
+        { name: "milo", path: "./assets/models/milo.onnx", shape: [1, 3, 448, 448] },
+      ];
+
+      const statusEl = document.getElementById("status");
+      const resultsEl = document.getElementById("results");
+      const jsonEl = document.getElementById("json");
+      const runButton = document.getElementById("run");
+      const downloadButton = document.getElementById("download");
+      const backButton = document.getElementById("back");
+      const params = new URLSearchParams(location.search);
+      const initialBackend = params.get("backend");
+      if (["wasm", "webgpu"].includes(initialBackend)) {
+        document.getElementById("backend").value = initialBackend;
+      }
+      let lastReport = null;
+
+      function percentile(values, pct) {
+        const sorted = [...values].sort((a, b) => a - b);
+        const index = (sorted.length - 1) * pct / 100;
+        const low = Math.floor(index);
+        const high = Math.min(low + 1, sorted.length - 1);
+        const weight = index - low;
+        return sorted[low] * (1 - weight) + sorted[high] * weight;
+      }
+
+      function summarize(values) {
+        const sum = values.reduce((total, value) => total + value, 0);
+        return {
+          runs: values.length,
+          mean: sum / values.length,
+          median: percentile(values, 50),
+          p90: percentile(values, 90),
+          p95: percentile(values, 95),
+          min: Math.min(...values),
+          max: Math.max(...values),
+        };
+      }
+
+      function makeTensor(shape) {
+        const size = shape.reduce((product, value) => product * value, 1);
+        const data = new Float32Array(size);
+        for (let i = 0; i < data.length; i += 1) {
+          // Deterministic ImageNet-normalised-ish input.
+          data[i] = Math.sin(i * 0.013) * 1.2;
+        }
+        return data;
+      }
+
+      function roundStats(stats) {
+        return Object.fromEntries(Object.entries(stats).map(([key, value]) => [
+          key,
+          typeof value === "number" ? Math.round(value * 1000) / 1000 : value,
+        ]));
+      }
+
+      async function configureBackend(backend, threads) {
+        ort.env.wasm.numThreads = threads;
+        if (backend !== "webgpu") {
+          return;
+        }
+        if (!("gpu" in navigator)) {
+          throw new Error("navigator.gpu is unavailable on this browser/device.");
+        }
+        const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+        if (!adapter) {
+          throw new Error("No WebGPU adapter available.");
+        }
+        ort.env.webgpu.adapter = adapter;
+        ort.env.webgpu.forceFp16 = false;
+      }
+
+      async function benchmarkModel(model, backend, warmup, runs) {
+        statusEl.textContent = `Loading ${model.name}...`;
+        const createStart = performance.now();
+        const session = await ort.InferenceSession.create(model.path, { executionProviders: [backend] });
+        const sessionCreateMs = performance.now() - createStart;
+        const inputName = session.inputNames[0];
+        const input = new ort.Tensor("float32", makeTensor(model.shape), model.shape);
+        const feeds = { [inputName]: input };
+
+        statusEl.textContent = `Running ${model.name} first pass...`;
+        const firstStart = performance.now();
+        await session.run(feeds);
+        const firstRunMs = performance.now() - firstStart;
+
+        statusEl.textContent = `Warming ${model.name}...`;
+        for (let i = 0; i < warmup; i += 1) {
+          await session.run(feeds);
+        }
+
+        const timings = [];
+        for (let i = 0; i < runs; i += 1) {
+          statusEl.textContent = `Measuring ${model.name} ${i + 1}/${runs}...`;
+          const start = performance.now();
+          await session.run(feeds);
+          timings.push(performance.now() - start);
+        }
+
+        return {
+          name: model.name,
+          path: model.path,
+          backend,
+          inputShape: model.shape,
+          outputNames: session.outputNames,
+          sessionCreateMs,
+          firstRunMs,
+          latencyMs: summarize(timings),
+        };
+      }
+
+      function render(report) {
+        lastReport = report;
+        downloadButton.disabled = false;
+        const rows = report.benchmarks.map((result) => {
+          const stats = result.latencyMs;
+          return `<tr><td>${result.name}</td><td>${result.backend}</td><td>${stats.mean.toFixed(1)}</td><td>${stats.median.toFixed(1)}</td><td>${stats.p90.toFixed(1)}</td><td>${result.firstRunMs.toFixed(1)}</td><td>${result.sessionCreateMs.toFixed(1)}</td></tr>`;
+        }).join("");
+        resultsEl.innerHTML = `<table><thead><tr><th>Model</th><th>Backend</th><th>Mean ms</th><th>Median ms</th><th>P90 ms</th><th>First run ms</th><th>Create ms</th></tr></thead><tbody>${rows}</tbody></table>`;
+        const rounded = {
+          ...report,
+          benchmarks: report.benchmarks.map((result) => ({
+            ...result,
+            sessionCreateMs: Math.round(result.sessionCreateMs * 1000) / 1000,
+            firstRunMs: Math.round(result.firstRunMs * 1000) / 1000,
+            latencyMs: roundStats(result.latencyMs),
+          })),
+        };
+        jsonEl.textContent = JSON.stringify(rounded, null, 2);
+      }
+
+      function downloadReport() {
+        if (!lastReport) {
+          return;
+        }
+        const text = jsonEl.textContent || JSON.stringify(lastReport, null, 2);
+        const blob = new Blob([text], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const a = document.createElement("a");
+        a.href = url;
+        const backend = lastReport.backend || "unknown";
+        a.download = `collectorvision-model-benchmark-${backend}-${stamp}.json`;
+        document.body.append(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      function returnToScanner() {
+        location.href = "./index.html";
+      }
+
+      async function runBenchmark() {
+        runButton.disabled = true;
+        downloadButton.disabled = true;
+        resultsEl.innerHTML = "";
+        statusEl.className = "muted";
+        try {
+          const backend = document.getElementById("backend").value;
+          const threads = Number(document.getElementById("threads").value);
+          const warmup = Number(document.getElementById("warmup").value);
+          const runs = Number(document.getElementById("runs").value);
+          await configureBackend(backend, threads);
+          const report = {
+            createdAt: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+            crossOriginIsolated,
+            hardwareConcurrency: navigator.hardwareConcurrency,
+            benchmarkMode: "single-backend",
+            backend,
+            wasmThreads: threads,
+            benchmarks: [],
+          };
+          for (const model of MODELS) {
+            report.benchmarks.push(await benchmarkModel(model, backend, warmup, runs));
+            render(report);
+          }
+          statusEl.textContent = "Done.";
+          if (params.get("download") === "1") {
+            downloadReport();
+          }
+          if (params.get("return") === "1") {
+            setTimeout(returnToScanner, 750);
+          }
+        } catch (error) {
+          statusEl.className = "error";
+          statusEl.textContent = error instanceof Error ? error.message : String(error);
+        } finally {
+          runButton.disabled = false;
+        }
+      }
+
+      runButton.addEventListener("click", runBenchmark);
+      downloadButton.addEventListener("click", downloadReport);
+      backButton.addEventListener("click", returnToScanner);
+
+      if (params.get("autorun") === "1") {
+        runBenchmark();
+      }
+    </script>
+  </body>
+</html>
