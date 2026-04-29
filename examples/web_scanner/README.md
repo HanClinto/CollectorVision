@@ -132,7 +132,9 @@ configuration object, and listen for card events. It intentionally has no stock
 settings screen, scan list, pricing UI, benchmark tooling, or GitHub reporting.
 The example page includes a small editable JavaScript handler that defaults to
 looking up detected cards on Scryfall and appending them to a spreadsheet-like
-table.
+table. Its code editor uses CodeJar and Prism from jsDelivr for lightweight
+syntax highlighting; the applet module itself does not depend on those editor
+libraries.
 
 ```js
 import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanner-applet.mjs";

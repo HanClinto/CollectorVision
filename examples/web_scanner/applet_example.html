@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CollectorVision Applet Example</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/themes/prism.min.css" />
     <style>
       :root { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color-scheme: light dark; }
       body { margin: 0; min-height: 100vh; padding: 1.5rem; background: #f8f6ee; color: #24211f; }
@@ -11,10 +12,10 @@
       h1 { margin: 0; font-size: clamp(2.25rem, 8vw, 5rem); line-height: 0.9; letter-spacing: -0.06em; }
       h2 { margin: 0; font-size: 1rem; }
       p { line-height: 1.55; }
+      code { border-radius: 0.35rem; padding: 0.1rem 0.3rem; background: rgba(36, 33, 31, 0.08); font-size: 0.92em; }
       button { min-height: 2.5rem; border: 1px solid rgba(36, 33, 31, 0.18); border-radius: 0.75rem; padding: 0.55rem 0.8rem; background: #24211f; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
       button.secondary { background: rgba(36, 33, 31, 0.08); color: inherit; }
-      textarea, pre, table { border: 1px solid rgba(36, 33, 31, 0.14); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.58); }
-      textarea { width: 100%; min-height: 22rem; box-sizing: border-box; padding: 1rem; font: 0.9rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 2; }
+      pre, table, .tip-card { border: 1px solid rgba(36, 33, 31, 0.14); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.58); }
       pre { overflow: auto; min-height: 3rem; margin: 0; padding: 0.85rem; white-space: pre-wrap; }
       table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; }
       th, td { padding: 0.65rem 0.75rem; border-bottom: 1px solid rgba(36, 33, 31, 0.12); text-align: left; vertical-align: top; }
@@ -23,16 +24,30 @@
       .eyebrow { margin: 0 0 0.25rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.16em; color: #81796f; }
       .layout { display: grid; gap: 1rem; align-items: start; }
       .panel { display: grid; gap: 0.75rem; min-width: 0; }
+      .panel-heading { display: grid; gap: 0.25rem; }
+      .panel-heading p { margin: 0; color: #665f56; }
       .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+      .editor-shell { min-height: 22rem; box-sizing: border-box; padding: 1rem; overflow: auto; border: 1px solid rgba(36, 33, 31, 0.14); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.66); font: 0.9rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.55; tab-size: 2; white-space: pre-wrap; }
+      .editor-shell:focus { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22); }
+      .editor-shell .token { background: transparent; }
+      .editor-meta { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; color: #665f56; font-size: 0.88rem; }
+      .pill { border-radius: 999px; padding: 0.25rem 0.55rem; background: rgba(36, 33, 31, 0.08); font-weight: 700; }
+      .tip-card { padding: 0.85rem; }
+      .tip-card p { margin: 0 0 0.45rem; }
+      .tip-card ul { margin: 0; padding-left: 1.2rem; line-height: 1.55; }
       .empty { color: #81796f; font-style: italic; }
       @media (min-width: 880px) { .layout { grid-template-columns: minmax(20rem, 0.8fr) minmax(28rem, 1.2fr); } }
       @media (prefers-color-scheme: dark) {
         body { background: #0f172a; color: #e2e8f0; }
+        code { background: rgba(226, 232, 240, 0.1); }
         button { border-color: rgba(226, 232, 240, 0.18); background: #e2e8f0; color: #0f172a; }
         button.secondary { background: rgba(226, 232, 240, 0.08); color: inherit; }
-        textarea, pre, table { border-color: rgba(226, 232, 240, 0.16); background: rgba(15, 23, 42, 0.72); }
+        pre, table, .tip-card, .editor-shell { border-color: rgba(226, 232, 240, 0.16); background: rgba(15, 23, 42, 0.72); }
         th, td { border-bottom-color: rgba(226, 232, 240, 0.12); }
         th { background: rgba(226, 232, 240, 0.08); }
+        .panel-heading p, .editor-meta { color: #cbd5e1; }
+        .editor-shell { color: #e2e8f0; }
+        .pill { background: rgba(226, 232, 240, 0.1); }
         .eyebrow, .empty { color: #94a3b8; }
       }
     </style>
@@ -42,7 +57,7 @@
       <header>
         <p class="eyebrow">Candidate API</p>
         <h1>Hackable scanner applet</h1>
-        <p>Add a target element, pass a JSON config, and attach whatever JavaScript you want to <code>cardDetected</code>. This example starts with a Scryfall lookup and a simple spreadsheet.</p>
+        <p>Add a target element, pass a JSON config, and attach whatever JavaScript you want to <code>cardDetected</code>. This playground keeps everything local in your browser: edit the handler, apply it, then scan a card.</p>
       </header>
 
       <section class="layout">
@@ -52,19 +67,38 @@
         </div>
 
         <div class="panel">
-          <h2>Card handler JavaScript</h2>
-          <textarea id="handler-code" spellcheck="false"></textarea>
+          <div class="panel-heading">
+            <h2>Card handler JavaScript</h2>
+            <p>Start with the Scryfall example, or change the rows, logs, and fetches to fit your own page.</p>
+          </div>
+          <div id="handler-code" class="editor-shell language-javascript" aria-label="JavaScript card handler editor"></div>
+          <div class="editor-meta">
+            <span class="pill">Available: <code>card</code></span>
+            <span class="pill">Helpers: <code>mygui.addRow()</code> <code>mygui.log()</code> <code>mygui.fetchJson()</code></span>
+          </div>
           <div class="toolbar">
             <button id="apply-code" type="button">Apply handler</button>
             <button id="reset-code" class="secondary" type="button">Reset example</button>
             <button id="clear-table" class="secondary" type="button">Clear table</button>
+          </div>
+          <div class="tip-card">
+            <p><strong>Try this:</strong> add a new column inside <code>mygui.addRow({ ... })</code>, or replace the Scryfall lookup with your own API call.</p>
+            <ul>
+              <li><code>card.cardId</code> is the confirmed CollectorVision card id.</li>
+              <li><code>card.score</code> is the match confidence.</li>
+              <li>The handler runs only on your device; refreshing restores your saved code.</li>
+            </ul>
           </div>
           <div id="table-wrap"><p class="empty">Detected cards will appear here.</p></div>
         </div>
       </section>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-core.min.js" data-manual></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-clike.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-javascript.min.js"></script>
     <script type="module">
+      import { CodeJar } from "https://cdn.jsdelivr.net/npm/codejar@4.3.0/dist/codejar.js";
       import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanner-applet.mjs";
 
       const CODE_KEY = "collectorvision_applet_example_code";
@@ -87,7 +121,7 @@ mygui.addRow({
 });`;
 
       const events = document.getElementById("events");
-      const codeEditor = document.getElementById("handler-code");
+      const editorElement = document.getElementById("handler-code");
       const tableWrap = document.getElementById("table-wrap");
       const rows = [];
       const columns = [];
@@ -95,7 +129,8 @@ mygui.addRow({
       const LOG_LIMIT = 12;
       let handleCard = null;
 
-      codeEditor.value = localStorage.getItem(CODE_KEY) || DEFAULT_HANDLER;
+      const codeEditor = CodeJar(editorElement, (editor) => window.Prism.highlightElement(editor), { tab: "  " });
+      codeEditor.updateCode(localStorage.getItem(CODE_KEY) || DEFAULT_HANDLER, false);
 
       function log(...parts) {
         const line = parts.map((part) => (
@@ -147,7 +182,7 @@ mygui.addRow({
       }
 
       function compileHandler() {
-        const source = codeEditor.value;
+        const source = codeEditor.toString();
         localStorage.setItem(CODE_KEY, source);
         handleCard = new Function("card", "mygui", `"use strict"; return (async () => {\n${source}\n})();`);
         log("Handler applied. Scan a card to run it.");
@@ -175,7 +210,7 @@ mygui.addRow({
         }
       });
       document.getElementById("reset-code").addEventListener("click", () => {
-        codeEditor.value = DEFAULT_HANDLER;
+        codeEditor.updateCode(DEFAULT_HANDLER, false);
         compileHandler();
       });
       document.getElementById("clear-table").addEventListener("click", mygui.clear);
