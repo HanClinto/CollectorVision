@@ -61,18 +61,18 @@
       import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanner-applet.mjs";
 
       const CODE_KEY = "collectorvision_applet_example_code";
-      const DEFAULT_HANDLER = `mygui.log("Looking up", card.cardId, "score", card.score.toFixed(3));
+      const DEFAULT_HANDLER = `  mygui.log("Looking up", card.cardId, "score", card.score.toFixed(3));
 
-const scryfall = await mygui.fetchJson(` + "`https://api.scryfall.com/cards/${card.cardId}`" + `);
+  const scryfall = await mygui.fetchJson(` + "`https://api.scryfall.com/cards/${card.cardId}`" + `);
 
-mygui.addRow({
-  Name: scryfall.name,
-  Set: scryfall.set_name,
-  Number: scryfall.collector_number,
-  Rarity: scryfall.rarity,
-  USD: scryfall.prices?.usd ?? "",
-  Score: card.score.toFixed(3),
-});`;
+  mygui.addRow({
+    Name: scryfall.name,
+    Set: scryfall.set_name,
+    Number: scryfall.collector_number,
+    Rarity: scryfall.rarity,
+    USD: scryfall.prices?.usd ?? "",
+    Score: card.score.toFixed(3),
+  });`;
 
       const events = document.getElementById("events");
       const editorElement = document.getElementById("handler-code");
