@@ -5,33 +5,175 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CollectorVision Applet Example</title>
     <style>
-      :root { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color-scheme: light dark; }
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 1.5rem; background: #f8f6ee; color: #24211f; }
-      main { width: min(32rem, 100%); display: grid; gap: 1rem; }
-      h1 { margin: 0; font-size: clamp(2rem, 8vw, 4rem); line-height: 0.95; }
-      code, pre { border-radius: 0.75rem; background: rgba(36, 33, 31, 0.08); }
-      code { padding: 0.1rem 0.25rem; }
-      pre { overflow: auto; margin: 0; padding: 1rem; }
-      #events { min-height: 5rem; }
-      @media (prefers-color-scheme: dark) { body { background: #0f172a; color: #e2e8f0; } code, pre { background: rgba(226, 232, 240, 0.08); } }
+      :root { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color-scheme: light dark; }
+      body { margin: 0; min-height: 100vh; padding: 1.5rem; background: #f8f6ee; color: #24211f; }
+      main { width: min(72rem, 100%); margin: 0 auto; display: grid; gap: 1rem; }
+      h1 { margin: 0; font-size: clamp(2.25rem, 8vw, 5rem); line-height: 0.9; letter-spacing: -0.06em; }
+      h2 { margin: 0; font-size: 1rem; }
+      p { line-height: 1.55; }
+      button { min-height: 2.5rem; border: 1px solid rgba(36, 33, 31, 0.18); border-radius: 0.75rem; padding: 0.55rem 0.8rem; background: #24211f; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+      button.secondary { background: rgba(36, 33, 31, 0.08); color: inherit; }
+      textarea, pre, table { border: 1px solid rgba(36, 33, 31, 0.14); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.58); }
+      textarea { width: 100%; min-height: 22rem; box-sizing: border-box; padding: 1rem; font: 0.9rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 2; }
+      pre { overflow: auto; min-height: 3rem; margin: 0; padding: 0.85rem; white-space: pre-wrap; }
+      table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+      th, td { padding: 0.65rem 0.75rem; border-bottom: 1px solid rgba(36, 33, 31, 0.12); text-align: left; vertical-align: top; }
+      th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; background: rgba(36, 33, 31, 0.07); }
+      tr:last-child td { border-bottom: 0; }
+      .eyebrow { margin: 0 0 0.25rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.16em; color: #81796f; }
+      .layout { display: grid; gap: 1rem; align-items: start; }
+      .panel { display: grid; gap: 0.75rem; min-width: 0; }
+      .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+      .empty { color: #81796f; font-style: italic; }
+      @media (min-width: 880px) { .layout { grid-template-columns: minmax(20rem, 0.8fr) minmax(28rem, 1.2fr); } }
+      @media (prefers-color-scheme: dark) {
+        body { background: #0f172a; color: #e2e8f0; }
+        button { border-color: rgba(226, 232, 240, 0.18); background: #e2e8f0; color: #0f172a; }
+        button.secondary { background: rgba(226, 232, 240, 0.08); color: inherit; }
+        textarea, pre, table { border-color: rgba(226, 232, 240, 0.16); background: rgba(15, 23, 42, 0.72); }
+        th, td { border-bottom-color: rgba(226, 232, 240, 0.12); }
+        th { background: rgba(226, 232, 240, 0.08); }
+        .eyebrow, .empty { color: #94a3b8; }
+      }
     </style>
   </head>
   <body>
     <main>
-      <div>
-        <p><strong>Candidate API</strong></p>
-        <h1>Scanner applet</h1>
-        <p>Add one target element, pass a JSON config object, and listen for card events.</p>
-      </div>
+      <header>
+        <p class="eyebrow">Candidate API</p>
+        <h1>Hackable scanner applet</h1>
+        <p>Add a target element, pass a JSON config, and attach whatever JavaScript you want to <code>cardDetected</code>. This example starts with a Scryfall lookup and a simple spreadsheet.</p>
+      </header>
 
-      <div id="collectorvision"></div>
-      <pre id="events">Waiting for cards…</pre>
+      <section class="layout">
+        <div class="panel">
+          <div id="collectorvision"></div>
+          <pre id="events">Waiting for cards…</pre>
+        </div>
+
+        <div class="panel">
+          <h2>Card handler JavaScript</h2>
+          <textarea id="handler-code" spellcheck="false"></textarea>
+          <div class="toolbar">
+            <button id="apply-code" type="button">Apply handler</button>
+            <button id="reset-code" class="secondary" type="button">Reset example</button>
+            <button id="clear-table" class="secondary" type="button">Clear table</button>
+          </div>
+          <div id="table-wrap"><p class="empty">Detected cards will appear here.</p></div>
+        </div>
+      </section>
     </main>
 
     <script type="module">
       import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanner-applet.mjs";
 
+      const CODE_KEY = "collectorvision_applet_example_code";
+      const DEFAULT_HANDLER = `// Runs whenever CollectorVision confirms a card.
+// Available variables:
+//   card.cardId, card.score, card.detectedAt, card.raw
+//   api.addRow(object), api.log(...), api.fetchJson(url), api.clear()
+
+api.log("Looking up", card.cardId, "score", card.score.toFixed(3));
+
+const scryfall = await api.fetchJson(` + "`https://api.scryfall.com/cards/${card.cardId}`" + `);
+
+api.addRow({
+  Name: scryfall.name,
+  Set: scryfall.set_name,
+  Number: scryfall.collector_number,
+  Rarity: scryfall.rarity,
+  USD: scryfall.prices?.usd ?? "",
+  Score: card.score.toFixed(3),
+});`;
+
       const events = document.getElementById("events");
+      const codeEditor = document.getElementById("handler-code");
+      const tableWrap = document.getElementById("table-wrap");
+      const rows = [];
+      const columns = [];
+      let handleCard = null;
+
+      codeEditor.value = localStorage.getItem(CODE_KEY) || DEFAULT_HANDLER;
+
+      function log(...parts) {
+        events.textContent = parts.map((part) => (
+          typeof part === "string" ? part : JSON.stringify(part, null, 2)
+        )).join(" ");
+      }
+
+      async function fetchJson(url, options) {
+        const response = await fetch(url, options);
+        if (!response.ok) {
+          throw new Error(`Fetch failed ${response.status}: ${url}`);
+        }
+        return response.json();
+      }
+
+      function addRow(row) {
+        rows.unshift(row);
+        for (const key of Object.keys(row)) {
+          if (!columns.includes(key)) {
+            columns.push(key);
+          }
+        }
+        renderTable();
+      }
+
+      function renderTable() {
+        if (!rows.length) {
+          tableWrap.innerHTML = `<p class="empty">Detected cards will appear here.</p>`;
+          return;
+        }
+        const head = columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("");
+        const body = rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column] ?? "")}</td>`).join("")}</tr>`).join("");
+        tableWrap.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>'"]/g, (char) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          "'": "&#39;",
+          "\"": "&quot;",
+        }[char]));
+      }
+
+      function compileHandler() {
+        const source = codeEditor.value;
+        localStorage.setItem(CODE_KEY, source);
+        handleCard = new Function("card", "api", `"use strict"; return (async () => {\n${source}\n})();`);
+        log("Handler applied. Scan a card to run it.");
+      }
+
+      const api = {
+        addRow,
+        clear() {
+          rows.length = 0;
+          columns.length = 0;
+          renderTable();
+        },
+        fetchJson,
+        log,
+        get rows() {
+          return rows;
+        },
+      };
+
+      document.getElementById("apply-code").addEventListener("click", () => {
+        try {
+          compileHandler();
+        } catch (error) {
+          log("Handler error:", error.message);
+        }
+      });
+      document.getElementById("reset-code").addEventListener("click", () => {
+        codeEditor.value = DEFAULT_HANDLER;
+        compileHandler();
+      });
+      document.getElementById("clear-table").addEventListener("click", api.clear);
+
+      compileHandler();
 
       const scanner = await createCollectorVisionScannerApplet({
         target: "#collectorvision",
@@ -40,16 +182,15 @@
         scanIntervalMs: 900,
         overlay: true,
         enableWebGpu: false,
-        onCardDetected(card) {
-          events.textContent = JSON.stringify({
-            type: "cardDetected",
-            cardId: card.cardId,
-            score: card.score,
-            detectedAt: card.detectedAt,
-          }, null, 2);
+        async onCardDetected(card) {
+          try {
+            await handleCard?.(card, { ...api, scanner });
+          } catch (error) {
+            log("Handler error:", error.message);
+          }
         },
         onError(error) {
-          events.textContent = `Scanner error: ${error.message}`;
+          log("Scanner error:", error.message);
         },
       });
 

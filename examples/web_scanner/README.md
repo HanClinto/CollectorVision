@@ -130,6 +130,9 @@ separate from the full CollectorVision demo UI:
 The goal is a batteries-included component: add one target element, pass a JSON
 configuration object, and listen for card events. It intentionally has no stock
 settings screen, scan list, pricing UI, benchmark tooling, or GitHub reporting.
+The example page includes a small editable JavaScript handler that defaults to
+looking up detected cards on Scryfall and appending them to a spreadsheet-like
+table.
 
 ```js
 import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanner-applet.mjs";
