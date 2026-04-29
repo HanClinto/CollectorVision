@@ -201,8 +201,14 @@ function bounceCard(imageUrl, label = "Scanned card") {
   const origin = cameraRect();
   const image = document.createElement("img");
   image.className = "bouncing-card";
-  image.src = imageUrl;
+  image.crossOrigin = "anonymous";
+  image.referrerPolicy = "no-referrer";
+  image.decoding = "async";
   image.alt = label;
+  image.addEventListener("error", () => {
+    log("Could not load card image; showing name fallback for", label, imageUrl);
+  }, { once: true });
+  image.src = imageUrl;
   effectsLayer.append(image);
 
   const width = 92;
