@@ -149,7 +149,11 @@ def get_total_memory_bytes() -> int | None:
     if sys.platform.startswith("linux"):
         meminfo = Path("/proc/meminfo")
         if meminfo.exists():
-            match = re.search(r"^MemTotal:\s+(\d+)\s+kB", meminfo.read_text(encoding="utf-8", errors="ignore"), re.MULTILINE)
+            match = re.search(
+                r"^MemTotal:\s+(\d+)\s+kB",
+                meminfo.read_text(encoding="utf-8", errors="ignore"),
+                re.MULTILINE,
+            )
             if match:
                 return int(match.group(1)) * 1024
     try:
@@ -265,9 +269,13 @@ def summarize_profile(profile_path: str | None) -> dict[str, Any] | None:
         node_entry["total_ms"] = float(node_entry["total_ms"]) + duration_ms
 
     ranked_ops = sorted(by_op.items(), key=lambda item: float(item[1]["total_ms"]), reverse=True)
-    ranked_nodes = sorted(by_node.items(), key=lambda item: float(item[1]["total_ms"]), reverse=True)
+    ranked_nodes = sorted(
+        by_node.items(), key=lambda item: float(item[1]["total_ms"]), reverse=True
+    )
     return {
-        "profile_path": str(profile_file.relative_to(ROOT) if profile_file.is_relative_to(ROOT) else profile_file),
+        "profile_path": str(
+            profile_file.relative_to(ROOT) if profile_file.is_relative_to(ROOT) else profile_file
+        ),
         "note": "Profile includes first run, warmup runs, and measured runs; use it to locate hotspots, not exact steady-state latency.",
         "top_ops": [
             {
@@ -344,7 +352,9 @@ def benchmark_model(
 
     return {
         "name": name,
-        "path": str(model_path.relative_to(ROOT) if model_path.is_relative_to(ROOT) else model_path),
+        "path": str(
+            model_path.relative_to(ROOT) if model_path.is_relative_to(ROOT) else model_path
+        ),
         "size_mib": round(model_path.stat().st_size / 1024 / 1024, 4),
         "model": model_metadata,
         "provider": provider,
@@ -417,8 +427,12 @@ def failed_benchmark_result(
 ) -> dict[str, Any]:
     return {
         "name": name,
-        "path": str(model_path.relative_to(ROOT) if model_path.is_relative_to(ROOT) else model_path),
-        "size_mib": round(model_path.stat().st_size / 1024 / 1024, 4) if model_path.exists() else None,
+        "path": str(
+            model_path.relative_to(ROOT) if model_path.is_relative_to(ROOT) else model_path
+        ),
+        "size_mib": round(model_path.stat().st_size / 1024 / 1024, 4)
+        if model_path.exists()
+        else None,
         "provider": provider,
         "provider_chain": provider_chain(provider),
         "threads": threads,
@@ -434,7 +448,9 @@ def format_markdown_report(report: dict[str, Any], output: Path) -> str:
     source = report["source"]
     commit = source.get("git_commit_short") or "unknown"
     dirty = "dirty" if source.get("git_dirty") else "clean"
-    cpu = system.get("cpu_model") or system.get("processor") or system.get("machine") or "unknown CPU"
+    cpu = (
+        system.get("cpu_model") or system.get("processor") or system.get("machine") or "unknown CPU"
+    )
     cores = f"{system.get('cpu_physical_cores') or '?'}P/{system.get('cpu_logical_cores') or '?'}L"
     memory = f"{system.get('memory_total_mib') or '?'} MiB RAM"
     available = system.get("memory_available_mib")
@@ -524,7 +540,16 @@ def run_gh_comment(thread_url: str, body: str) -> bool:
         if kind == "issues":
             command = [gh, "issue", "comment", number, "--repo", repo, "--body-file", body_path]
         else:
-            command = [gh, "discussion", "comment", number, "--repo", repo, "--body-file", body_path]
+            command = [
+                gh,
+                "discussion",
+                "comment",
+                number,
+                "--repo",
+                repo,
+                "--body-file",
+                body_path,
+            ]
         result = subprocess.run(command, check=False, capture_output=True, text=True)
         if result.returncode == 0:
             print(f"Posted benchmark result to {thread_url}")
@@ -544,7 +569,9 @@ def copy_to_clipboard(text: str) -> bool:
     elif sys.platform == "win32":
         commands.append(["clip"])
     else:
-        commands.extend([["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]])
+        commands.extend(
+            [["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]
+        )
 
     for command in commands:
         if shutil.which(command[0]) is None:
@@ -563,7 +590,9 @@ def open_browser_comment_fallback(thread_url: str, body: str, output: Path) -> N
     if copied:
         print("Copied GitHub comment body to the clipboard.")
     else:
-        print("Could not copy to clipboard automatically; open the .github-comment.md file and copy it manually.")
+        print(
+            "Could not copy to clipboard automatically; open the .github-comment.md file and copy it manually."
+        )
     if thread_url:
         webbrowser.open(thread_url)
         print(f"Opened {thread_url}")
@@ -580,7 +609,9 @@ def wants_to_contribute(mode: str, thread_url: str) -> bool:
     return answer in {"y", "yes"}
 
 
-def contribute_report(report: dict[str, Any], output: Path, thread_url: str, mode: str, method: str) -> None:
+def contribute_report(
+    report: dict[str, Any], output: Path, thread_url: str, mode: str, method: str
+) -> None:
     if not wants_to_contribute(mode, thread_url):
         if mode != "never" and not thread_url:
             print(
@@ -602,19 +633,43 @@ def contribute_report(report: dict[str, Any], output: Path, thread_url: str, mod
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", action="append", default=[], help="Model spec: name=path or path. Defaults to Cornelius and Milo.")
-    parser.add_argument("--threads", default="1,2,4", help="Comma-separated intra-op thread counts.")
+    parser.add_argument(
+        "--model",
+        action="append",
+        default=[],
+        help="Model spec: name=path or path. Defaults to Cornelius and Milo.",
+    )
+    parser.add_argument(
+        "--threads", default="1,2,4", help="Comma-separated intra-op thread counts."
+    )
     parser.add_argument("--runs", type=int, default=50)
-    parser.add_argument("--warmup", type=int, default=10, help="Warmup runs per model/thread combination. Excluded from reported steady-state latency.")
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=10,
+        help="Warmup runs per model/thread combination. Excluded from reported steady-state latency.",
+    )
     parser.add_argument(
         "--provider",
         default="all-local",
         help="ONNX Runtime provider, comma-separated providers, 'all'/'all-local' for local providers only, or 'all-with-remote'/'all-available' to include remote-capable providers such as AzureExecutionProvider. Non-CPU providers use CPU fallback for unsupported nodes.",
     )
-    parser.add_argument("--ort-log-severity", type=int, default=3, help="ONNX Runtime log severity: 0 verbose, 1 info, 2 warning, 3 error, 4 fatal. Default suppresses provider warning noise during sweeps.")
-    parser.add_argument("--profile", action="store_true", help="Write and summarize ONNX Runtime node profiles.")
+    parser.add_argument(
+        "--ort-log-severity",
+        type=int,
+        default=3,
+        help="ONNX Runtime log severity: 0 verbose, 1 info, 2 warning, 3 error, 4 fatal. Default suppresses provider warning noise during sweeps.",
+    )
+    parser.add_argument(
+        "--profile", action="store_true", help="Write and summarize ONNX Runtime node profiles."
+    )
     parser.add_argument("--seed", type=int, default=12345)
-    parser.add_argument("--output", type=Path, default=None, help="JSON output path. Defaults under build/model_benchmarks/.")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="JSON output path. Defaults under build/model_benchmarks/.",
+    )
     parser.add_argument(
         "--contribute",
         choices=("ask", "always", "never"),
@@ -687,7 +742,9 @@ def main() -> None:
     with output.open("w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2)
     print(f"Wrote {output.relative_to(ROOT) if output.is_relative_to(ROOT) else output}")
-    contribute_report(report, output, args.github_thread_url, args.contribute, args.contribution_method)
+    contribute_report(
+        report, output, args.github_thread_url, args.contribute, args.contribution_method
+    )
 
 
 if __name__ == "__main__":
