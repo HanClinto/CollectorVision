@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="./applet_example.css" />
   </head>
   <body>
+    <div id="effects-layer" aria-hidden="true"></div>
     <main>
       <header>
         <p class="eyebrow">Candidate API</p>
@@ -33,18 +34,21 @@
           </div>
           <div class="editor-meta">
             <span class="pill">Card: <code>card.cardId</code> <code>card.score</code> <code>card.detectedAt</code> <code>card.raw</code></span>
-            <span class="pill">Helpers: <code>mygui.addRow()</code> <code>mygui.log()</code> <code>mygui.fetchJson()</code></span>
+            <span class="pill">Helpers: <code>mygui.addRow()</code> <code>mygui.log()</code> <code>mygui.fetchJson()</code> <code>mygui.cardImageUrl()</code> <code>mygui.cameraRect()</code></span>
+            <span class="pill">Fun: <code>mygui.bounceCard()</code> <code>mygui.priceBurst()</code> <code>mygui.addToTotal()</code></span>
           </div>
           <div class="toolbar">
+            <label class="preset-picker">Preset <select id="preset-code"></select></label>
             <button id="apply-code" type="button">Apply handler</button>
-            <button id="reset-code" class="secondary" type="button">Reset example</button>
+            <button id="reset-code" class="secondary" type="button">Load preset</button>
             <button id="clear-table" class="secondary" type="button">Clear table</button>
           </div>
           <div class="tip-card">
-            <p><strong>Try this:</strong> add a new column inside <code>mygui.addRow({ ... })</code>, or replace the Scryfall lookup with your own API call.</p>
+            <p><strong>Try this:</strong> choose a preset, click <strong>Load preset</strong>, then scan a card. The examples are starting points—edit them freely.</p>
             <ul>
               <li><code>card.cardId</code> is the confirmed CollectorVision card id.</li>
               <li><code>card.score</code> is the match confidence.</li>
+              <li><code>mygui.bounceCard()</code> adds one bouncing image per scan.</li>
               <li>The handler runs only on your device; refreshing restores your saved code.</li>
             </ul>
           </div>

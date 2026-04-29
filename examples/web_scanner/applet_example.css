@@ -56,6 +56,17 @@ button.secondary {
   color: inherit;
 }
 
+select {
+  min-height: 2.5rem;
+  border: 1px solid rgba(36, 33, 31, 0.18);
+  border-radius: 0.75rem;
+  padding: 0.45rem 2rem 0.45rem 0.7rem;
+  background: rgba(255, 255, 255, 0.7);
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+}
+
 pre,
 table,
 .tip-card {
@@ -129,7 +140,16 @@ tr:last-child td { border-bottom: 0; }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
+}
+
+.preset-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #665f56;
+  font-weight: 800;
 }
 
 .handler-frame {
@@ -219,6 +239,59 @@ pre.function-signature[class*="language-"] {
   font-style: italic;
 }
 
+#effects-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.bouncing-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 92px;
+  height: 128px;
+  border-radius: 4.8% / 3.5%;
+  filter: drop-shadow(0 0.45rem 0.8rem rgba(0, 0, 0, 0.32));
+  object-fit: cover;
+  will-change: transform;
+}
+
+.price-burst {
+  position: fixed;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  color: #fbbf24;
+  font-size: clamp(3rem, 11vw, 8rem);
+  font-weight: 900;
+  letter-spacing: -0.08em;
+  text-shadow: 0 0.2rem 0 #7c2d12, 0 0 2rem rgba(251, 191, 36, 0.7);
+  animation: price-pop 1.6s ease-out forwards;
+}
+
+.sparkle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  font-size: 1.4rem;
+  animation: sparkle-pop 1.2s ease-out forwards;
+}
+
+@keyframes price-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.45); }
+  22% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.75); }
+}
+
+@keyframes sparkle-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--x)), calc(-50% + var(--y))) scale(1.2) rotate(180deg); }
+}
+
 @media (min-width: 880px) {
   .layout { grid-template-columns: minmax(20rem, 0.8fr) minmax(28rem, 1.2fr); }
 }
@@ -242,6 +315,11 @@ pre.function-signature[class*="language-"] {
     color: inherit;
   }
 
+  select {
+    border-color: rgba(226, 232, 240, 0.18);
+    background: rgba(15, 23, 42, 0.72);
+  }
+
   pre,
   table,
   .tip-card {
@@ -255,7 +333,8 @@ pre.function-signature[class*="language-"] {
   th { background: rgba(226, 232, 240, 0.08); }
 
   .panel-heading p,
-  .editor-meta { color: #cbd5e1; }
+  .editor-meta,
+  .preset-picker { color: #cbd5e1; }
 
   .handler-frame {
     border-color: rgba(226, 232, 240, 0.16);

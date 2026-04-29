@@ -136,8 +136,10 @@ The example page includes a small editable JavaScript handler that defaults to
 looking up detected cards on Scryfall and appending them to a spreadsheet-like
 table. The example keeps its HTML, JavaScript, and CSS split into small files,
 and its code editor uses CodeJar and Prism from jsDelivr for lightweight syntax
-highlighting. The applet module itself does not depend on those editor
-libraries.
+highlighting. It includes selectable preset handlers for a plain lookup table,
+card-color page tinting, bouncing scanned-card images, and a playful running
+price total. The applet module itself does not depend on those editor
+libraries or presets.
 
 ```js
 import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanner-applet.mjs";
