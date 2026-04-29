@@ -132,14 +132,14 @@ separate from the full CollectorVision demo UI:
 The goal is a batteries-included component: add one target element, pass a JSON
 configuration object, and listen for card events. It intentionally has no stock
 settings screen, scan list, pricing UI, benchmark tooling, or GitHub reporting.
-The example page includes a small editable JavaScript handler that defaults to
-looking up detected cards on Scryfall and appending them to a spreadsheet-like
-table. The example keeps its HTML, JavaScript, and CSS split into small files,
-and its code editor uses CodeJar and Prism from jsDelivr for lightweight syntax
-highlighting. It includes selectable preset handlers for a plain lookup table,
-card-color page tinting, bouncing scanned-card images, and a playful running
-price total. The applet module itself does not depend on those editor
-libraries or presets.
+The Scanner Playground includes a small editable JavaScript handler that
+defaults to looking up detected cards on Scryfall and appending them to a
+spreadsheet-like table. The playground keeps its HTML, JavaScript, and CSS split
+into small files, and its code editor uses CodeJar and Prism from jsDelivr for
+lightweight syntax highlighting. It includes selectable preset handlers for a
+plain lookup table, card-color page tinting, bouncing scanned-card images, and a
+playful running price total. The applet module itself does not depend on those
+editor libraries or presets.
 
 ```js
 import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanner-applet.mjs";
