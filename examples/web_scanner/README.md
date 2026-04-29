@@ -119,6 +119,37 @@ uv run python -m http.server 8040
 
 Open `http://localhost:8040`.
 
+## Candidate Scanner Applet API
+
+This directory also includes an experimental, embeddable scanner applet that is
+separate from the full CollectorVision demo UI:
+
+- [`lib/collectorvision-scanner-applet.mjs`](./lib/collectorvision-scanner-applet.mjs)
+- [`applet_example.html`](./applet_example.html)
+
+The goal is a batteries-included component: add one target element, pass a JSON
+configuration object, and listen for card events. It intentionally has no stock
+settings screen, scan list, pricing UI, benchmark tooling, or GitHub reporting.
+
+```js
+import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanner-applet.mjs";
+
+const scanner = await createCollectorVisionScannerApplet({
+   target: "#collectorvision",
+   matchThreshold: 0.60,
+   consecutiveMatches: 2,
+   scanIntervalMs: 900,
+   overlay: true,
+   onCardDetected(card) {
+      console.log(card.cardId, card.score);
+   },
+});
+```
+
+This is a candidate API, not the final library package. It currently reuses the
+existing scanner worker and expects the standard `./assets`, `./vendor`, and
+`scanner.worker.mjs` layout served from the same static directory.
+
 If you are testing on desktop before camera permissions or mobile WebGPU are
 sorted out, use `Run Bundled Sample` from the settings sheet to exercise the
 real inference path on a known card image.
