@@ -1,0 +1,48 @@
+:root { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color-scheme: light dark; }
+body { margin: 0; min-height: 100vh; padding: 1.5rem; background: #f8f6ee; color: #24211f; }
+main { width: min(72rem, 100%); margin: 0 auto; display: grid; gap: 1rem; }
+h1 { margin: 0; font-size: clamp(2.25rem, 8vw, 5rem); line-height: 0.9; letter-spacing: -0.06em; }
+h2 { margin: 0; font-size: 1rem; }
+p { line-height: 1.55; }
+code { border-radius: 0.35rem; padding: 0.1rem 0.3rem; background: rgba(36, 33, 31, 0.08); font-size: 0.92em; }
+button { min-height: 2.5rem; border: 1px solid rgba(36, 33, 31, 0.18); border-radius: 0.75rem; padding: 0.55rem 0.8rem; background: #24211f; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+button.secondary { background: rgba(36, 33, 31, 0.08); color: inherit; }
+pre, table, .tip-card { border: 1px solid rgba(36, 33, 31, 0.14); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.58); }
+pre { overflow: auto; min-height: 3rem; margin: 0; padding: 0.85rem; white-space: pre-wrap; }
+table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+th, td { padding: 0.65rem 0.75rem; border-bottom: 1px solid rgba(36, 33, 31, 0.12); text-align: left; vertical-align: top; }
+th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; background: rgba(36, 33, 31, 0.07); }
+tr:last-child td { border-bottom: 0; }
+.eyebrow { margin: 0 0 0.25rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.16em; color: #81796f; }
+.layout { display: grid; gap: 1rem; align-items: start; }
+.panel { display: grid; gap: 0.75rem; min-width: 0; }
+.panel-heading { display: grid; gap: 0.25rem; }
+.panel-heading p { margin: 0; color: #665f56; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.editor-shell { min-height: 22rem; box-sizing: border-box; padding: 1rem; overflow: auto; border: 1px solid rgba(36, 33, 31, 0.14); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.66); font: 0.9rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.55; tab-size: 2; white-space: pre-wrap; }
+.editor-shell:focus { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22); }
+.editor-shell .token { background: transparent; }
+.editor-meta { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; color: #665f56; font-size: 0.88rem; }
+.pill { border-radius: 999px; padding: 0.25rem 0.55rem; background: rgba(36, 33, 31, 0.08); font-weight: 700; }
+.tip-card { padding: 0.85rem; }
+.tip-card p { margin: 0 0 0.45rem; }
+.tip-card ul { margin: 0; padding-left: 1.2rem; line-height: 1.55; }
+.empty { color: #81796f; font-style: italic; }
+
+@media (min-width: 880px) {
+  .layout { grid-template-columns: minmax(20rem, 0.8fr) minmax(28rem, 1.2fr); }
+}
+
+@media (prefers-color-scheme: dark) {
+  body { background: #0f172a; color: #e2e8f0; }
+  code { background: rgba(226, 232, 240, 0.1); }
+  button { border-color: rgba(226, 232, 240, 0.18); background: #e2e8f0; color: #0f172a; }
+  button.secondary { background: rgba(226, 232, 240, 0.08); color: inherit; }
+  pre, table, .tip-card, .editor-shell { border-color: rgba(226, 232, 240, 0.16); background: rgba(15, 23, 42, 0.72); }
+  th, td { border-bottom-color: rgba(226, 232, 240, 0.12); }
+  th { background: rgba(226, 232, 240, 0.08); }
+  .panel-heading p, .editor-meta { color: #cbd5e1; }
+  .editor-shell { color: #e2e8f0; }
+  .pill { background: rgba(226, 232, 240, 0.1); }
+  .eyebrow, .empty { color: #94a3b8; }
+}
