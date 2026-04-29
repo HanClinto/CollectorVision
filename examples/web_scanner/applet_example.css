@@ -20,9 +20,11 @@ tr:last-child td { border-bottom: 0; }
 .panel-heading p { margin: 0; color: #665f56; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .handler-frame { overflow: hidden; border: 1px solid rgba(36, 33, 31, 0.14); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.66); }
-.function-signature { min-height: 0; border: 0; border-radius: 0; padding: 0.35rem 1rem; background: rgba(36, 33, 31, 0.06); color: #665f56; font: 0.95rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.4; white-space: pre; }
-.function-signature code { padding: 0; background: transparent; font-size: inherit; }
-.function-signature .token { background: transparent; }
+.function-signature,
+pre.function-signature[class*="language-"] { min-height: 0; margin: 0; border: 0; border-radius: 0; padding: 0.25rem 1rem; overflow: visible; background: rgba(36, 33, 31, 0.06); color: #665f56; font: 0.95rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.35; text-shadow: none; white-space: pre; }
+.function-signature code,
+.function-signature code[class*="language-"] { padding: 0; background: transparent; color: inherit; font-size: inherit; line-height: inherit; text-shadow: none; }
+.function-signature .token { background: transparent; text-shadow: none; }
 .editor-shell { min-height: 19rem; box-sizing: border-box; padding: 0.85rem 1rem 0.85rem 2rem; overflow: auto; border: 0; border-top: 1px solid rgba(36, 33, 31, 0.1); border-bottom: 1px solid rgba(36, 33, 31, 0.1); background: transparent; font: 0.95rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.5; tab-size: 2; white-space: pre-wrap; }
 .editor-shell:focus { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22); }
 .editor-shell .token { background: transparent; }
@@ -47,7 +49,8 @@ tr:last-child td { border-bottom: 0; }
   th { background: rgba(226, 232, 240, 0.08); }
   .panel-heading p, .editor-meta { color: #cbd5e1; }
   .handler-frame { border-color: rgba(226, 232, 240, 0.16); background: rgba(15, 23, 42, 0.72); }
-  .function-signature { background: rgba(226, 232, 240, 0.08); color: #cbd5e1; }
+  .function-signature,
+  pre.function-signature[class*="language-"] { background: rgba(226, 232, 240, 0.08); color: #cbd5e1; }
   .editor-shell { color: #e2e8f0; }
   .pill { background: rgba(226, 232, 240, 0.1); }
   .eyebrow, .empty { color: #94a3b8; }
