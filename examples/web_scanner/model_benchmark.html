@@ -55,7 +55,8 @@
       const BENCHMARK_ISSUE_URL = "https://github.com/HanClinto/CollectorVision/issues/16#issuecomment-new";
       const params = new URLSearchParams(location.search);
       const backend = params.get("backend") === "webgpu" ? "webgpu" : "wasm";
-      const threads = 4;
+      const requestedThreads = 4;
+      const actualThreads = crossOriginIsolated && typeof SharedArrayBuffer !== "undefined" ? requestedThreads : 1;
       const warmup = 10;
       const runs = 50;
       const MODELS = [
@@ -117,8 +118,30 @@
         return data;
       }
 
+      async function collectBuildInfo() {
+        try {
+          const response = await fetch("./build.json", { cache: "no-store" });
+          if (!response.ok) {
+            return { buildId: "unknown" };
+          }
+          return await response.json();
+        } catch {
+          return { buildId: "unknown" };
+        }
+      }
+
+      async function modelSizeMiB(path) {
+        try {
+          const response = await fetch(path, { method: "HEAD", cache: "force-cache" });
+          const length = Number(response.headers.get("content-length"));
+          return Number.isFinite(length) && length > 0 ? Math.round(length / 1024 / 1024 * 100) / 100 : null;
+        } catch {
+          return null;
+        }
+      }
+
       async function configureBackend() {
-        ort.env.wasm.numThreads = threads;
+        ort.env.wasm.numThreads = actualThreads;
         if (backend !== "webgpu") {
           return;
         }
@@ -138,6 +161,7 @@
         const createStart = performance.now();
         const session = await ort.InferenceSession.create(model.path, { executionProviders: [backend] });
         const sessionCreateMs = performance.now() - createStart;
+        const sizeMiB = await modelSizeMiB(model.path);
         const inputName = session.inputNames[0];
         const feeds = { [inputName]: new ort.Tensor("float32", makeTensor(model.shape), model.shape) };
 
@@ -162,7 +186,11 @@
         return {
           name: model.name,
           path: model.path,
+          version: "unknown",
+          sizeMiB,
           backend,
+          provider: backend,
+          threads: actualThreads,
           inputShape: model.shape,
           outputNames: session.outputNames,
           sessionCreateMs,
@@ -174,9 +202,9 @@
       function renderSummary(report) {
         const rows = report.benchmarks.map((result) => {
           const stats = result.latencyMs;
-          return `<tr><td>${result.name}</td><td>${stats.mean.toFixed(1)}</td><td>${stats.p90.toFixed(1)}</td><td>${result.firstRunMs.toFixed(1)}</td></tr>`;
+          return `<tr><td>${result.name}</td><td>${result.threads}</td><td>${result.provider}</td><td>${stats.mean.toFixed(1)}</td><td>${stats.p90.toFixed(1)}</td></tr>`;
         }).join("");
-        resultsEl.innerHTML = `<table><thead><tr><th>Model</th><th>Mean ms</th><th>P90 ms</th><th>First ms</th></tr></thead><tbody>${rows}</tbody></table>`;
+        resultsEl.innerHTML = `<table><thead><tr><th>Model</th><th>Threads</th><th>Provider</th><th>Mean ms</th><th>P90 ms</th></tr></thead><tbody>${rows}</tbody></table>`;
       }
 
       function roundedReport(report) {
@@ -194,23 +222,25 @@
       function formatMarkdownReport(report) {
         const rows = report.benchmarks.map((result) => {
           const stats = result.latencyMs;
-          return `| ${result.name} | ${result.backend} | ${stats.mean.toFixed(1)} | ${stats.median.toFixed(1)} | ${stats.p90.toFixed(1)} | ${result.firstRunMs.toFixed(1)} | ${result.sessionCreateMs.toFixed(1)} |`;
+          const size = result.sizeMiB === null ? "—" : result.sizeMiB.toFixed(2);
+          return `| ${result.name} | ${result.version} | ${result.threads} | ${result.provider} | ${stats.mean.toFixed(2)} | ${stats.median.toFixed(2)} | ${stats.p90.toFixed(2)} | ${result.firstRunMs.toFixed(2)} | ${size} |`;
         }).join("\n");
         return [
-          "## Browser model benchmark",
+          "## ONNX browser benchmark",
           "",
-          `- Created: ${report.createdAt}`,
-          `- Backend: ${report.backend}`,
-          `- WASM threads: ${report.wasmThreads}`,
-          `- Hardware concurrency: ${report.hardwareConcurrency ?? "unknown"}`,
-          `- Cross-origin isolated: ${report.crossOriginIsolated}`,
-          `- User agent: ${report.userAgent}`,
+          `- **Source:** \`${report.source.buildId}\``,
+          `- **System:** \`${report.userAgent}\` · \`${report.hardwareConcurrency ?? "unknown"} logical threads\``,
+          `- **Runtime:** ONNX Runtime Web · \`${report.backend}\` · \`${report.wasmThreads} WASM thread${report.wasmThreads === 1 ? "" : "s"}\``,
+          `- **Isolation:** cross-origin isolated \`${report.crossOriginIsolated}\``,
           "",
-          "| Model | Backend | Mean ms | Median ms | P90 ms | First run ms | Create ms |",
-          "|---|---:|---:|---:|---:|---:|---:|",
+          "Mean/median/P90 are steady-state ms; first run and warmups are excluded.",
+          "",
+          "| Model | Version | Threads | Provider | Mean ms | Median ms | P90 ms | First ms | Size MiB |",
+          "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
           rows,
           "",
-          "<details><summary>Full JSON report</summary>",
+          "<details>",
+          "<summary>Full JSON report</summary>",
           "",
           "```json",
           JSON.stringify(report, null, 2),
@@ -260,12 +290,15 @@
           await configureBackend();
           const report = {
             createdAt: new Date().toISOString(),
+            source: await collectBuildInfo(),
             userAgent: navigator.userAgent,
             crossOriginIsolated,
+            sharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
             hardwareConcurrency: navigator.hardwareConcurrency,
             benchmarkMode: "single-backend",
             backend,
-            wasmThreads: threads,
+            requestedWasmThreads: requestedThreads,
+            wasmThreads: actualThreads,
             warmupRuns: warmup,
             measuredRuns: runs,
             benchmarks: [],
