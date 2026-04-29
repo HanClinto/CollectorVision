@@ -91,14 +91,21 @@ mygui.addRow({
       const tableWrap = document.getElementById("table-wrap");
       const rows = [];
       const columns = [];
+      const logLines = [];
+      const LOG_LIMIT = 12;
       let handleCard = null;
 
       codeEditor.value = localStorage.getItem(CODE_KEY) || DEFAULT_HANDLER;
 
       function log(...parts) {
-        events.textContent = parts.map((part) => (
+        const line = parts.map((part) => (
           typeof part === "string" ? part : JSON.stringify(part, null, 2)
         )).join(" ");
+        logLines.unshift(`${new Date().toLocaleTimeString()}  ${line}`);
+        while (logLines.length > LOG_LIMIT) {
+          logLines.pop();
+        }
+        events.textContent = logLines.join("\n");
       }
 
       async function fetchJson(url, options) {
