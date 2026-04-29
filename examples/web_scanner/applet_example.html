@@ -4,6 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CollectorVision Applet Example</title>
+    <script>
+      // The main scanner page installs a cross-origin-isolation service worker
+      // for threaded WASM. This playground loads public Scryfall card art, which
+      // is not compatible with `Cross-Origin-Embedder-Policy: require-corp`, so
+      // opt out if an older service worker already isolated this page.
+      if (window.crossOriginIsolated && "serviceWorker" in navigator) {
+        navigator.serviceWorker.getRegistration("./").then((registration) => {
+          if (!registration) {
+            return;
+          }
+          return registration.unregister().then(() => window.location.reload());
+        });
+      }
+    </script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/themes/prism.min.css" />
     <link rel="stylesheet" href="./applet_example.css" />
   </head>

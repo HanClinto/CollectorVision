@@ -18,7 +18,16 @@
 
 /* eslint-env serviceworker */
 
-const SW_VERSION = 1;
+const SW_VERSION = 2;
+const NON_ISOLATED_DOCUMENTS = [
+  /\/applet_example\.html$/,
+];
+
+function shouldSkipIsolation(request) {
+  const url = new URL(request.url);
+  return request.mode === "navigate"
+    && NON_ISOLATED_DOCUMENTS.some((pattern) => pattern.test(url.pathname));
+}
 
 self.addEventListener("install", () => {
   // Skip waiting so the new SW takes over without requiring user navigation.
@@ -51,6 +60,15 @@ self.addEventListener("fetch", (event) => {
   // range requests (e.g. video seeks) are not compatible with Response
   // construction from a cloned body; skip them.
   if (request.headers.get("range")) {
+    return;
+  }
+
+  // The applet playground intentionally demonstrates arbitrary page behavior,
+  // including loading public Scryfall card art.  Scryfall's image CDN does not
+  // emit CORP/CORS headers, so a `require-corp` document would show only the
+  // image alt text in Firefox.  The applet does not need SharedArrayBuffer, so
+  // leave that document non-isolated.
+  if (shouldSkipIsolation(request)) {
     return;
   }
 

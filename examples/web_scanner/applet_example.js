@@ -201,7 +201,6 @@ function bounceCard(imageUrl, label = "Scanned card") {
   const origin = cameraRect();
   const image = document.createElement("img");
   image.className = "bouncing-card";
-  image.crossOrigin = "anonymous";
   image.referrerPolicy = "no-referrer";
   image.decoding = "async";
   image.alt = label;
