@@ -303,6 +303,25 @@ pre.function-signature[class*="language-"] {
   animation: price-pop 1.6s ease-out forwards;
 }
 
+.running-total {
+  position: fixed;
+  top: max(1rem, env(safe-area-inset-top));
+  right: max(1rem, env(safe-area-inset-right));
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  background: rgba(124, 45, 18, 0.76);
+  color: #fbbf24;
+  font-size: clamp(1.15rem, 4vw, 2.2rem);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  text-shadow: 0 0.12rem 0 #7c2d12, 0 0 1.2rem rgba(251, 191, 36, 0.7);
+  box-shadow: 0 0.6rem 1.5rem rgba(124, 45, 18, 0.28);
+}
+
+.running-total--pulse {
+  animation: total-grow 520ms ease-out;
+}
+
 .sparkle {
   position: absolute;
   left: 50%;
@@ -315,6 +334,12 @@ pre.function-signature[class*="language-"] {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.45); }
   22% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
   100% { opacity: 0; transform: translate(-50%, -50%) scale(1.75); }
+}
+
+@keyframes total-grow {
+  0% { transform: scale(1); }
+  38% { transform: scale(1.18); }
+  100% { transform: scale(1); }
 }
 
 @keyframes sparkle-pop {

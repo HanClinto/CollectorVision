@@ -97,6 +97,7 @@ const thresholdInput = document.getElementById("scan-threshold");
 const consecutiveInput = document.getElementById("scan-consecutive");
 const tableWrap = document.getElementById("table-wrap");
 const effectsLayer = document.getElementById("effects-layer");
+const totalLabel = document.createElement("div");
 
 const rows = [];
 const columns = [];
@@ -112,6 +113,9 @@ const codeEditor = CodeJar(
   { tab: "  " },
 );
 
+totalLabel.className = "running-total";
+totalLabel.hidden = true;
+effectsLayer.append(totalLabel);
 populatePresetSelect();
 populateScanSettings();
 codeEditor.updateCode(localStorage.getItem(CODE_KEY) || activePreset().code, false);
@@ -314,8 +318,19 @@ function priceBurst(name, usd) {
   log(name, usd > 0 ? `is worth $${usd.toFixed(2)}` : "has no USD price today");
 }
 
+function updateTotalLabel({ pulse = false } = {}) {
+  totalLabel.textContent = `Total $${runningTotal.toFixed(2)}`;
+  totalLabel.hidden = runningTotal <= 0;
+  if (pulse && runningTotal > 0) {
+    totalLabel.classList.remove("running-total--pulse");
+    void totalLabel.offsetWidth;
+    totalLabel.classList.add("running-total--pulse");
+  }
+}
+
 function addToTotal(amount) {
   runningTotal += Number.isFinite(amount) ? amount : 0;
+  updateTotalLabel({ pulse: amount > 0 });
   return runningTotal;
 }
 
@@ -344,6 +359,7 @@ const mygui = {
     rows.length = 0;
     columns.length = 0;
     runningTotal = 0;
+    updateTotalLabel();
     renderTable();
   },
   fetchJson,
