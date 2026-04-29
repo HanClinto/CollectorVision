@@ -18,16 +18,19 @@
       th, td { border-bottom: 1px solid #30363d; padding: 8px; text-align: right; }
       th:first-child, td:first-child { text-align: left; }
       pre { overflow: auto; border: 1px solid #30363d; border-radius: 12px; padding: 16px; background: #010409; }
+      textarea { width: 100%; min-height: 180px; box-sizing: border-box; border: 1px solid #30363d; border-radius: 12px; padding: 12px; background: #010409; color: #e6edf3; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      a.action-link, button.secondary { display: inline-block; margin: 8px 8px 8px 0; text-decoration: none; font: inherit; border-radius: 8px; border: 1px solid #30363d; padding: 8px 10px; background: #161b22; color: #e6edf3; }
+      a.action-link { cursor: pointer; }
       .muted { color: #8b949e; }
       .error { color: #ff7b72; }
+      .hidden { display: none; }
     </style>
   </head>
   <body>
     <main>
       <h1>CollectorVision ONNX Model Benchmark</h1>
       <p class="muted">
-        Serve this directory with <code>./scripts/run_web_scanner_local.sh</code>, then open this page on the target device.
-        It measures raw ONNX inference latency with synthetic tensors, which isolates model/runtime cost from camera and dewarp work.
+        This page measures raw ONNX inference latency with synthetic tensors, which isolates model/runtime cost from camera and dewarp work.
       </p>
 
       <fieldset>
@@ -64,12 +67,27 @@
 
       <div id="status" class="muted">Idle.</div>
       <div id="results"></div>
+
+      <fieldset id="share" class="hidden">
+        <legend>Share results</legend>
+        <p class="muted">
+          GitHub does not allow a static page to submit an issue comment directly. Use the button below to copy a ready-to-post comment, then paste it into the canonical benchmark issue.
+        </p>
+        <button id="copy-comment" class="secondary" type="button" disabled>Copy GitHub comment</button>
+        <button id="copy-open-issue" class="secondary" type="button" disabled>Copy comment and open issue</button>
+        <button id="share-download" class="secondary" type="button" disabled>Download JSON</button>
+        <a id="issue-link" class="action-link" href="https://github.com/HanClinto/CollectorVision/issues/16#issuecomment-new" target="_blank" rel="noopener">Open benchmark issue</a>
+        <textarea id="comment" readonly></textarea>
+      </fieldset>
+
       <h2>JSON report</h2>
       <pre id="json">{}</pre>
     </main>
 
     <script type="module">
       import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs";
+
+      const BENCHMARK_ISSUE_URL = "https://github.com/HanClinto/CollectorVision/issues/16#issuecomment-new";
 
       const MODELS = [
         { name: "cornelius", path: "./assets/models/cornelius.onnx", shape: [1, 3, 384, 384] },
@@ -82,12 +100,44 @@
       const runButton = document.getElementById("run");
       const downloadButton = document.getElementById("download");
       const backButton = document.getElementById("back");
+      const copyCommentButton = document.getElementById("copy-comment");
+      const copyOpenIssueButton = document.getElementById("copy-open-issue");
+      const shareDownloadButton = document.getElementById("share-download");
+      const issueLink = document.getElementById("issue-link");
+      const shareEl = document.getElementById("share");
+      const commentEl = document.getElementById("comment");
+      const lockedControls = [
+        document.getElementById("backend"),
+        document.getElementById("threads"),
+        document.getElementById("warmup"),
+        document.getElementById("runs"),
+        runButton,
+      ];
       const params = new URLSearchParams(location.search);
       const initialBackend = params.get("backend");
       if (["wasm", "webgpu"].includes(initialBackend)) {
         document.getElementById("backend").value = initialBackend;
       }
       let lastReport = null;
+
+      issueLink.href = BENCHMARK_ISSUE_URL;
+
+      function setRunning(isRunning) {
+        for (const control of lockedControls) {
+          control.disabled = isRunning;
+        }
+        if (isRunning) {
+          downloadButton.disabled = true;
+          shareDownloadButton.disabled = true;
+          copyCommentButton.disabled = true;
+          copyOpenIssueButton.disabled = true;
+        } else if (lastReport) {
+          downloadButton.disabled = false;
+          shareDownloadButton.disabled = false;
+          copyCommentButton.disabled = false;
+          copyOpenIssueButton.disabled = false;
+        }
+      }
 
       function percentile(values, pct) {
         const sorted = [...values].sort((a, b) => a - b);
@@ -201,6 +251,63 @@
           })),
         };
         jsonEl.textContent = JSON.stringify(rounded, null, 2);
+        commentEl.value = formatMarkdownReport(rounded);
+        shareEl.classList.remove("hidden");
+        copyCommentButton.disabled = false;
+        copyOpenIssueButton.disabled = false;
+        shareDownloadButton.disabled = false;
+      }
+
+      function formatMarkdownReport(report) {
+        const rows = report.benchmarks.map((result) => {
+          const stats = result.latencyMs;
+          return `| ${result.name} | ${result.backend} | ${stats.mean.toFixed(1)} | ${stats.median.toFixed(1)} | ${stats.p90.toFixed(1)} | ${result.firstRunMs.toFixed(1)} | ${result.sessionCreateMs.toFixed(1)} |`;
+        }).join("\n");
+        return [
+          "## Browser model benchmark",
+          "",
+          `- Created: ${report.createdAt}`,
+          `- Backend: ${report.backend}`,
+          `- WASM threads: ${report.wasmThreads}`,
+          `- Hardware concurrency: ${report.hardwareConcurrency ?? "unknown"}`,
+          `- Cross-origin isolated: ${report.crossOriginIsolated}`,
+          `- User agent: ${report.userAgent}`,
+          "",
+          "| Model | Backend | Mean ms | Median ms | P90 ms | First run ms | Create ms |",
+          "|---|---:|---:|---:|---:|---:|---:|",
+          rows,
+          "",
+          "<details><summary>Full JSON report</summary>",
+          "",
+          "```json",
+          JSON.stringify(report, null, 2),
+          "```",
+          "</details>",
+        ].join("\n");
+      }
+
+      async function copyText(text) {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+        commentEl.focus();
+        commentEl.select();
+        document.execCommand("copy");
+      }
+
+      async function copyComment() {
+        if (!commentEl.value) {
+          return;
+        }
+        await copyText(commentEl.value);
+        statusEl.className = "muted";
+        statusEl.textContent = "Copied GitHub comment Markdown to clipboard.";
+      }
+
+      async function copyCommentAndOpenIssue() {
+        await copyComment();
+        window.open(BENCHMARK_ISSUE_URL, "_blank", "noopener");
       }
 
       function downloadReport() {
@@ -226,9 +333,11 @@
       }
 
       async function runBenchmark() {
-        runButton.disabled = true;
-        downloadButton.disabled = true;
+        setRunning(true);
         resultsEl.innerHTML = "";
+        shareEl.classList.add("hidden");
+        commentEl.value = "";
+        lastReport = null;
         statusEl.className = "muted";
         try {
           const backend = document.getElementById("backend").value;
@@ -261,13 +370,16 @@
           statusEl.className = "error";
           statusEl.textContent = error instanceof Error ? error.message : String(error);
         } finally {
-          runButton.disabled = false;
+          setRunning(false);
         }
       }
 
       runButton.addEventListener("click", runBenchmark);
       downloadButton.addEventListener("click", downloadReport);
+      shareDownloadButton.addEventListener("click", downloadReport);
       backButton.addEventListener("click", returnToScanner);
+      copyCommentButton.addEventListener("click", copyComment);
+      copyOpenIssueButton.addEventListener("click", copyCommentAndOpenIssue);
 
       if (params.get("autorun") === "1") {
         runBenchmark();
