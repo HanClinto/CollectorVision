@@ -230,15 +230,15 @@ export class CollectorVisionScannerApplet extends EventTarget {
       <style>
         .cv-applet { position: relative; display: grid; gap: 0.65rem; width: 100%; max-width: 28rem; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #f8fafc; }
         .cv-applet__stage { position: relative; overflow: hidden; border-radius: 1rem; background: #020617; aspect-ratio: 16 / 9; box-shadow: 0 1rem 3rem rgba(2, 6, 23, 0.28); }
-        .cv-applet__canvas { display: block; width: 100%; height: 100%; object-fit: cover; }
+        .cv-applet__video { display: block; width: 100%; height: 100%; object-fit: cover; }
+        .cv-applet__canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; pointer-events: none; }
         .cv-applet__status { margin: 0; padding: 0.65rem 0.75rem; border-radius: 0.75rem; background: rgba(15, 23, 42, 0.86); color: #e2e8f0; font-size: 0.9rem; }
-        .cv-applet__video { display: none; }
       </style>
       <div class="cv-applet__stage">
+        <video class="cv-applet__video" playsinline muted></video>
         <canvas class="cv-applet__canvas"></canvas>
       </div>
       <p class="cv-applet__status">Idle.</p>
-      <video class="cv-applet__video" playsinline muted></video>
     `;
     return {
       root,
@@ -363,13 +363,7 @@ export class CollectorVisionScannerApplet extends EventTarget {
       return;
     }
     this.resizeCanvas();
-    this.ctx.drawImage(
-      this.elements.video,
-      0,
-      0,
-      this.elements.canvas.width,
-      this.elements.canvas.height,
-    );
+    this.ctx.clearRect(0, 0, this.elements.canvas.width, this.elements.canvas.height);
     this.drawOverlay(this.lastResult);
   }
 
