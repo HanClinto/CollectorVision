@@ -27,9 +27,9 @@
             <p>Start with the Scryfall example, or change the rows, logs, and fetches to fit your own page.</p>
           </div>
           <div class="handler-frame" aria-label="Card scan handler function">
-            <pre class="function-signature"><code>async function onCardScanned(card, mygui) {</code></pre>
+            <pre class="function-signature"><code class="language-javascript">async function onCardScanned(card, mygui) {</code></pre>
             <div id="handler-code" class="editor-shell language-javascript" aria-label="Editable JavaScript function body"></div>
-            <pre class="function-signature"><code>}</code></pre>
+            <pre class="function-signature"><code class="language-javascript">}</code></pre>
           </div>
           <div class="editor-meta">
             <span class="pill">Available: <code>card</code></span>
@@ -85,6 +85,9 @@
 
       const codeEditor = CodeJar(editorElement, (editor) => window.Prism.highlightElement(editor), { tab: "  " });
       codeEditor.updateCode(localStorage.getItem(CODE_KEY) || DEFAULT_HANDLER, false);
+      document.querySelectorAll(".function-signature code").forEach((element) => {
+        window.Prism.highlightElement(element);
+      });
 
       function log(...parts) {
         const line = parts.map((part) => (

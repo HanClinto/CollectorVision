@@ -22,6 +22,7 @@ tr:last-child td { border-bottom: 0; }
 .handler-frame { overflow: hidden; border: 1px solid rgba(36, 33, 31, 0.14); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.66); }
 .function-signature { min-height: 0; border: 0; border-radius: 0; padding: 0.35rem 1rem; background: rgba(36, 33, 31, 0.06); color: #665f56; font: 0.95rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.4; white-space: pre; }
 .function-signature code { padding: 0; background: transparent; font-size: inherit; }
+.function-signature .token { background: transparent; }
 .editor-shell { min-height: 19rem; box-sizing: border-box; padding: 0.85rem 1rem 0.85rem 2rem; overflow: auto; border: 0; border-top: 1px solid rgba(36, 33, 31, 0.1); border-bottom: 1px solid rgba(36, 33, 31, 0.1); background: transparent; font: 0.95rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.5; tab-size: 2; white-space: pre-wrap; }
 .editor-shell:focus { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.22); }
 .editor-shell .token { background: transparent; }
