@@ -305,8 +305,9 @@ pre.function-signature[class*="language-"] {
 
 .running-total {
   position: fixed;
-  top: max(1rem, env(safe-area-inset-top));
-  right: max(1rem, env(safe-area-inset-right));
+  top: 1rem;
+  right: 1rem;
+  z-index: 3;
   border-radius: 999px;
   padding: 0.45rem 0.8rem;
   background: rgba(124, 45, 18, 0.76);
