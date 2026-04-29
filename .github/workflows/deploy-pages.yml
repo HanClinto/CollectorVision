@@ -55,6 +55,7 @@ jobs:
           SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
           sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/app.js
           sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/index.html
+          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/applet_example.html
           sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/build.json
           echo "Stamped build ID: ${SHORT_SHA}"
 
