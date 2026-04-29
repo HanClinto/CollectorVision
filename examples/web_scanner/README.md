@@ -126,10 +126,12 @@ real inference path on a known card image.
 For raw model latency, open Settings → Model Benchmark or visit
 `http://localhost:8040/model_benchmark.html`.  WASM and WebGPU are intentionally
 run as separate benchmark pages so a backend crash does not lose another
-backend's report.  Direct autorun links:
+backend's report.  The benchmark runs immediately and downloads a Markdown
+report that can be pasted into the canonical GitHub benchmark issue. Direct
+links:
 
-- WASM: `http://localhost:8040/model_benchmark.html?backend=wasm&autorun=1&download=1&return=1`
-- WebGPU: `http://localhost:8040/model_benchmark.html?backend=webgpu&autorun=1&download=1&return=1`
+- WASM: `http://localhost:8040/model_benchmark.html?backend=wasm&download=md`
+- WebGPU: `http://localhost:8040/model_benchmark.html?backend=webgpu&download=md`
 
 ## Nice To Have Later
 

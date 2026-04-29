@@ -230,9 +230,9 @@
                 <h2>Model Benchmark</h2>
               </div>
             </header>
-            <p class="capture-hint">Runs raw Cornelius and Milo ONNX inference benchmarks on this browser/device. WASM and WebGPU are separate runs so a crash in one backend does not lose the other report.</p>
-            <a class="action-button action-button--block" href="./model_benchmark.html?backend=wasm&amp;autorun=1&amp;download=1&amp;return=1">▶ Run WASM Benchmark</a>
-            <a class="action-button action-button--block" href="./model_benchmark.html?backend=webgpu&amp;autorun=1&amp;download=1&amp;return=1">▶ Run WebGPU Benchmark</a>
+            <p class="capture-hint">Runs the model benchmark and downloads a GitHub-ready Markdown report. WASM is recommended; WebGPU is experimental.</p>
+            <a class="action-button action-button--block" href="./model_benchmark.html?backend=wasm&amp;download=md">▶ Run WASM Benchmark</a>
+            <a class="action-button action-button--block" href="./model_benchmark.html?backend=webgpu&amp;download=md">▶ Run WebGPU Benchmark</a>
           </section>
 
           <section class="panel panel--nested">

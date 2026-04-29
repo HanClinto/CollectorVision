@@ -3,141 +3,81 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CollectorVision ONNX Model Benchmark</title>
+    <title>CollectorVision Benchmark</title>
     <style>
-      :root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      body { margin: 0; padding: 24px; background: #0d1117; color: #e6edf3; }
-      main { max-width: 980px; margin: 0 auto; }
-      h1 { margin-top: 0; }
-      fieldset { border: 1px solid #30363d; border-radius: 12px; padding: 16px; margin: 16px 0; }
-      label { display: inline-flex; flex-direction: column; gap: 6px; margin: 8px 16px 8px 0; color: #c9d1d9; }
-      input, select, button { font: inherit; border-radius: 8px; border: 1px solid #30363d; padding: 8px 10px; background: #161b22; color: #e6edf3; }
-      button { cursor: pointer; background: #238636; border-color: #2ea043; font-weight: 700; }
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at top, #172033, #070a10 65%); color: #e6edf3; }
+      main { width: min(760px, 100%); }
+      .card { border: 1px solid #30363d; border-radius: 24px; padding: clamp(24px, 5vw, 44px); background: rgba(13, 17, 23, 0.88); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42); }
+      .eyebrow { margin: 0 0 10px; color: #8b949e; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; }
+      h1 { margin: 0; font-size: clamp(2rem, 7vw, 4rem); line-height: 0.95; }
+      p { color: #c9d1d9; line-height: 1.55; }
+      .status { margin: 24px 0; padding: 16px; border: 1px solid #30363d; border-radius: 16px; background: #010409; color: #c9d1d9; }
+      .status--error { color: #ffb4ab; border-color: #8e2727; background: rgba(142, 39, 39, 0.18); }
+      .actions { display: grid; gap: 12px; margin-top: 20px; }
+      button, a.button { box-sizing: border-box; width: 100%; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid #30363d; border-radius: 14px; padding: 12px 16px; background: #238636; color: #fff; font: inherit; font-weight: 800; text-decoration: none; cursor: pointer; }
+      button.secondary, a.button.secondary { background: #161b22; color: #e6edf3; }
       button:disabled { cursor: wait; opacity: 0.65; }
-      table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-      th, td { border-bottom: 1px solid #30363d; padding: 8px; text-align: right; }
+      table { width: 100%; border-collapse: collapse; margin-top: 20px; overflow: hidden; border-radius: 14px; }
+      th, td { border-bottom: 1px solid #30363d; padding: 10px 8px; text-align: right; }
       th:first-child, td:first-child { text-align: left; }
-      pre { overflow: auto; border: 1px solid #30363d; border-radius: 12px; padding: 16px; background: #010409; }
-      textarea { width: 100%; min-height: 180px; box-sizing: border-box; border: 1px solid #30363d; border-radius: 12px; padding: 12px; background: #010409; color: #e6edf3; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-      a.action-link, button.secondary { display: inline-block; margin: 8px 8px 8px 0; text-decoration: none; font: inherit; border-radius: 8px; border: 1px solid #30363d; padding: 8px 10px; background: #161b22; color: #e6edf3; }
-      a.action-link { cursor: pointer; }
-      .muted { color: #8b949e; }
-      .error { color: #ff7b72; }
+      textarea { width: 100%; min-height: 220px; box-sizing: border-box; margin-top: 14px; border: 1px solid #30363d; border-radius: 14px; padding: 14px; background: #010409; color: #e6edf3; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
       .hidden { display: none; }
+      .muted { color: #8b949e; }
+      @media (min-width: 680px) { .actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .actions .wide { grid-column: 1 / -1; } }
     </style>
   </head>
   <body>
     <main>
-      <h1>CollectorVision ONNX Model Benchmark</h1>
-      <p class="muted">
-        This page measures raw ONNX inference latency with synthetic tensors, which isolates model/runtime cost from camera and dewarp work.
-      </p>
-
-      <fieldset>
-        <legend>Settings</legend>
-        <label>
-          Backend
-          <select id="backend">
-            <option value="wasm" selected>WASM</option>
-            <option value="webgpu">WebGPU</option>
-          </select>
-        </label>
-        <label>
-          Threads
-          <input id="threads" type="number" min="1" max="8" value="4" />
-        </label>
-        <label>
-          Warmup runs
-          <input id="warmup" type="number" min="0" max="100" value="10" />
-        </label>
-        <label>
-          Measured runs
-          <input id="runs" type="number" min="1" max="500" value="50" />
-        </label>
-        <button id="run">Run benchmark</button>
-        <button id="download" type="button" disabled>Download JSON</button>
-        <button id="back" type="button">Back to scanner</button>
-        <p class="muted">
-          Safer separate runs:
-          <a href="./model_benchmark.html?backend=wasm&amp;autorun=1&amp;download=1">WASM only</a>
-          ·
-          <a href="./model_benchmark.html?backend=webgpu&amp;autorun=1&amp;download=1">WebGPU only</a>
-        </p>
-      </fieldset>
-
-      <div id="status" class="muted">Idle.</div>
-      <div id="results"></div>
-
-      <fieldset id="share" class="hidden">
-        <legend>Share results</legend>
-        <p class="muted">
-          GitHub does not allow a static page to submit an issue comment directly. Use the button below to copy a ready-to-post comment, then paste it into the canonical benchmark issue.
-        </p>
-        <button id="copy-comment" class="secondary" type="button" disabled>Copy GitHub comment</button>
-        <button id="copy-open-issue" class="secondary" type="button" disabled>Copy comment and open issue</button>
-        <button id="share-download" class="secondary" type="button" disabled>Download JSON</button>
-        <a id="issue-link" class="action-link" href="https://github.com/HanClinto/CollectorVision/issues/16#issuecomment-new" target="_blank" rel="noopener">Open benchmark issue</a>
-        <textarea id="comment" readonly></textarea>
-      </fieldset>
-
-      <h2>JSON report</h2>
-      <pre id="json">{}</pre>
+      <section class="card">
+        <p class="eyebrow">CollectorVision</p>
+        <h1 id="title">Browser benchmark</h1>
+        <p id="intro">Running raw ONNX inference on this browser/device and preparing a GitHub-ready Markdown report.</p>
+        <div id="status" class="status">Starting benchmark…</div>
+        <div id="results"></div>
+        <div id="done" class="hidden">
+          <p class="muted">The Markdown report below includes the summary table and full JSON payload. Download it or copy it into the canonical benchmark issue.</p>
+          <div class="actions">
+            <button id="download-md" type="button">Download Markdown report</button>
+            <button id="copy-comment" type="button" class="secondary">Copy Markdown</button>
+            <button id="copy-open-issue" type="button" class="secondary wide">Copy Markdown and open GitHub issue</button>
+            <a class="button secondary" href="./index.html">Back to scanner</a>
+            <a id="issue-link" class="button secondary" href="https://github.com/HanClinto/CollectorVision/issues/16#issuecomment-new" target="_blank" rel="noopener">Open GitHub issue</a>
+          </div>
+          <textarea id="comment" readonly></textarea>
+        </div>
+      </section>
     </main>
 
     <script type="module">
       import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs";
 
       const BENCHMARK_ISSUE_URL = "https://github.com/HanClinto/CollectorVision/issues/16#issuecomment-new";
-
+      const params = new URLSearchParams(location.search);
+      const backend = params.get("backend") === "webgpu" ? "webgpu" : "wasm";
+      const threads = 4;
+      const warmup = 10;
+      const runs = 50;
       const MODELS = [
         { name: "cornelius", path: "./assets/models/cornelius.onnx", shape: [1, 3, 384, 384] },
         { name: "milo", path: "./assets/models/milo.onnx", shape: [1, 3, 448, 448] },
       ];
 
+      const titleEl = document.getElementById("title");
+      const introEl = document.getElementById("intro");
       const statusEl = document.getElementById("status");
       const resultsEl = document.getElementById("results");
-      const jsonEl = document.getElementById("json");
-      const runButton = document.getElementById("run");
-      const downloadButton = document.getElementById("download");
-      const backButton = document.getElementById("back");
+      const doneEl = document.getElementById("done");
+      const commentEl = document.getElementById("comment");
+      const downloadButton = document.getElementById("download-md");
       const copyCommentButton = document.getElementById("copy-comment");
       const copyOpenIssueButton = document.getElementById("copy-open-issue");
-      const shareDownloadButton = document.getElementById("share-download");
       const issueLink = document.getElementById("issue-link");
-      const shareEl = document.getElementById("share");
-      const commentEl = document.getElementById("comment");
-      const lockedControls = [
-        document.getElementById("backend"),
-        document.getElementById("threads"),
-        document.getElementById("warmup"),
-        document.getElementById("runs"),
-        runButton,
-      ];
-      const params = new URLSearchParams(location.search);
-      const initialBackend = params.get("backend");
-      if (["wasm", "webgpu"].includes(initialBackend)) {
-        document.getElementById("backend").value = initialBackend;
-      }
-      let lastReport = null;
-
       issueLink.href = BENCHMARK_ISSUE_URL;
+      titleEl.textContent = `${backend.toUpperCase()} browser benchmark`;
+      introEl.textContent = `Running Cornelius and Milo with ${backend.toUpperCase()} and preparing a GitHub-ready Markdown report.`;
 
-      function setRunning(isRunning) {
-        for (const control of lockedControls) {
-          control.disabled = isRunning;
-        }
-        if (isRunning) {
-          downloadButton.disabled = true;
-          shareDownloadButton.disabled = true;
-          copyCommentButton.disabled = true;
-          copyOpenIssueButton.disabled = true;
-        } else if (lastReport) {
-          downloadButton.disabled = false;
-          shareDownloadButton.disabled = false;
-          copyCommentButton.disabled = false;
-          copyOpenIssueButton.disabled = false;
-        }
-      }
+      let markdownReport = "";
 
       function percentile(values, pct) {
         const sorted = [...values].sort((a, b) => a - b);
@@ -161,16 +101,6 @@
         };
       }
 
-      function makeTensor(shape) {
-        const size = shape.reduce((product, value) => product * value, 1);
-        const data = new Float32Array(size);
-        for (let i = 0; i < data.length; i += 1) {
-          // Deterministic ImageNet-normalised-ish input.
-          data[i] = Math.sin(i * 0.013) * 1.2;
-        }
-        return data;
-      }
-
       function roundStats(stats) {
         return Object.fromEntries(Object.entries(stats).map(([key, value]) => [
           key,
@@ -178,13 +108,22 @@
         ]));
       }
 
-      async function configureBackend(backend, threads) {
+      function makeTensor(shape) {
+        const size = shape.reduce((product, value) => product * value, 1);
+        const data = new Float32Array(size);
+        for (let i = 0; i < data.length; i += 1) {
+          data[i] = Math.sin(i * 0.013) * 1.2;
+        }
+        return data;
+      }
+
+      async function configureBackend() {
         ort.env.wasm.numThreads = threads;
         if (backend !== "webgpu") {
           return;
         }
         if (!("gpu" in navigator)) {
-          throw new Error("navigator.gpu is unavailable on this browser/device.");
+          throw new Error("WebGPU is unavailable on this browser/device.");
         }
         const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
         if (!adapter) {
@@ -194,28 +133,27 @@
         ort.env.webgpu.forceFp16 = false;
       }
 
-      async function benchmarkModel(model, backend, warmup, runs) {
-        statusEl.textContent = `Loading ${model.name}...`;
+      async function benchmarkModel(model) {
+        statusEl.textContent = `Loading ${model.name}…`;
         const createStart = performance.now();
         const session = await ort.InferenceSession.create(model.path, { executionProviders: [backend] });
         const sessionCreateMs = performance.now() - createStart;
         const inputName = session.inputNames[0];
-        const input = new ort.Tensor("float32", makeTensor(model.shape), model.shape);
-        const feeds = { [inputName]: input };
+        const feeds = { [inputName]: new ort.Tensor("float32", makeTensor(model.shape), model.shape) };
 
-        statusEl.textContent = `Running ${model.name} first pass...`;
+        statusEl.textContent = `Running first ${model.name} pass…`;
         const firstStart = performance.now();
         await session.run(feeds);
         const firstRunMs = performance.now() - firstStart;
 
-        statusEl.textContent = `Warming ${model.name}...`;
+        statusEl.textContent = `Warming ${model.name}…`;
         for (let i = 0; i < warmup; i += 1) {
           await session.run(feeds);
         }
 
         const timings = [];
         for (let i = 0; i < runs; i += 1) {
-          statusEl.textContent = `Measuring ${model.name} ${i + 1}/${runs}...`;
+          statusEl.textContent = `Measuring ${model.name} ${i + 1}/${runs}…`;
           const start = performance.now();
           await session.run(feeds);
           timings.push(performance.now() - start);
@@ -233,15 +171,16 @@
         };
       }
 
-      function render(report) {
-        lastReport = report;
-        downloadButton.disabled = false;
+      function renderSummary(report) {
         const rows = report.benchmarks.map((result) => {
           const stats = result.latencyMs;
-          return `<tr><td>${result.name}</td><td>${result.backend}</td><td>${stats.mean.toFixed(1)}</td><td>${stats.median.toFixed(1)}</td><td>${stats.p90.toFixed(1)}</td><td>${result.firstRunMs.toFixed(1)}</td><td>${result.sessionCreateMs.toFixed(1)}</td></tr>`;
+          return `<tr><td>${result.name}</td><td>${stats.mean.toFixed(1)}</td><td>${stats.p90.toFixed(1)}</td><td>${result.firstRunMs.toFixed(1)}</td></tr>`;
         }).join("");
-        resultsEl.innerHTML = `<table><thead><tr><th>Model</th><th>Backend</th><th>Mean ms</th><th>Median ms</th><th>P90 ms</th><th>First run ms</th><th>Create ms</th></tr></thead><tbody>${rows}</tbody></table>`;
-        const rounded = {
+        resultsEl.innerHTML = `<table><thead><tr><th>Model</th><th>Mean ms</th><th>P90 ms</th><th>First ms</th></tr></thead><tbody>${rows}</tbody></table>`;
+      }
+
+      function roundedReport(report) {
+        return {
           ...report,
           benchmarks: report.benchmarks.map((result) => ({
             ...result,
@@ -250,12 +189,6 @@
             latencyMs: roundStats(result.latencyMs),
           })),
         };
-        jsonEl.textContent = JSON.stringify(rounded, null, 2);
-        commentEl.value = formatMarkdownReport(rounded);
-        shareEl.classList.remove("hidden");
-        copyCommentButton.disabled = false;
-        copyOpenIssueButton.disabled = false;
-        shareDownloadButton.disabled = false;
       }
 
       function formatMarkdownReport(report) {
@@ -286,65 +219,45 @@
         ].join("\n");
       }
 
-      async function copyText(text) {
-        if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(text);
+      function downloadMarkdown() {
+        if (!markdownReport) {
           return;
         }
-        commentEl.focus();
-        commentEl.select();
-        document.execCommand("copy");
-      }
-
-      async function copyComment() {
-        if (!commentEl.value) {
-          return;
-        }
-        await copyText(commentEl.value);
-        statusEl.className = "muted";
-        statusEl.textContent = "Copied GitHub comment Markdown to clipboard.";
-      }
-
-      async function copyCommentAndOpenIssue() {
-        await copyComment();
-        window.open(BENCHMARK_ISSUE_URL, "_blank", "noopener");
-      }
-
-      function downloadReport() {
-        if (!lastReport) {
-          return;
-        }
-        const text = jsonEl.textContent || JSON.stringify(lastReport, null, 2);
-        const blob = new Blob([text], { type: "application/json" });
+        const blob = new Blob([markdownReport], { type: "text/markdown" });
         const url = URL.createObjectURL(blob);
         const stamp = new Date().toISOString().replace(/[:.]/g, "-");
         const a = document.createElement("a");
         a.href = url;
-        const backend = lastReport.backend || "unknown";
-        a.download = `collectorvision-model-benchmark-${backend}-${stamp}.json`;
+        a.download = `collectorvision-model-benchmark-${backend}-${stamp}.md`;
         document.body.append(a);
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
       }
 
-      function returnToScanner() {
-        location.href = "./index.html";
+      async function copyMarkdown() {
+        if (!markdownReport) {
+          return;
+        }
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(markdownReport);
+        } else {
+          commentEl.focus();
+          commentEl.select();
+          document.execCommand("copy");
+        }
+        statusEl.className = "status";
+        statusEl.textContent = "Copied Markdown to clipboard.";
+      }
+
+      async function copyAndOpenIssue() {
+        await copyMarkdown();
+        window.open(BENCHMARK_ISSUE_URL, "_blank", "noopener");
       }
 
       async function runBenchmark() {
-        setRunning(true);
-        resultsEl.innerHTML = "";
-        shareEl.classList.add("hidden");
-        commentEl.value = "";
-        lastReport = null;
-        statusEl.className = "muted";
         try {
-          const backend = document.getElementById("backend").value;
-          const threads = Number(document.getElementById("threads").value);
-          const warmup = Number(document.getElementById("warmup").value);
-          const runs = Number(document.getElementById("runs").value);
-          await configureBackend(backend, threads);
+          await configureBackend();
           const report = {
             createdAt: new Date().toISOString(),
             userAgent: navigator.userAgent,
@@ -353,37 +266,32 @@
             benchmarkMode: "single-backend",
             backend,
             wasmThreads: threads,
+            warmupRuns: warmup,
+            measuredRuns: runs,
             benchmarks: [],
           };
           for (const model of MODELS) {
-            report.benchmarks.push(await benchmarkModel(model, backend, warmup, runs));
-            render(report);
+            report.benchmarks.push(await benchmarkModel(model));
+            renderSummary(report);
           }
-          statusEl.textContent = "Done.";
-          if (params.get("download") === "1") {
-            downloadReport();
-          }
-          if (params.get("return") === "1") {
-            setTimeout(returnToScanner, 750);
+          const rounded = roundedReport(report);
+          markdownReport = formatMarkdownReport(rounded);
+          commentEl.value = markdownReport;
+          doneEl.classList.remove("hidden");
+          statusEl.textContent = "Done. Download or copy the Markdown report, then post it to GitHub.";
+          if (params.get("download") === "1" || params.get("download") === "md") {
+            downloadMarkdown();
           }
         } catch (error) {
-          statusEl.className = "error";
+          statusEl.className = "status status--error";
           statusEl.textContent = error instanceof Error ? error.message : String(error);
-        } finally {
-          setRunning(false);
         }
       }
 
-      runButton.addEventListener("click", runBenchmark);
-      downloadButton.addEventListener("click", downloadReport);
-      shareDownloadButton.addEventListener("click", downloadReport);
-      backButton.addEventListener("click", returnToScanner);
-      copyCommentButton.addEventListener("click", copyComment);
-      copyOpenIssueButton.addEventListener("click", copyCommentAndOpenIssue);
-
-      if (params.get("autorun") === "1") {
-        runBenchmark();
-      }
+      downloadButton.addEventListener("click", downloadMarkdown);
+      copyCommentButton.addEventListener("click", copyMarkdown);
+      copyOpenIssueButton.addEventListener("click", copyAndOpenIssue);
+      runBenchmark();
     </script>
   </body>
 </html>

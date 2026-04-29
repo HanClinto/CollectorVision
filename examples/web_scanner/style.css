@@ -478,11 +478,17 @@ h2 {
 }
 
 .action-button--block {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   width: 100%;
   border-right: 0;
   border-radius: 0.85rem;
   border: 1px solid var(--line);
   background: var(--accent-soft);
+  margin-top: 0.65rem;
+  text-align: center;
 }
 
 .scan-list {
