@@ -140,10 +140,13 @@ export class CollectorVisionScannerApplet extends EventTarget {
     this.manifest = null;
     this.stream = null;
     this.timer = null;
+    this.previewFrame = null;
     this.workerBusy = false;
     this.ready = false;
     this.started = false;
     this.lastResult = null;
+    this.captureCanvas = document.createElement("canvas");
+    this.captureCtx = this.captureCanvas.getContext("2d");
     this.elements = this.createElements();
     this.mount();
   }
@@ -181,13 +184,18 @@ export class CollectorVisionScannerApplet extends EventTarget {
     this.started = true;
     this.setStatus(this.ready ? "Scanning…" : "Camera ready. Loading models…");
     this.timer = window.setInterval(() => this.tick(), this.config.scanIntervalMs);
-    this.drawPreview();
+    this.startPreviewLoop();
+    this.tick();
   }
 
   stop() {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    if (this.previewFrame) {
+      cancelAnimationFrame(this.previewFrame);
+      this.previewFrame = null;
     }
     this.started = false;
     this.workerBusy = false;
@@ -281,7 +289,6 @@ export class CollectorVisionScannerApplet extends EventTarget {
     this.lastResult = result;
     this.emit("result", result);
     this.config.onResult?.(result, this);
-    this.drawOverlay(result);
 
     if (!result.cardPresent || !result.cornersValid) {
       this.bucket.push(null);
@@ -324,18 +331,31 @@ export class CollectorVisionScannerApplet extends EventTarget {
   }
 
   async tick() {
-    this.drawPreview();
     if (!this.ready || this.workerBusy || !this.started) {
+      return;
+    }
+    if (!this.drawCaptureFrame()) {
       return;
     }
     this.workerBusy = true;
     try {
-      const bitmap = await createImageBitmap(this.elements.canvas);
+      const bitmap = await createImageBitmap(this.captureCanvas);
       this.worker.postMessage({ type: "frame", bitmap }, [bitmap]);
     } catch (error) {
       this.workerBusy = false;
       this.handleError(error);
     }
+  }
+
+  startPreviewLoop() {
+    if (this.previewFrame) {
+      return;
+    }
+    const render = () => {
+      this.drawPreview();
+      this.previewFrame = this.started ? requestAnimationFrame(render) : null;
+    };
+    this.previewFrame = requestAnimationFrame(render);
   }
 
   drawPreview() {
@@ -350,6 +370,22 @@ export class CollectorVisionScannerApplet extends EventTarget {
       this.elements.canvas.width,
       this.elements.canvas.height,
     );
+    this.drawOverlay(this.lastResult);
+  }
+
+  drawCaptureFrame() {
+    if (!this.stream || !this.elements.video.videoWidth) {
+      return false;
+    }
+    this.resizeCanvas();
+    this.captureCtx.drawImage(
+      this.elements.video,
+      0,
+      0,
+      this.captureCanvas.width,
+      this.captureCanvas.height,
+    );
+    return true;
   }
 
   resizeCanvas() {
@@ -358,6 +394,10 @@ export class CollectorVisionScannerApplet extends EventTarget {
     if (this.elements.canvas.width !== width || this.elements.canvas.height !== height) {
       this.elements.canvas.width = width;
       this.elements.canvas.height = height;
+    }
+    if (this.captureCanvas.width !== width || this.captureCanvas.height !== height) {
+      this.captureCanvas.width = width;
+      this.captureCanvas.height = height;
     }
   }
 
