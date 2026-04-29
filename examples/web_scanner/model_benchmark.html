@@ -56,7 +56,10 @@
       const params = new URLSearchParams(location.search);
       const backend = params.get("backend") === "webgpu" ? "webgpu" : "wasm";
       const requestedThreads = 4;
-      const actualThreads = crossOriginIsolated && typeof SharedArrayBuffer !== "undefined" ? requestedThreads : 1;
+      const maxWasmThreads = crossOriginIsolated && typeof SharedArrayBuffer !== "undefined"
+        ? Math.max(1, Math.min(requestedThreads, navigator.hardwareConcurrency || requestedThreads))
+        : 1;
+      const threadSweep = backend === "wasm" && maxWasmThreads > 1 ? [1, maxWasmThreads] : [1];
       const warmup = 10;
       const runs = 50;
       const MODELS = [
@@ -140,8 +143,8 @@
         }
       }
 
-      async function configureBackend() {
-        ort.env.wasm.numThreads = actualThreads;
+      async function configureBackend(threadCount) {
+        ort.env.wasm.numThreads = threadCount;
         if (backend !== "webgpu") {
           return;
         }
@@ -156,8 +159,8 @@
         ort.env.webgpu.forceFp16 = false;
       }
 
-      async function benchmarkModel(model) {
-        statusEl.textContent = `Loading ${model.name}…`;
+      async function benchmarkModel(model, threadCount) {
+        statusEl.textContent = `Loading ${model.name} with ${threadCount} thread${threadCount === 1 ? "" : "s"}…`;
         const createStart = performance.now();
         const session = await ort.InferenceSession.create(model.path, { executionProviders: [backend] });
         const sessionCreateMs = performance.now() - createStart;
@@ -165,19 +168,19 @@
         const inputName = session.inputNames[0];
         const feeds = { [inputName]: new ort.Tensor("float32", makeTensor(model.shape), model.shape) };
 
-        statusEl.textContent = `Running first ${model.name} pass…`;
+        statusEl.textContent = `Running first ${model.name} pass with ${threadCount} thread${threadCount === 1 ? "" : "s"}…`;
         const firstStart = performance.now();
         await session.run(feeds);
         const firstRunMs = performance.now() - firstStart;
 
-        statusEl.textContent = `Warming ${model.name}…`;
+        statusEl.textContent = `Warming ${model.name} with ${threadCount} thread${threadCount === 1 ? "" : "s"}…`;
         for (let i = 0; i < warmup; i += 1) {
           await session.run(feeds);
         }
 
         const timings = [];
         for (let i = 0; i < runs; i += 1) {
-          statusEl.textContent = `Measuring ${model.name} ${i + 1}/${runs}…`;
+          statusEl.textContent = `Measuring ${model.name} ${i + 1}/${runs} with ${threadCount} thread${threadCount === 1 ? "" : "s"}…`;
           const start = performance.now();
           await session.run(feeds);
           timings.push(performance.now() - start);
@@ -190,7 +193,7 @@
           sizeMiB,
           backend,
           provider: backend,
-          threads: actualThreads,
+          threads: threadCount,
           inputShape: model.shape,
           outputNames: session.outputNames,
           sessionCreateMs,
@@ -225,12 +228,17 @@
           const size = result.sizeMiB === null ? "—" : result.sizeMiB.toFixed(2);
           return `| ${result.name} | ${result.version} | ${result.threads} | ${result.provider} | ${stats.mean.toFixed(2)} | ${stats.median.toFixed(2)} | ${stats.p90.toFixed(2)} | ${result.firstRunMs.toFixed(2)} | ${size} |`;
         }).join("\n");
+        const threadSummary = report.backend === "webgpu"
+          ? "1 reported thread"
+          : report.wasmThreadSweep.length === 1
+          ? `${report.wasmThreadSweep[0]} WASM thread`
+          : `WASM thread sweep ${report.wasmThreadSweep.join(", ")}`;
         return [
           "## ONNX browser benchmark",
           "",
           `- **Source:** \`${report.source.buildId}\``,
           `- **System:** \`${report.userAgent}\` · \`${report.hardwareConcurrency ?? "unknown"} logical threads\``,
-          `- **Runtime:** ONNX Runtime Web · \`${report.backend}\` · \`${report.wasmThreads} WASM thread${report.wasmThreads === 1 ? "" : "s"}\``,
+          `- **Runtime:** ONNX Runtime Web · \`${report.backend}\` · \`${threadSummary}\``,
           `- **Isolation:** cross-origin isolated \`${report.crossOriginIsolated}\``,
           "",
           "Mean/median/P90 are steady-state ms; first run and warmups are excluded.",
@@ -287,7 +295,6 @@
 
       async function runBenchmark() {
         try {
-          await configureBackend();
           const report = {
             createdAt: new Date().toISOString(),
             source: await collectBuildInfo(),
@@ -295,17 +302,21 @@
             crossOriginIsolated,
             sharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
             hardwareConcurrency: navigator.hardwareConcurrency,
-            benchmarkMode: "single-backend",
+            benchmarkMode: backend === "wasm" ? "wasm-thread-sweep" : "single-backend",
             backend,
             requestedWasmThreads: requestedThreads,
-            wasmThreads: actualThreads,
+            wasmThreads: threadSweep.length === 1 ? threadSweep[0] : threadSweep,
+            wasmThreadSweep: threadSweep,
             warmupRuns: warmup,
             measuredRuns: runs,
             benchmarks: [],
           };
-          for (const model of MODELS) {
-            report.benchmarks.push(await benchmarkModel(model));
-            renderSummary(report);
+          for (const threadCount of threadSweep) {
+            await configureBackend(threadCount);
+            for (const model of MODELS) {
+              report.benchmarks.push(await benchmarkModel(model, threadCount));
+              renderSummary(report);
+            }
           }
           const rounded = roundedReport(report);
           markdownReport = formatMarkdownReport(rounded);
