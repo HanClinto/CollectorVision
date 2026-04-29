@@ -56,16 +56,19 @@ button.secondary {
   color: inherit;
 }
 
-select {
+select,
+input {
   min-height: 2.5rem;
   border: 1px solid rgba(36, 33, 31, 0.18);
   border-radius: 0.75rem;
-  padding: 0.45rem 2rem 0.45rem 0.7rem;
+  padding: 0.45rem 0.7rem;
   background: rgba(255, 255, 255, 0.7);
   color: inherit;
   font: inherit;
   font-weight: 700;
 }
+
+select { padding-right: 2rem; }
 
 pre,
 table,
@@ -142,6 +145,34 @@ tr:last-child td { border-bottom: 0; }
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
+}
+
+.scan-settings {
+  border: 1px solid rgba(36, 33, 31, 0.14);
+  border-radius: 0.9rem;
+  padding: 0.65rem 0.75rem;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.scan-settings summary {
+  color: #665f56;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.scan-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.65rem;
+}
+
+.scan-settings-grid label {
+  display: grid;
+  gap: 0.3rem;
+  color: #665f56;
+  font-size: 0.85rem;
+  font-weight: 800;
 }
 
 .preset-picker {
@@ -315,13 +346,15 @@ pre.function-signature[class*="language-"] {
     color: inherit;
   }
 
-  select {
+  select,
+  input {
     border-color: rgba(226, 232, 240, 0.18);
     background: rgba(15, 23, 42, 0.72);
   }
 
   pre,
   table,
+  .scan-settings,
   .tip-card {
     border-color: rgba(226, 232, 240, 0.16);
     background: rgba(15, 23, 42, 0.72);
@@ -334,7 +367,9 @@ pre.function-signature[class*="language-"] {
 
   .panel-heading p,
   .editor-meta,
-  .preset-picker { color: #cbd5e1; }
+  .preset-picker,
+  .scan-settings summary,
+  .scan-settings-grid label { color: #cbd5e1; }
 
   .handler-frame {
     border-color: rgba(226, 232, 240, 0.16);

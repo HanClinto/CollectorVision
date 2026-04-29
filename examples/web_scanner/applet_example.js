@@ -3,8 +3,13 @@ import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanne
 
 const CODE_KEY = "collectorvision_applet_example_code";
 const PRESET_KEY = "collectorvision_applet_example_preset";
+const SETTINGS_KEY = "collectorvision_applet_example_settings";
 const LOG_LIMIT = 12;
 const SCRYFALL_CARD_URL = "https://api.scryfall.com/cards/${card.cardId}";
+const DEFAULT_SCAN_SETTINGS = {
+  matchThreshold: 0.60,
+  consecutiveMatches: 2,
+};
 
 const PRESETS = [
   {
@@ -88,6 +93,8 @@ const PRESETS = [
 const events = document.getElementById("events");
 const editorElement = document.getElementById("handler-code");
 const presetSelect = document.getElementById("preset-code");
+const thresholdInput = document.getElementById("scan-threshold");
+const consecutiveInput = document.getElementById("scan-consecutive");
 const tableWrap = document.getElementById("table-wrap");
 const effectsLayer = document.getElementById("effects-layer");
 
@@ -97,6 +104,7 @@ const logLines = [];
 const bouncingCards = [];
 let handleCard = null;
 let runningTotal = 0;
+let scanner = null;
 
 const codeEditor = CodeJar(
   editorElement,
@@ -105,6 +113,7 @@ const codeEditor = CodeJar(
 );
 
 populatePresetSelect();
+populateScanSettings();
 codeEditor.updateCode(localStorage.getItem(CODE_KEY) || activePreset().code, false);
 highlightReadonlySignature();
 requestAnimationFrame(animateBouncingCards);
@@ -118,6 +127,41 @@ function populatePresetSelect() {
 
 function activePreset() {
   return PRESETS.find((preset) => preset.id === presetSelect.value) ?? PRESETS[0];
+}
+
+function readScanSettings() {
+  try {
+    return {
+      ...DEFAULT_SCAN_SETTINGS,
+      ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"),
+    };
+  } catch {
+    return { ...DEFAULT_SCAN_SETTINGS };
+  }
+}
+
+function populateScanSettings() {
+  const settings = readScanSettings();
+  thresholdInput.value = settings.matchThreshold.toFixed(2);
+  consecutiveInput.value = String(settings.consecutiveMatches);
+}
+
+function scanSettingsFromInputs() {
+  const matchThreshold = clamp(Number(thresholdInput.value), 0, 1);
+  const consecutiveMatches = Math.max(1, Math.round(Number(consecutiveInput.value) || 1));
+  return { matchThreshold, consecutiveMatches };
+}
+
+function applyScanSettings({ announce = true } = {}) {
+  const settings = scanSettingsFromInputs();
+  thresholdInput.value = settings.matchThreshold.toFixed(2);
+  consecutiveInput.value = String(settings.consecutiveMatches);
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  scanner?.updateConfig(settings);
+  if (announce) {
+    log("Scan settings:", `threshold ${settings.matchThreshold.toFixed(2)},`, `${settings.consecutiveMatches} consecutive`);
+  }
+  return settings;
 }
 
 function highlightReadonlySignature() {
@@ -328,6 +372,7 @@ document.getElementById("reset-code").addEventListener("click", () => {
 });
 
 document.getElementById("clear-table").addEventListener("click", mygui.clear);
+document.getElementById("apply-scan-settings").addEventListener("click", () => applyScanSettings());
 
 presetSelect.addEventListener("change", () => {
   localStorage.setItem(PRESET_KEY, presetSelect.value);
@@ -336,10 +381,9 @@ presetSelect.addEventListener("change", () => {
 
 compileHandler();
 
-const scanner = await createCollectorVisionScannerApplet({
+scanner = await createCollectorVisionScannerApplet({
   target: "#collectorvision",
-  matchThreshold: 0.60,
-  consecutiveMatches: 2,
+  ...applyScanSettings({ announce: false }),
   scanIntervalMs: 900,
   overlay: true,
   enableWebGpu: false,

@@ -138,7 +138,8 @@ spreadsheet-like table. The playground keeps its HTML, JavaScript, and CSS split
 into small files, and its code editor uses CodeJar and Prism from jsDelivr for
 lightweight syntax highlighting. It includes selectable preset handlers for a
 plain lookup table, card-color page tinting, bouncing scanned-card images, and a
-playful running price total. The applet module itself does not depend on those
+playful running price total, plus compact controls for match threshold and
+required consecutive scans. The applet module itself does not depend on those
 editor libraries or presets.
 
 ```js

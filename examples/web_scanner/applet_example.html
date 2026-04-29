@@ -33,6 +33,14 @@
       <section class="layout">
         <div class="panel">
           <div id="collectorvision"></div>
+          <details class="scan-settings">
+            <summary>Scan settings</summary>
+            <div class="scan-settings-grid">
+              <label>Threshold <input id="scan-threshold" type="number" min="0" max="1" step="0.01" /></label>
+              <label>Consecutive scans <input id="scan-consecutive" type="number" min="1" max="6" step="1" /></label>
+              <button id="apply-scan-settings" class="secondary" type="button">Apply</button>
+            </div>
+          </details>
           <pre id="events">Waiting for cards…</pre>
         </div>
 
@@ -52,8 +60,8 @@
             <span class="pill">Fun: <code>mygui.bounceCard()</code> <code>mygui.priceBurst()</code> <code>mygui.addToTotal()</code></span>
           </div>
           <div class="toolbar">
-            <label class="preset-picker">Preset <select id="preset-code"></select></label>
             <button id="apply-code" type="button">Apply handler</button>
+            <label class="preset-picker">Preset <select id="preset-code"></select></label>
             <button id="reset-code" class="secondary" type="button">Load preset</button>
             <button id="clear-table" class="secondary" type="button">Clear table</button>
           </div>
