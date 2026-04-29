@@ -71,13 +71,13 @@
       const DEFAULT_HANDLER = `// Runs whenever CollectorVision confirms a card.
 // Available variables:
 //   card.cardId, card.score, card.detectedAt, card.raw
-//   api.addRow(object), api.log(...), api.fetchJson(url), api.clear()
+//   mygui.addRow(object), mygui.log(...), mygui.fetchJson(url), mygui.clear()
 
-api.log("Looking up", card.cardId, "score", card.score.toFixed(3));
+mygui.log("Looking up", card.cardId, "score", card.score.toFixed(3));
 
-const scryfall = await api.fetchJson(` + "`https://api.scryfall.com/cards/${card.cardId}`" + `);
+const scryfall = await mygui.fetchJson(` + "`https://api.scryfall.com/cards/${card.cardId}`" + `);
 
-api.addRow({
+mygui.addRow({
   Name: scryfall.name,
   Set: scryfall.set_name,
   Number: scryfall.collector_number,
@@ -142,11 +142,11 @@ api.addRow({
       function compileHandler() {
         const source = codeEditor.value;
         localStorage.setItem(CODE_KEY, source);
-        handleCard = new Function("card", "api", `"use strict"; return (async () => {\n${source}\n})();`);
+        handleCard = new Function("card", "mygui", `"use strict"; return (async () => {\n${source}\n})();`);
         log("Handler applied. Scan a card to run it.");
       }
 
-      const api = {
+      const mygui = {
         addRow,
         clear() {
           rows.length = 0;
@@ -171,7 +171,7 @@ api.addRow({
         codeEditor.value = DEFAULT_HANDLER;
         compileHandler();
       });
-      document.getElementById("clear-table").addEventListener("click", api.clear);
+      document.getElementById("clear-table").addEventListener("click", mygui.clear);
 
       compileHandler();
 
@@ -184,7 +184,7 @@ api.addRow({
         enableWebGpu: false,
         async onCardDetected(card) {
           try {
-            await handleCard?.(card, { ...api, scanner });
+            await handleCard?.(card, { ...mygui, scanner });
           } catch (error) {
             log("Handler error:", error.message);
           }
