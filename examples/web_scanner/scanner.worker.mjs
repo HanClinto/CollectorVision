@@ -441,9 +441,14 @@ function isIOS() {
 // ---------------------------------------------------------------------------
 
 class WorkerRuntime {
-  constructor(manifest, useWebGpu = false) {
+  constructor(manifest, useWebGpu = false, catalogLimit = null) {
     this.manifest = manifest;
     this.useWebGpu = useWebGpu;
+    this.catalogLimit = Number.isFinite(catalogLimit) && catalogLimit > 0
+      ? Math.floor(catalogLimit)
+      : null;
+    this.catalogRows = manifest.catalog?.rows ?? 0;
+    this.catalogTotalRows = manifest.catalog?.rows ?? 0;
     this.detector = null;
     this.embedder = null;
     this.inputNames = {};
@@ -523,8 +528,26 @@ class WorkerRuntime {
     // matrix to Float32Array roughly doubles steady-state catalog memory and
     // can push iOS WebKit into tab reloads.  Search converts individual values
     // through a 256 KB lookup table instead.
-    this.embeddings = wrapFloat16Buffer(embeddingBuffer);
-    this.cardIds = ids;
+    const dims = this.manifest.catalog.dims;
+    const declaredRows = this.manifest.catalog.rows;
+    const requestedRows = this.catalogLimit
+      ? Math.min(this.catalogLimit, declaredRows, ids.length)
+      : Math.min(declaredRows, ids.length);
+    const embeddingBytes = requestedRows * dims * 2;
+    // Diagnostic-only catalog limiting still fetches the monolithic asset, so
+    // it does not remove the transient load peak.  It does keep only the small
+    // prefix after load, which is enough to test steady-state catalog pressure.
+    const retainedEmbeddingBuffer = requestedRows < declaredRows
+      ? embeddingBuffer.slice(0, embeddingBytes)
+      : embeddingBuffer;
+    this.embeddings = wrapFloat16Buffer(retainedEmbeddingBuffer);
+    this.cardIds = requestedRows < ids.length ? ids.slice(0, requestedRows) : ids;
+    this.catalogRows = Math.min(
+      requestedRows,
+      this.cardIds.length,
+      Math.floor(this.embeddings.length / dims),
+    );
+    this.catalogTotalRows = declaredRows;
   }
 
   async detect(frameCanvas) {
@@ -667,7 +690,7 @@ class WorkerRuntime {
 
   search(query) {
     const dims = this.manifest.catalog.dims;
-    const rows = this.manifest.catalog.rows;
+    const rows = this.catalogRows ?? this.manifest.catalog.rows;
     let bestScore = -Infinity;
     let bestIndex = -1;
 
@@ -838,12 +861,22 @@ self.onmessage = async ({ data }) => {
       self.postMessage({ type: "progress", stage: "webgpu", inferenceMode });
       self.postMessage({ type: "progress", stage: "dewarp", ratio: 1 });
 
-      runtime = new WorkerRuntime(data.manifest, useWebGpu);
+      const catalogLimit = Number.isFinite(data.catalogLimit) && data.catalogLimit > 0
+        ? Math.floor(data.catalogLimit)
+        : null;
+      runtime = new WorkerRuntime(data.manifest, useWebGpu, catalogLimit);
       await runtime.load((stage, ratio, loaded, total, cached) => {
         self.postMessage({ type: "progress", stage, ratio, loaded, total, cached });
       });
 
-      self.postMessage({ type: "ready", inferenceMode, numThreads: runtime.numThreads ?? 1 });
+      self.postMessage({
+        type: "ready",
+        inferenceMode,
+        numThreads: runtime.numThreads ?? 1,
+        catalogRows: runtime.catalogRows,
+        catalogTotalRows: runtime.catalogTotalRows,
+        catalogLimit: runtime.catalogLimit,
+      });
 
     } else if (data.type === "frame") {
       await processFrame(

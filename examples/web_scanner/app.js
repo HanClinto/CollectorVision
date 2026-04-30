@@ -82,6 +82,16 @@ function getQueryFlag(...names) {
   return null;
 }
 
+function getCatalogLimitFromQuery() {
+  const params = new URLSearchParams(location.search);
+  const raw = params.get("limitCatalog") ?? params.get("catalogLimit");
+  if (raw === null || raw.trim() === "") {
+    return null;
+  }
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 function initializePerfOverlayPreference() {
   const queryValue = getQueryFlag("fps", "perf", "performance");
   if (queryValue !== null) {
@@ -101,8 +111,8 @@ function formatMiB(value) {
   return Number.isFinite(value) ? `${(value / (1024 * 1024)).toFixed(1)} MiB` : "—";
 }
 
-function estimateCatalogBytes(manifest) {
-  const rows = manifest?.catalog?.rows;
+function estimateCatalogBytes(manifest, rowOverride = null) {
+  const rows = rowOverride ?? manifest?.catalog?.rows;
   const dims = manifest?.catalog?.dims;
   if (!Number.isFinite(rows) || !Number.isFinite(dims)) {
     return null;
@@ -1497,7 +1507,7 @@ class PerformanceOverlay {
     this.lastResultAt = null;
     this.resultCount = 0;
     this.lastData = null;
-    this.catalogBytes = estimateCatalogBytes(manifest);
+    this.catalogBytes = estimateCatalogBytes(manifest, captureState?.catalogRows);
   }
 
   setVisible(visible) {
@@ -1981,11 +1991,20 @@ async function boot() {
   // Load the manifest on the main thread first — it drives both the loading
   // screen text and the worker init message.
   const manifest = await loadManifest();
-  recordBootTrace("boot:manifest", { version: manifest.version, rows: manifest.catalog?.rows, dims: manifest.catalog?.dims });
+  const catalogLimit = getCatalogLimitFromQuery();
+  recordBootTrace("boot:manifest", {
+    version: manifest.version,
+    rows: manifest.catalog?.rows,
+    dims: manifest.catalog?.dims,
+    catalogLimit,
+  });
   renderManifestContract(manifest);
   loadingScreen.step("manifest", "done", `v${manifest.version}`);
   loadingScreen.progress(14, "Manifest loaded");
   debugLog.info("manifest loaded", manifest.version);
+  if (catalogLimit) {
+    debugLog.warn("debug catalog limit active", `${catalogLimit} rows`);
+  }
   const modelHashes = manifest.model_hashes ?? {};
   setText("settings-cornelius-hash", modelHashes.cornelius ? modelHashes.cornelius.slice(0, 16) + "\u2026" : manifest.version);
   setText("settings-milo-hash",      modelHashes.milo      ? modelHashes.milo.slice(0, 16)      + "\u2026" : manifest.version);
@@ -2026,9 +2045,21 @@ async function boot() {
           setPhase(data.stage, percent, label, note, data.ratio >= 1 ? "done" : "active");
         }
       } else if (data.type === "ready") {
-        recordBootTrace("worker:ready", { inferenceMode: data.inferenceMode, numThreads: data.numThreads ?? 1 });
+        recordBootTrace("worker:ready", {
+          inferenceMode: data.inferenceMode,
+          numThreads: data.numThreads ?? 1,
+          catalogRows: data.catalogRows,
+          catalogTotalRows: data.catalogTotalRows,
+          catalogLimit: data.catalogLimit,
+        });
         scannerWorker.removeEventListener("message", onInitMessage);
-        resolve({ inferenceMode: data.inferenceMode, numThreads: data.numThreads ?? 1 });
+        resolve({
+          inferenceMode: data.inferenceMode,
+          numThreads: data.numThreads ?? 1,
+          catalogRows: data.catalogRows ?? manifest.catalog.rows,
+          catalogTotalRows: data.catalogTotalRows ?? manifest.catalog.rows,
+          catalogLimit: data.catalogLimit ?? null,
+        });
       } else if (data.type === "error") {
         recordBootTrace("worker:error", { message: data.message });
         scannerWorker.removeEventListener("message", onInitMessage);
@@ -2045,9 +2076,9 @@ async function boot() {
   loadingScreen.step("catalog", "active", "Queued");
   setText("models-status", "Loading models");
 
-  scannerWorker.postMessage({ type: "init", manifest, enableWebGpu: isWebGpuEnabled() });
-  recordBootTrace("worker:init-posted", { enableWebGpu: isWebGpuEnabled() });
-  const { inferenceMode, numThreads } = await scannerReady;
+  scannerWorker.postMessage({ type: "init", manifest, enableWebGpu: isWebGpuEnabled(), catalogLimit });
+  recordBootTrace("worker:init-posted", { enableWebGpu: isWebGpuEnabled(), catalogLimit });
+  const { inferenceMode, numThreads, catalogRows, catalogTotalRows, catalogLimit: activeCatalogLimit } = await scannerReady;
 
   const threadLabel = self.crossOriginIsolated
     ? `${numThreads} (cross-origin isolated)`
@@ -2055,13 +2086,19 @@ async function boot() {
   setText("settings-threads", threadLabel);
 
   setText("models-status", "Models ready");
-  setText("catalog-status", `${manifest.catalog.rows} cards ready`);
+  const catalogStatus = activeCatalogLimit && catalogRows < catalogTotalRows
+    ? `${catalogRows} of ${catalogTotalRows} cards ready (debug limit)`
+    : `${manifest.catalog.rows} cards ready`;
+  setText("catalog-status", catalogStatus);
   loadingScreen.progress(100, "Scanner ready");
   debugLog.info("models and catalog ready", `${manifest.catalog.rows} rows`);
+  if (activeCatalogLimit && catalogRows < catalogTotalRows) {
+    debugLog.warn("catalog limited for diagnostics", `${catalogRows} of ${catalogTotalRows} rows`);
+  }
   debugLog.info("wasm threads", threadLabel);
 
   // captureState is updated by the scanner result handler inside createScannerLoop.
-  const captureState = { lastResult: null, lastDetectorBitmap: null, lastCropBitmap: null, pendingCapture: false, onCapture: null, inferenceMode, numThreads };
+  const captureState = { lastResult: null, lastDetectorBitmap: null, lastCropBitmap: null, pendingCapture: false, onCapture: null, inferenceMode, numThreads, catalogRows };
   const perfOverlay = new PerformanceOverlay(manifest, captureState);
   setupPerfOverlayToggle(perfOverlay);
 
