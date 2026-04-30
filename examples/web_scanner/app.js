@@ -237,8 +237,20 @@ function createDebugLog() {
     recordBootTrace("window:unhandledrejection", { reason: describeValue(event.reason) });
     push("error", "Unhandled promise rejection", event.reason);
   });
+  window.addEventListener("pageshow", (event) => {
+    recordBootTrace("page:show", { persisted: event.persisted, visibilityState: document.visibilityState });
+  });
   window.addEventListener("pagehide", (event) => {
-    recordBootTrace("page:hide", { persisted: event.persisted });
+    recordBootTrace("page:hide", { persisted: event.persisted, visibilityState: document.visibilityState });
+  });
+  document.addEventListener("visibilitychange", () => {
+    recordBootTrace("page:visibility", { visibilityState: document.visibilityState });
+  });
+  document.addEventListener("freeze", () => {
+    recordBootTrace("page:freeze", { visibilityState: document.visibilityState });
+  });
+  document.addEventListener("resume", () => {
+    recordBootTrace("page:resume", { visibilityState: document.visibilityState });
   });
 
   return {
@@ -958,6 +970,7 @@ class CameraSurface {
           this.badge.dataset.cameraLive = "true";
           this.badge.disabled = false;
         } catch (error) {
+          recordBootTrace("camera:start-failed", { name: error?.name, message: error?.message ?? String(error) });
           this.debugLog.error("camera start failed", error);
           this.badge.textContent = this.describeCameraError(error);
           this.badge.disabled = false;
@@ -995,8 +1008,9 @@ class CameraSurface {
           this.badge.dataset.cameraLive = "true";
           this.badge.disabled = false;
           this.debugLog.info("page visible — camera resumed");
-        } catch {
+        } catch (error) {
           // Likely a gesture-required restriction (iOS Safari).
+          recordBootTrace("camera:resume-failed", { name: error?.name, message: error?.message ?? String(error) });
           this.badge.textContent = "Camera paused — tap to resume";
           this.badge.disabled = false;
           this.debugLog.info("auto-resume blocked — tap required");
@@ -1146,6 +1160,15 @@ class CameraSurface {
     this.diag.set("diag-process-canvas", `${nextProcessWidth} × ${nextProcessHeight}`);
     this.diag.set("diag-display-canvas", `${nextDisplayWidth} × ${nextDisplayHeight}`);
     if (dimensionsChanged) {
+      recordBootTrace("camera:resize", {
+        videoWidth: vw,
+        videoHeight: vh,
+        processWidth: nextProcessWidth,
+        processHeight: nextProcessHeight,
+        displayWidth: nextDisplayWidth,
+        displayHeight: nextDisplayHeight,
+        dpr,
+      }, { debugOnly: true });
       this.debugLog.info(
         "resize",
         `video=${vw}×${vh}`,
@@ -1680,6 +1703,24 @@ function createScannerLoop(
   let timer = null;
   let workerBusy = false;
 
+  scannerWorker.addEventListener("error", (event) => {
+    workerBusy = false;
+    recordBootTrace("worker:fatal-error", {
+      message: event.message,
+      filename: event.filename,
+      lineno: event.lineno,
+    });
+    debugLog.error("scanner worker fatal error", event.message || event);
+    setText("camera-badge", "Scanner worker error");
+  });
+
+  scannerWorker.addEventListener("messageerror", () => {
+    workerBusy = false;
+    recordBootTrace("worker:message-error");
+    debugLog.error("scanner worker message error");
+    setText("camera-badge", "Scanner message error");
+  });
+
   // Enricher results arrive here on the main thread.
   enricherWorker.addEventListener("message", async ({ data }) => {
     if (data.type === "enriched") {
@@ -1702,6 +1743,14 @@ function createScannerLoop(
   // Scanner results arrive here.  The worker has already done detect/dewarp/
   // embed/search; this handler only does UI + bucket + confirm logic.
   scannerWorker.addEventListener("message", async ({ data }) => {
+    if (data.type === "error") {
+      workerBusy = false;
+      recordBootTrace("worker:runtime-error", { message: data.message });
+      debugLog.error("scanner worker error", data.message);
+      setText("camera-badge", data.message || "Scan error");
+      return;
+    }
+
     if (data.type !== "result") {
       return;
     }
