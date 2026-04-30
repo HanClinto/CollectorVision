@@ -1028,6 +1028,7 @@ class CameraSurface {
       throw new Error("Camera API unavailable in this browser.");
     }
     this.badge.textContent = "Requesting camera";
+    recordBootTrace("camera:start-requested");
     this.debugLog.info("requesting camera stream");
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
@@ -1051,6 +1052,15 @@ class CameraSurface {
     await this.video.play();
     this.page.dataset.cameraReady = "true";
     this.badge.textContent = "Camera live";
+    const trackSettings = stream.getVideoTracks()[0]?.getSettings?.() ?? null;
+    recordBootTrace("camera:live", {
+      videoWidth: this.video.videoWidth,
+      videoHeight: this.video.videoHeight,
+      trackWidth: trackSettings?.width,
+      trackHeight: trackSettings?.height,
+      frameRate: trackSettings?.frameRate,
+      facingMode: trackSettings?.facingMode,
+    });
     this.debugLog.info("camera stream is live", `${this.video.videoWidth}x${this.video.videoHeight}`);
     this.resize();
     window.addEventListener("resize", this._resizeHandler);
@@ -1076,6 +1086,7 @@ class CameraSurface {
     this.page.dataset.cameraReady = "false";
     window.removeEventListener("resize", this._resizeHandler);
     this.clearOverlay();
+    recordBootTrace("camera:stopped");
     this.debugLog.info("camera stopped");
   }
 
@@ -1787,6 +1798,7 @@ function createScannerLoop(
       if (timer) {
         clearInterval(timer);
         timer = null;
+        recordBootTrace("scan:loop-stopped");
       }
     },
     start() {
@@ -1795,6 +1807,7 @@ function createScannerLoop(
       }
       setText("camera-badge", "Scanning");
       debugLog.info("scan interval", `${SCAN_INTERVAL_MS}ms`);
+      recordBootTrace("scan:loop-started", { intervalMs: SCAN_INTERVAL_MS });
       timer = setInterval(async () => {
         if (workerBusy || !camera.stream) {
           return;
