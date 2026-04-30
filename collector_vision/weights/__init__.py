@@ -2,8 +2,8 @@
 
 Both models are single-file ONNX (no paired .data file).
 
-cornelius.onnx  (8.2 MB) — Cornelius v1.164, card corner detector
-    MobileViT-XXS + SimCC, epoch 164, test_iou=0.7234.
+cornelius.onnx  (8.2 MB) — Cornelius v1.205, card corner detector
+    MobileViT-XXS + SimCC, epoch 205, test_iou=0.7865.
     Input:   (1, 3, 384, 384) float32, ImageNet-normalised
     Outputs: corners (1, 8) normalised [0,1] TL/TR/BR/BL x0,y0…
              presence (1,) raw logit — use sharpness instead
@@ -32,7 +32,7 @@ EMBEDDER = _WEIGHTS_DIR / "milo.onnx"  # Milo
 # These mirror the 'version' key in each model's ONNX metadata_props.
 # Bump here (and rebuild the wheel) whenever the .onnx file is replaced.
 
-CORNELIUS_VERSION = "1.164"
+CORNELIUS_VERSION = "1.205"
 MILO_VERSION = "1.0.0"
 
 BUNDLED_VERSIONS: dict[str, str] = {
