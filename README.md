@@ -142,6 +142,16 @@ Other games and sources coming soon. To request a specific game/source, open an 
 
 AGPL-3.0. Commercial licenses available — see [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md).
 
+## Integrations
+
+If you build something with CollectorVision, an announcement is welcome.
+
+- Open an issue if you want to say that your project uses CollectorVision.
+- Open a PR if you want to add your project to a future integrations list.
+
+For hobby and noncommercial projects, this request is appreciated but not a
+condition of the license.
+
 ## Development
 
 ```bash
