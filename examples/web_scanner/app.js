@@ -5,7 +5,7 @@ const GITHUB_REPO = "HanClinto/CollectorVision";
 
 // DETECTOR_SIZE is kept here for the capture-bundle debug export.
 const DETECTOR_SIZE = 384;
-const MIN_MATCH_SCORE_DEFAULT = 0.60;
+const MIN_MATCH_SCORE_DEFAULT = 0.50;
 const PREVIEW_ASPECT = 16 / 9;
 const SCAN_INTERVAL_MS = 900;
 const MOBILE_PREVIEW_INTERVAL_MS = 1000 / 15;

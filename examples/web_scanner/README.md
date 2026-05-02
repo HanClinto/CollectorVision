@@ -147,7 +147,7 @@ import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanne
 
 const scanner = await createCollectorVisionScannerApplet({
    target: "#collectorvision",
-   matchThreshold: 0.60,
+   matchThreshold: 0.50,
    consecutiveMatches: 2,
    scanIntervalMs: 900,
    overlay: true,

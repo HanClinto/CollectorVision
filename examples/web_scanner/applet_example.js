@@ -7,7 +7,7 @@ const SETTINGS_KEY = "collectorvision_applet_example_settings";
 const LOG_LIMIT = 12;
 const SCRYFALL_CARD_URL = "https://api.scryfall.com/cards/${card.cardId}";
 const DEFAULT_SCAN_SETTINGS = {
-  matchThreshold: 0.60,
+  matchThreshold: 0.50,
   consecutiveMatches: 2,
 };
 

@@ -4,7 +4,7 @@ const DEFAULT_CONFIG = {
   enableWebGpu: false,
   autoStart: true,
   scanIntervalMs: 900,
-  matchThreshold: 0.6,
+  matchThreshold: 0.5,
   consecutiveMatches: 2,
   cooldownMs: 3500,
   overlay: true,
