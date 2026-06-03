@@ -15,6 +15,7 @@ const DEFAULT_SCAN_SETTINGS = {
   showFpsOverlay: true,
   groupBySecondaryId: true,
 };
+const MAX_GUI_CORNER_CONFIDENCE = 0.10;
 
 const PRESETS = [
   {
@@ -161,8 +162,9 @@ function readScanSettings() {
 
 function populateScanSettings() {
   const settings = readScanSettings();
-  cornerThresholdInput.value = settings.minCornerConfidence.toFixed(2);
-  updateCornerThresholdUi(settings.minCornerConfidence);
+  const cornerThreshold = clamp(Number(settings.minCornerConfidence), 0, MAX_GUI_CORNER_CONFIDENCE);
+  cornerThresholdInput.value = cornerThreshold.toFixed(2);
+  updateCornerThresholdUi(cornerThreshold);
   thresholdInput.value = settings.matchThreshold.toFixed(2);
   consecutiveInput.value = String(settings.consecutiveMatches);
   intervalInput.value = String(Math.max(0, Math.round(Number(settings.scanIntervalMs) || 0)));
@@ -185,7 +187,7 @@ function updateCornerSignal(confidence) {
 }
 
 function scanSettingsFromInputs() {
-  const minCornerConfidence = clamp(Number(cornerThresholdInput.value), 0, 1);
+  const minCornerConfidence = clamp(Number(cornerThresholdInput.value), 0, MAX_GUI_CORNER_CONFIDENCE);
   const matchThreshold = clamp(Number(thresholdInput.value), 0, 1);
   const consecutiveMatches = Math.max(1, Math.round(Number(consecutiveInput.value) || 1));
   const scanIntervalMs = Math.max(0, Math.round(Number(intervalInput.value) || 0));
