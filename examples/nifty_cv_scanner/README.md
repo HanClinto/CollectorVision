@@ -4,6 +4,16 @@ Python/CollectorVision port of Paul Saunders' [`paul-lrr/nifty-recognizer`](http
 
 The original project used Node, Express, Socket.IO, and DeckedBuilder notifications to update a stream overlay. This example keeps the same `card-view.html`, `card-controller.html`, and `card-view.xml` layout and browser behavior, but serves them with FastAPI and can recognize uploaded frames with CollectorVision's Python ONNX Runtime backend.
 
+## Features
+
+Includes all of the same OBS overlay pages as the original, along with a new scanner page that offers fast CollectorVision-based card recognition -- all controllable through the browser.
+
+<img width="1536" height="768" alt="Screenshot 2026-06-03 at 12 17 47 PM" src="https://github.com/user-attachments/assets/93898f6f-3240-49d2-a5f5-341f40935052" />
+
+<img width="3222" height="2122" alt="image" src="https://github.com/user-attachments/assets/89b66821-8191-4572-8245-f4621c730b1f" />
+
+
+
 ## Install
 
 Use an example-local virtual environment so the FastAPI server dependencies stay
@@ -125,6 +135,12 @@ It also accepts the older record wrapper:
   ]
 }
 ```
+
+## Suggested Settings
+Full explanation of all settings is outside of the scope of this document, but feel free to experiment to see what gives you the best results. YMMV, but these are some settings that seemed to work well for me in my testing:
+
+<img width="3258" height="894" alt="image" src="https://github.com/user-attachments/assets/da9e712b-71a7-4a71-b578-5c19f8beb23b" />
+
 
 ## Compatibility Routes
 
