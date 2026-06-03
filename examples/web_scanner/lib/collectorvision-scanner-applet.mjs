@@ -382,6 +382,9 @@ export class CollectorVisionScannerApplet extends EventTarget {
       this.setStatus(this.started ? "Scanning…" : "Ready.");
       this.emit("ready", data);
       this.config.onReady?.(data, this);
+      if (this.started && Number(this.config.scanIntervalMs) <= 0) {
+        this.tick();
+      }
       return;
     }
     if (data.type === "result") {

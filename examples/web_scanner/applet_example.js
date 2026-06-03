@@ -271,6 +271,10 @@ function log(...parts) {
   events.textContent = logLines.join("\n");
 }
 
+if (self.crossOriginIsolated) {
+  log("COI mode enabled for performance; cross-origin art effects may use local fallback tiles.");
+}
+
 async function fetchJson(url, options) {
   const response = await fetch(url, options);
   if (!response.ok) {
@@ -325,23 +329,53 @@ function cameraRect() {
   return document.getElementById("collectorvision").getBoundingClientRect();
 }
 
-function bounceCard(imageUrl, label = "Scanned card") {
-  if (!imageUrl) {
-    log("No card image available for", label);
-    return;
+function isCrossOriginUrl(url) {
+  try {
+    return new URL(url, window.location.href).origin !== window.location.origin;
+  } catch {
+    return false;
   }
+}
 
+function bounceCard(imageUrl, label = "Scanned card") {
   const origin = cameraRect();
-  const image = document.createElement("img");
-  image.className = "bouncing-card";
-  image.referrerPolicy = "no-referrer";
-  image.decoding = "async";
-  image.alt = label;
-  image.addEventListener("error", () => {
-    log("Could not load card image; showing name fallback for", label, imageUrl);
-  }, { once: true });
-  image.src = imageUrl;
-  effectsLayer.append(image);
+  const shouldAvoidCrossOriginImage = self.crossOriginIsolated
+    && imageUrl
+    && isCrossOriginUrl(imageUrl);
+
+  let element;
+  if (!imageUrl || shouldAvoidCrossOriginImage) {
+    if (!imageUrl) {
+      log("No card image available for", label);
+    } else {
+      log("Cross-origin image blocked under COI; using local fallback tile for", label);
+    }
+    const fallback = document.createElement("div");
+    fallback.className = "bouncing-card";
+    fallback.textContent = String(label || "Scanned card").slice(0, 24);
+    fallback.style.display = "grid";
+    fallback.style.placeItems = "center";
+    fallback.style.padding = "0.5rem";
+    fallback.style.textAlign = "center";
+    fallback.style.fontSize = "0.72rem";
+    fallback.style.lineHeight = "1.1";
+    fallback.style.fontWeight = "700";
+    fallback.style.color = "#e2e8f0";
+    fallback.style.background = "linear-gradient(160deg, #0f172a, #334155)";
+    element = fallback;
+  } else {
+    const image = document.createElement("img");
+    image.className = "bouncing-card";
+    image.referrerPolicy = "no-referrer";
+    image.decoding = "async";
+    image.alt = label;
+    image.addEventListener("error", () => {
+      log("Could not load card image; showing name fallback for", label, imageUrl);
+    }, { once: true });
+    image.src = imageUrl;
+    element = image;
+  }
+  effectsLayer.append(element);
 
   const width = 92;
   const height = 128;
@@ -351,7 +385,7 @@ function bounceCard(imageUrl, label = "Scanned card") {
   const angle = -Math.PI / 3 + Math.random() * Math.PI * 1.66;
 
   bouncingCards.push({
-    element: image,
+    element,
     x: clamp(startX, 0, window.innerWidth - width),
     y: clamp(startY, 0, window.innerHeight - height),
     dx: Math.cos(angle) * speed || speed,
