@@ -57,7 +57,7 @@ button.secondary {
 }
 
 select,
-input {
+input:not([type="checkbox"]):not([type="range"]) {
   min-height: 2.5rem;
   border: 1px solid rgba(36, 33, 31, 0.18);
   border-radius: 0.75rem;
@@ -162,17 +162,124 @@ tr:last-child td { border-bottom: 0; }
 
 .scan-settings-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
-  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
   margin-top: 0.65rem;
 }
 
-.scan-settings-grid label {
+.scan-settings-field {
   display: grid;
   gap: 0.3rem;
   color: #665f56;
   font-size: 0.85rem;
   font-weight: 800;
+}
+
+.scan-settings-mic {
+  display: grid;
+  gap: 0.38rem;
+  color: #665f56;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.scan-settings-mic > span:first-child {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.scan-settings-mic input[type="range"] {
+  width: 100%;
+  min-height: 1.4rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: #2563eb;
+}
+
+.scan-settings-meter {
+  position: relative;
+  overflow: hidden;
+  height: 0.46rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.14);
+}
+
+.scan-settings-meter__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: linear-gradient(90deg, #22c55e 0%, #facc15 55%, #ef4444 100%);
+  transition: width 80ms linear;
+}
+
+.scan-settings-meter__threshold {
+  position: absolute;
+  top: -0.14rem;
+  bottom: -0.14rem;
+  width: 2px;
+  background: rgba(15, 23, 42, 0.7);
+  transform: translateX(-1px);
+}
+
+.scan-settings-meter-value {
+  font-size: 0.76rem;
+  color: #81796f;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-settings-slider {
+  display: grid;
+  gap: 0.45rem;
+  color: #665f56;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.scan-settings-slider span {
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-settings-slider input[type="range"] {
+  width: 100%;
+  min-height: 1.4rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: #2563eb;
+}
+
+.scan-settings-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 0.55rem;
+  color: #665f56;
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.scan-settings-toggle input[type="checkbox"] {
+  inline-size: 1.05rem;
+  block-size: 1.05rem;
+  margin-top: 0.08rem;
+  accent-color: #2563eb;
+}
+
+.scan-settings-actions {
+  display: flex;
+  align-items: end;
+}
+
+.scan-settings-actions button {
+  min-width: 8.5rem;
 }
 
 .preset-picker {
@@ -373,7 +480,7 @@ pre.function-signature[class*="language-"] {
   }
 
   select,
-  input {
+  input:not([type="checkbox"]):not([type="range"]) {
     border-color: rgba(226, 232, 240, 0.18);
     background: rgba(15, 23, 42, 0.72);
   }
@@ -395,7 +502,22 @@ pre.function-signature[class*="language-"] {
   .editor-meta,
   .preset-picker,
   .scan-settings summary,
-  .scan-settings-grid label { color: #cbd5e1; }
+  .scan-settings-field,
+  .scan-settings-mic,
+  .scan-settings-slider,
+  .scan-settings-toggle { color: #cbd5e1; }
+
+  .scan-settings-meter {
+    background: rgba(148, 163, 184, 0.24);
+  }
+
+  .scan-settings-meter__threshold {
+    background: rgba(226, 232, 240, 0.85);
+  }
+
+  .scan-settings-meter-value {
+    color: #94a3b8;
+  }
 
   .handler-frame {
     border-color: rgba(226, 232, 240, 0.16);
@@ -411,4 +533,10 @@ pre.function-signature[class*="language-"] {
   .editor-shell { color: #e2e8f0; }
   .pill { background: rgba(226, 232, 240, 0.1); }
   .eyebrow, .empty { color: #94a3b8; }
+}
+
+@media (max-width: 42rem) {
+  .scan-settings-grid {
+    grid-template-columns: 1fr;
+  }
 }

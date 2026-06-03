@@ -4,6 +4,7 @@ const DEFAULT_CONFIG = {
   enableWebGpu: false,
   autoStart: true,
   scanIntervalMs: 900,
+  minCornerConfidence: 0.02,
   matchThreshold: 0.5,
   consecutiveMatches: 2,
   cooldownMs: 3500,
@@ -49,6 +50,10 @@ function mergeConfig(config) {
 
 function clamp01(value) {
   return Math.min(1, Math.max(0, Number(value) || 0));
+}
+
+function formatMetric(value) {
+  return Number.isFinite(value) ? value.toFixed(2) : "--";
 }
 
 function eventDetail(data) {
@@ -211,6 +216,7 @@ export class CollectorVisionScannerApplet extends EventTarget {
         type: "init",
         manifest: this.manifest,
         enableWebGpu: this.config.enableWebGpu === true,
+        minCornerConfidence: clamp01(this.config.minCornerConfidence),
       });
       if (this.config.autoStart) {
         await this.start();
@@ -266,9 +272,19 @@ export class CollectorVisionScannerApplet extends EventTarget {
   }
 
   updateConfig(config) {
+    const prevMinCornerConfidence = this.config.minCornerConfidence;
     this.config = mergeConfig({ ...this.config, ...config });
     this.bucket.updateConfig(this.config);
     this.updateFpsVisibility();
+    if (config.minCornerConfidence !== undefined && this.worker) {
+      const nextMinCornerConfidence = clamp01(this.config.minCornerConfidence);
+      if (nextMinCornerConfidence !== clamp01(prevMinCornerConfidence)) {
+        this.worker.postMessage({
+          type: "config",
+          minCornerConfidence: nextMinCornerConfidence,
+        });
+      }
+    }
     if (config.scanIntervalMs !== undefined && this.started) {
       this.restartTickLoop();
     }
@@ -391,15 +407,24 @@ export class CollectorVisionScannerApplet extends EventTarget {
     this.emit("result", result);
     this.config.onResult?.(result, this);
 
+    const cornerConfidence = formatMetric(result.confidence);
+    const cornerThreshold = clamp01(this.config.minCornerConfidence).toFixed(2);
+
     if (!result.cardPresent || !result.cornersValid) {
       this.bucket.push(null);
-      this.setStatus(result.cardPresent ? "Card found; waiting for stable corners…" : "Looking for a card…");
+      this.setStatus(
+        result.cardPresent
+          ? `Card found; waiting for stable corners… corner ${cornerConfidence}/${cornerThreshold}.`
+          : `Looking for a card… corner ${cornerConfidence}/${cornerThreshold}.`,
+      );
       return;
     }
 
     if (!Number.isFinite(result.score) || result.score < this.config.matchThreshold) {
       this.bucket.push(null);
-      this.setStatus(`Candidate below threshold (${result.score?.toFixed(2) ?? "—"}).`);
+      this.setStatus(
+        `Candidate below threshold (${result.score?.toFixed(2) ?? "—"}), corner ${cornerConfidence}/${cornerThreshold}.`,
+      );
       return;
     }
 

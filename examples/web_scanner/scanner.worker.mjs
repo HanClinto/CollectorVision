@@ -27,7 +27,7 @@ const DETECTOR_SIZE = 384;
 const EMBEDDER_SIZE = 448;
 const DEWARP_W = EMBEDDER_SIZE;
 const DEWARP_H = EMBEDDER_SIZE;
-const MIN_SHARPNESS = 0.02;
+const DEFAULT_MIN_CORNER_CONFIDENCE = 0.02;
 const IMAGENET_MEAN = [0.485, 0.456, 0.406];
 const IMAGENET_STD = [0.229, 0.224, 0.225];
 
@@ -40,6 +40,10 @@ const ASSET_STORE_NAME = "assets";
 
 function sigmoid(x) {
   return 1 / (1 + Math.exp(-x));
+}
+
+function clamp01(value) {
+  return Math.min(1, Math.max(0, Number(value) || 0));
 }
 
 function orientShortestEdgeTop(corners, width, height) {
@@ -505,10 +509,17 @@ function isIOS() {
 // ---------------------------------------------------------------------------
 
 class WorkerRuntime {
-  constructor(manifest, useWebGpu = false, catalogLimit = null, rotationInvariant = true) {
+  constructor(
+    manifest,
+    useWebGpu = false,
+    catalogLimit = null,
+    rotationInvariant = true,
+    minCornerConfidence = DEFAULT_MIN_CORNER_CONFIDENCE,
+  ) {
     this.manifest = manifest;
     this.useWebGpu = useWebGpu;
     this.rotationInvariant = rotationInvariant;
+    this.minCornerConfidence = clamp01(minCornerConfidence);
     this.catalogLimit = Number.isFinite(catalogLimit) && catalogLimit > 0
       ? Math.floor(catalogLimit)
       : null;
@@ -534,6 +545,12 @@ class WorkerRuntime {
     this.embedderInputTensor = createInputTensor(EMBEDDER_SIZE);
     this._lastRawCorners = null;
     this._lastDetectorInput = null;
+  }
+
+  updateConfig({ minCornerConfidence } = {}) {
+    if (minCornerConfidence !== undefined) {
+      this.minCornerConfidence = clamp01(minCornerConfidence);
+    }
   }
 
   async load(onStage) {
@@ -662,11 +679,12 @@ class WorkerRuntime {
     this._lastRawCorners = points.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join("  ");
     const t4 = performance.now();
 
+    const confidence = sharpness ?? sigmoid(presenceLogit);
     return {
       corners: orderCorners(points, vw, vh),
       sharpness,
-      confidence: sharpness ?? sigmoid(presenceLogit),
-      cardPresent: (sharpness ?? sigmoid(presenceLogit)) >= MIN_SHARPNESS,
+      confidence,
+      cardPresent: confidence >= this.minCornerConfidence,
       timing: {
         detectorDrawMs: t1 - t0,
         detectorInputMs: t2 - t1,
@@ -992,6 +1010,7 @@ self.onmessage = async ({ data }) => {
         useWebGpu,
         catalogLimit,
         data.rotationInvariant !== false,
+        data.minCornerConfidence,
       );
       await runtime.load((stage, ratio, loaded, total, cached) => {
         self.postMessage({ type: "progress", stage, ratio, loaded, total, cached });
@@ -1012,6 +1031,10 @@ self.onmessage = async ({ data }) => {
         data.captureRequested ?? false,
         data.includeDebugBitmaps ?? false,
       );
+    } else if (data.type === "config") {
+      runtime?.updateConfig({
+        minCornerConfidence: data.minCornerConfidence,
+      });
     }
   } catch (error) {
     self.postMessage({ type: "error", message: error?.message ?? String(error) });

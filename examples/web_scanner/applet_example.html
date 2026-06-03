@@ -36,16 +36,27 @@
           <details class="scan-settings">
             <summary>Scan settings</summary>
             <div class="scan-settings-grid">
-              <label>Threshold <input id="scan-threshold" type="number" min="0" max="1" step="0.01" /></label>
-              <label>Consecutive scans <input id="scan-consecutive" type="number" min="1" max="6" step="1" /></label>
-              <label>
+              <label class="scan-settings-mic" for="scan-corner-threshold">
+                <span>Corner threshold <span id="scan-corner-threshold-label">0.02</span></span>
+                <input id="scan-corner-threshold" type="range" min="0" max="1" step="0.01" />
+                <span class="scan-settings-meter" aria-hidden="true">
+                  <span id="scan-corner-signal-fill" class="scan-settings-meter__fill"></span>
+                  <span id="scan-corner-signal-threshold" class="scan-settings-meter__threshold"></span>
+                </span>
+                <span id="scan-corner-signal-value" class="scan-settings-meter-value">Current 0.00</span>
+              </label>
+              <label class="scan-settings-field">Threshold <input id="scan-threshold" type="number" min="0" max="1" step="0.01" /></label>
+              <label class="scan-settings-field">Consecutive scans <input id="scan-consecutive" type="number" min="1" max="6" step="1" /></label>
+              <label class="scan-settings-slider">
                 Scan interval <span id="scan-interval-label">900ms</span>
                 <input id="scan-interval" type="range" min="0" max="1200" step="25" />
               </label>
-              <label><input id="scan-webgpu" type="checkbox" /> Enable WebGPU (experimental)</label>
-              <label><input id="scan-fps-overlay" type="checkbox" /> Show FPS debug overlay</label>
-              <label><input id="scan-group-secondary" type="checkbox" /> Group printings by secondary ID (oracle)</label>
-              <button id="apply-scan-settings" class="secondary" type="button">Apply</button>
+              <label class="scan-settings-toggle"><input id="scan-webgpu" type="checkbox" /> <span>Enable WebGPU (experimental)</span></label>
+              <label class="scan-settings-toggle"><input id="scan-fps-overlay" type="checkbox" /> <span>Show FPS debug overlay</span></label>
+              <label class="scan-settings-toggle"><input id="scan-group-secondary" type="checkbox" /> <span>Group printings by secondary ID (oracle)</span></label>
+              <div class="scan-settings-actions">
+                <button id="apply-scan-settings" class="secondary" type="button">Apply</button>
+              </div>
             </div>
           </details>
           <pre id="events">Waiting for cards…</pre>

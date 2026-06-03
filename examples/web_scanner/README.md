@@ -156,6 +156,7 @@ import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanne
 
 const scanner = await createCollectorVisionScannerApplet({
    target: "#collectorvision",
+   minCornerConfidence: 0.02, // corner detector confidence/sharpness gate
    matchThreshold: 0.50,
    consecutiveMatches: 2,
    scanIntervalMs: 900, // set to 0 for max-speed continuous scanning

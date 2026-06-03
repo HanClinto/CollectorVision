@@ -7,6 +7,7 @@ const SETTINGS_KEY = "collectorvision_applet_example_settings";
 const LOG_LIMIT = 12;
 const SCRYFALL_CARD_URL = "https://api.scryfall.com/cards/${card.cardId}";
 const DEFAULT_SCAN_SETTINGS = {
+  minCornerConfidence: 0.02,
   matchThreshold: 0.50,
   consecutiveMatches: 2,
   scanIntervalMs: 900,
@@ -97,6 +98,11 @@ const PRESETS = [
 const events = document.getElementById("events");
 const editorElement = document.getElementById("handler-code");
 const presetSelect = document.getElementById("preset-code");
+const cornerThresholdInput = document.getElementById("scan-corner-threshold");
+const cornerThresholdLabel = document.getElementById("scan-corner-threshold-label");
+const cornerSignalFill = document.getElementById("scan-corner-signal-fill");
+const cornerSignalThreshold = document.getElementById("scan-corner-signal-threshold");
+const cornerSignalValue = document.getElementById("scan-corner-signal-value");
 const thresholdInput = document.getElementById("scan-threshold");
 const consecutiveInput = document.getElementById("scan-consecutive");
 const intervalInput = document.getElementById("scan-interval");
@@ -155,6 +161,8 @@ function readScanSettings() {
 
 function populateScanSettings() {
   const settings = readScanSettings();
+  cornerThresholdInput.value = settings.minCornerConfidence.toFixed(2);
+  updateCornerThresholdUi(settings.minCornerConfidence);
   thresholdInput.value = settings.matchThreshold.toFixed(2);
   consecutiveInput.value = String(settings.consecutiveMatches);
   intervalInput.value = String(Math.max(0, Math.round(Number(settings.scanIntervalMs) || 0)));
@@ -164,18 +172,41 @@ function populateScanSettings() {
   groupSecondaryInput.checked = settings.groupBySecondaryId === true;
 }
 
+function updateCornerThresholdUi(value) {
+  const threshold = clamp(Number(value), 0, 1);
+  cornerThresholdLabel.textContent = threshold.toFixed(2);
+  cornerSignalThreshold.style.left = `${(threshold * 100).toFixed(1)}%`;
+}
+
+function updateCornerSignal(confidence) {
+  const current = clamp(Number(confidence), 0, 1);
+  cornerSignalFill.style.width = `${(current * 100).toFixed(1)}%`;
+  cornerSignalValue.textContent = `Current ${current.toFixed(2)}`;
+}
+
 function scanSettingsFromInputs() {
+  const minCornerConfidence = clamp(Number(cornerThresholdInput.value), 0, 1);
   const matchThreshold = clamp(Number(thresholdInput.value), 0, 1);
   const consecutiveMatches = Math.max(1, Math.round(Number(consecutiveInput.value) || 1));
   const scanIntervalMs = Math.max(0, Math.round(Number(intervalInput.value) || 0));
   const enableWebGpu = webGpuInput.checked === true;
   const showFpsOverlay = fpsOverlayInput.checked === true;
   const groupBySecondaryId = groupSecondaryInput.checked === true;
-  return { matchThreshold, consecutiveMatches, scanIntervalMs, enableWebGpu, showFpsOverlay, groupBySecondaryId };
+  return {
+    minCornerConfidence,
+    matchThreshold,
+    consecutiveMatches,
+    scanIntervalMs,
+    enableWebGpu,
+    showFpsOverlay,
+    groupBySecondaryId,
+  };
 }
 
 async function applyScanSettings({ announce = true } = {}) {
   const settings = scanSettingsFromInputs();
+  cornerThresholdInput.value = settings.minCornerConfidence.toFixed(2);
+  updateCornerThresholdUi(settings.minCornerConfidence);
   thresholdInput.value = settings.matchThreshold.toFixed(2);
   consecutiveInput.value = String(settings.consecutiveMatches);
   intervalInput.value = String(settings.scanIntervalMs);
@@ -194,6 +225,7 @@ async function applyScanSettings({ announce = true } = {}) {
   if (announce) {
     log(
       "Scan settings:",
+      `corner threshold ${settings.minCornerConfidence.toFixed(2)},`,
       `threshold ${settings.matchThreshold.toFixed(2)},`,
       `${settings.consecutiveMatches} consecutive,`,
       settings.scanIntervalMs <= 0 ? "max-speed scanning," : `${settings.scanIntervalMs}ms interval,`,
@@ -208,6 +240,10 @@ async function applyScanSettings({ announce = true } = {}) {
 intervalInput.addEventListener("input", () => {
   const value = Math.max(0, Math.round(Number(intervalInput.value) || 0));
   intervalLabel.textContent = value <= 0 ? "Max speed" : `${value}ms`;
+});
+
+cornerThresholdInput.addEventListener("input", () => {
+  updateCornerThresholdUi(cornerThresholdInput.value);
 });
 
 function highlightReadonlySignature() {
@@ -446,6 +482,9 @@ async function createScanner(settings) {
     target: "#collectorvision",
     ...settings,
     overlay: true,
+    onResult(result) {
+      updateCornerSignal(result?.confidence ?? 0);
+    },
     async onCardDetected(card) {
       try {
         await handleCard?.(card, { ...mygui, scanner });
