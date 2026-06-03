@@ -7,6 +7,7 @@ const DEFAULT_CONFIG = {
   matchThreshold: 0.5,
   consecutiveMatches: 2,
   cooldownMs: 3500,
+  groupBySecondaryId: true,
   overlay: true,
   camera: {
     facingMode: "environment",
@@ -69,19 +70,25 @@ function structuredCloneSafe(value) {
 }
 
 class ConfirmationBucket {
-  constructor({ consecutiveMatches, cooldownMs }) {
+  constructor({ consecutiveMatches, cooldownMs, groupBySecondaryId }) {
     this.consecutiveMatches = Math.max(1, Number(consecutiveMatches) || 1);
     this.cooldownMs = Math.max(0, Number(cooldownMs) || 0);
+    this.groupBySecondaryId = groupBySecondaryId === true;
     this.candidate = null;
     this.cooldowns = new Map();
   }
 
-  updateConfig({ consecutiveMatches, cooldownMs }) {
+  updateConfig({ consecutiveMatches, cooldownMs, groupBySecondaryId }) {
     if (consecutiveMatches !== undefined) {
       this.consecutiveMatches = Math.max(1, Number(consecutiveMatches) || 1);
     }
     if (cooldownMs !== undefined) {
       this.cooldownMs = Math.max(0, Number(cooldownMs) || 0);
+    }
+    if (groupBySecondaryId !== undefined) {
+      this.groupBySecondaryId = groupBySecondaryId === true;
+      this.candidate = null;
+      this.cooldowns.clear();
     }
   }
 
@@ -90,11 +97,37 @@ class ConfirmationBucket {
     this.cooldowns.clear();
   }
 
+  secondaryIdFor(candidate) {
+    const explicitSecondaryId = String(candidate?.secondaryId ?? "").trim();
+    if (explicitSecondaryId) {
+      return explicitSecondaryId;
+    }
+    const secondaryField = String(candidate?.secondaryIdField ?? "").trim();
+    if (!secondaryField) {
+      return "";
+    }
+    return String(candidate?.[secondaryField] ?? "").trim();
+  }
+
+  bucketKeyFor(candidate) {
+    const primaryCardId = String(candidate?.cardId ?? "").trim();
+    if (!primaryCardId) {
+      return null;
+    }
+    if (this.groupBySecondaryId) {
+      const secondaryId = this.secondaryIdFor(candidate);
+      if (secondaryId) {
+        return `secondary:${secondaryId}`;
+      }
+    }
+    return `card:${primaryCardId}`;
+  }
+
   push(candidate) {
     const now = Date.now();
-    for (const [cardId, expiry] of this.cooldowns) {
+    for (const [bucketKey, expiry] of this.cooldowns) {
       if (now >= expiry) {
-        this.cooldowns.delete(cardId);
+        this.cooldowns.delete(bucketKey);
       }
     }
 
@@ -108,23 +141,36 @@ class ConfirmationBucket {
       return null;
     }
 
-    if (this.cooldowns.has(candidate.cardId)) {
+    const bucketKey = this.bucketKeyFor(candidate);
+    if (!bucketKey) {
       return null;
     }
 
-    if (this.candidate?.cardId === candidate.cardId) {
+    if (this.cooldowns.has(bucketKey)) {
+      return null;
+    }
+
+    if (this.candidate?.bucketKey === bucketKey) {
       this.candidate.count += 1;
-      this.candidate.result = candidate;
+      if (!Number.isFinite(this.candidate.bestScore) || candidate.score > this.candidate.bestScore) {
+        this.candidate.bestScore = candidate.score;
+        this.candidate.bestResult = candidate;
+      }
     } else {
-      this.candidate = { cardId: candidate.cardId, count: 1, result: candidate };
+      this.candidate = {
+        bucketKey,
+        count: 1,
+        bestScore: candidate.score,
+        bestResult: candidate,
+      };
     }
 
     if (this.candidate.count < this.consecutiveMatches) {
       return null;
     }
 
-    const confirmed = this.candidate.result;
-    this.cooldowns.set(confirmed.cardId, now + this.cooldownMs);
+    const confirmed = this.candidate.bestResult;
+    this.cooldowns.set(bucketKey, now + this.cooldownMs);
     this.candidate = null;
     return confirmed;
   }
@@ -310,6 +356,8 @@ export class CollectorVisionScannerApplet extends EventTarget {
 
     const detail = {
       cardId: confirmed.cardId,
+      secondaryId: confirmed.secondaryId ?? null,
+      secondaryIdField: confirmed.secondaryIdField ?? null,
       score: confirmed.score,
       corners: confirmed.corners,
       sharpness: confirmed.sharpness,
@@ -318,6 +366,9 @@ export class CollectorVisionScannerApplet extends EventTarget {
       raw: confirmed,
       detectedAt: new Date().toISOString(),
     };
+    if (detail.secondaryIdField && detail.secondaryId !== null && detail.secondaryId !== undefined) {
+      detail[detail.secondaryIdField] = detail.secondaryId;
+    }
     this.setStatus(`Detected ${detail.cardId} (${detail.score.toFixed(2)}).`);
     this.emit("cardDetected", detail);
     this.config.onCardDetected?.(detail, this);

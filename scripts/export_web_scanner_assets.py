@@ -12,6 +12,7 @@ Writes:
 The catalog payload is kept simple:
   - embeddings.f16.bin  raw float16 rows
   - card_ids.json       aligned card-id array
+    - oracle_ids.json     optional aligned oracle-id array
 """
 
 from __future__ import annotations
@@ -152,6 +153,11 @@ def main() -> None:
     card_ids_path = catalog_dir / f"{args.catalog_key}-card-ids.json"
     card_ids_path.write_text(json.dumps(catalog.card_ids), encoding="utf-8")
 
+    oracle_ids_path = None
+    if catalog.oracle_ids is not None:
+        oracle_ids_path = catalog_dir / f"{args.catalog_key}-oracle-ids.json"
+        oracle_ids_path.write_text(json.dumps(catalog.oracle_ids), encoding="utf-8")
+
     sample_path = samples_dir / "mtg-sample.jpg"
     shutil.copy2(SAMPLE_IMAGE, sample_path)
 
@@ -171,6 +177,11 @@ def main() -> None:
         "catalog": {
             "embeddings": f"catalog/{args.catalog_key}-embeddings.f16.bin",
             "card_ids": f"catalog/{args.catalog_key}-card-ids.json",
+            **(
+                {"oracle_ids": f"catalog/{args.catalog_key}-oracle-ids.json"}
+                if oracle_ids_path is not None
+                else {}
+            ),
             "rows": int(catalog.embeddings.shape[0]),
             "dims": int(catalog.embeddings.shape[1]),
             "dtype": "float16",
@@ -197,6 +208,7 @@ def main() -> None:
             "manifest": _sha256(manifest_path),
             "embeddings": _sha256(embeddings_path),
             "card_ids": _sha256(card_ids_path),
+            **({"oracle_ids": _sha256(oracle_ids_path)} if oracle_ids_path is not None else {}),
         },
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -205,6 +217,8 @@ def main() -> None:
 
     print(f"Wrote {embeddings_path}")
     print(f"Wrote {card_ids_path}")
+    if oracle_ids_path is not None:
+        print(f"Wrote {oracle_ids_path}")
     print(f"Wrote {sample_path}")
     print(f"Wrote {manifest_path}")
     print(f"Wrote {metadata_path}")

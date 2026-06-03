@@ -90,6 +90,13 @@ The intended long-term deploy shape is:
 - normal Pages deploys fetch that prepared bundle from GitHub
 - the HF catalog is only consulted by a separate asset refresh workflow
 
+Current automation behavior:
+
+- `Refresh Web Scanner Assets` checks the configured HF catalog weekly and only
+   rebuilds when the upstream fingerprint changes.
+- Successful refresh runs automatically trigger `Deploy Pages`, which publishes
+   both the full scanner UI and the applet playground with the refreshed bundle.
+
 See:
 
 - [ASSET_DEPLOY_PLAN.md](./ASSET_DEPLOY_PLAN.md)
@@ -151,13 +158,24 @@ const scanner = await createCollectorVisionScannerApplet({
    target: "#collectorvision",
    matchThreshold: 0.50,
    consecutiveMatches: 2,
+   groupBySecondaryId: true,
    scanIntervalMs: 900,
    overlay: true,
    onCardDetected(card) {
-      console.log(card.cardId, card.score);
+      console.log(card.cardId, card.secondaryIdField, card.secondaryId, card.score);
+      // Example: if the catalog exposes `oracle_ids`, then
+      // card.secondaryIdField === "oracleId" and card.oracleId is also set.
    },
 });
 ```
+
+When `groupBySecondaryId` is enabled, the confirmation bucket uses
+`card.secondaryId` (for example oracle ID) when present, so alternate printings
+of the same card share a bucket. The emitted detection keeps the highest-score
+card version seen while that bucket is stabilizing. The scanner auto-detects
+the secondary-id catalog key (for example `oracle_ids`) and exposes the
+detected field as `card.secondaryIdField` plus a convenience alias on the
+detail object (for example `card.oracleId`).
 
 This is a candidate API, not the final library package. It currently reuses the
 existing scanner worker and expects the standard `./assets`, `./vendor`, and

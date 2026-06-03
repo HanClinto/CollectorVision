@@ -9,6 +9,7 @@ const SCRYFALL_CARD_URL = "https://api.scryfall.com/cards/${card.cardId}";
 const DEFAULT_SCAN_SETTINGS = {
   matchThreshold: 0.50,
   consecutiveMatches: 2,
+  groupBySecondaryId: true,
 };
 
 const PRESETS = [
@@ -95,6 +96,7 @@ const editorElement = document.getElementById("handler-code");
 const presetSelect = document.getElementById("preset-code");
 const thresholdInput = document.getElementById("scan-threshold");
 const consecutiveInput = document.getElementById("scan-consecutive");
+const groupSecondaryInput = document.getElementById("scan-group-secondary");
 const tableWrap = document.getElementById("table-wrap");
 const effectsLayer = document.getElementById("effects-layer");
 const totalLabel = document.createElement("div");
@@ -148,22 +150,30 @@ function populateScanSettings() {
   const settings = readScanSettings();
   thresholdInput.value = settings.matchThreshold.toFixed(2);
   consecutiveInput.value = String(settings.consecutiveMatches);
+  groupSecondaryInput.checked = settings.groupBySecondaryId === true;
 }
 
 function scanSettingsFromInputs() {
   const matchThreshold = clamp(Number(thresholdInput.value), 0, 1);
   const consecutiveMatches = Math.max(1, Math.round(Number(consecutiveInput.value) || 1));
-  return { matchThreshold, consecutiveMatches };
+  const groupBySecondaryId = groupSecondaryInput.checked === true;
+  return { matchThreshold, consecutiveMatches, groupBySecondaryId };
 }
 
 function applyScanSettings({ announce = true } = {}) {
   const settings = scanSettingsFromInputs();
   thresholdInput.value = settings.matchThreshold.toFixed(2);
   consecutiveInput.value = String(settings.consecutiveMatches);
+  groupSecondaryInput.checked = settings.groupBySecondaryId;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   scanner?.updateConfig(settings);
   if (announce) {
-    log("Scan settings:", `threshold ${settings.matchThreshold.toFixed(2)},`, `${settings.consecutiveMatches} consecutive`);
+    log(
+      "Scan settings:",
+      `threshold ${settings.matchThreshold.toFixed(2)},`,
+      `${settings.consecutiveMatches} consecutive,`,
+      settings.groupBySecondaryId ? "grouping by secondary ID" : "grouping by card ID",
+    );
   }
   return settings;
 }

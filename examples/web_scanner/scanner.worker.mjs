@@ -12,7 +12,8 @@
 //   { type: 'progress', stage, ratio, loaded?, total?, cached?, inferenceMode? }
 //   { type: 'ready',    inferenceMode }
 //   { type: 'result',   cardPresent, cornersValid, corners, sharpness,
-//                       confidence, cardId, score, rawCorners, detectorInput,
+//                       confidence, cardId, secondaryId, score,
+//                       rawCorners, detectorInput,
 //                       detectorBitmap?, cropBitmap? }
 //   { type: 'error',    message }
 
@@ -233,6 +234,49 @@ function normalizeEmbedding(embedding) {
 
 function chooseBetterMatch(current, candidate) {
   return candidate.score > current.score ? candidate : current;
+}
+
+function snakeToCamel(value) {
+  return String(value).replace(/_([a-zA-Z0-9])/g, (_, char) => char.toUpperCase());
+}
+
+function secondaryCatalogKeyToFieldName(catalogKey) {
+  const key = String(catalogKey ?? "").trim();
+  if (!key) {
+    return null;
+  }
+  const base = key.replace(/_ids$/i, "_id");
+  const fieldName = snakeToCamel(base);
+  return fieldName || null;
+}
+
+function resolveSecondaryIdSource(catalog = {}) {
+  const explicitPath = typeof catalog.secondary_ids === "string"
+    ? catalog.secondary_ids
+    : null;
+  const explicitField = typeof catalog.secondary_id_field === "string"
+    ? catalog.secondary_id_field
+    : null;
+
+  if (explicitPath) {
+    return {
+      assetPath: explicitPath,
+      fieldName: explicitField || "secondaryId",
+    };
+  }
+
+  const candidates = Object.entries(catalog)
+    .filter(([key, value]) => key !== "card_ids" && /_ids$/i.test(key) && typeof value === "string")
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const [catalogKey, assetPath] = candidates[0];
+  return {
+    assetPath,
+    fieldName: explicitField || secondaryCatalogKeyToFieldName(catalogKey) || "secondaryId",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -475,6 +519,8 @@ class WorkerRuntime {
     this.inputNames = {};
     this.embeddings = null;
     this.cardIds = null;
+    this.secondaryIds = null;
+    this.secondaryIdField = null;
     this.dewarpCanvas = new OffscreenCanvas(DEWARP_W, DEWARP_H);
     this.dewarpCtx = this.dewarpCanvas.getContext("2d", { willReadFrequently: true });
     this.dewarpImageData = this.dewarpCtx.createImageData(DEWARP_W, DEWARP_H);
@@ -545,6 +591,10 @@ class WorkerRuntime {
       version,
       (ratio, loaded, total, cached) => onStage?.("catalog", 0.92 + ratio * 0.08, loaded, total, cached),
     );
+    const secondarySource = resolveSecondaryIdSource(this.manifest.catalog);
+    const secondaryIds = secondarySource
+      ? await fetchJsonCached(`./assets/${secondarySource.assetPath}`, version)
+      : null;
     // Keep the catalog in its packed float16 form.  Expanding the full MTG
     // matrix to Float32Array roughly doubles steady-state catalog memory and
     // can push iOS WebKit into tab reloads.  Search converts individual values
@@ -563,6 +613,10 @@ class WorkerRuntime {
       : embeddingBuffer;
     this.embeddings = wrapFloat16Buffer(retainedEmbeddingBuffer);
     this.cardIds = requestedRows < ids.length ? ids.slice(0, requestedRows) : ids;
+    this.secondaryIdField = secondarySource?.fieldName ?? null;
+    this.secondaryIds = Array.isArray(secondaryIds)
+      ? (requestedRows < secondaryIds.length ? secondaryIds.slice(0, requestedRows) : secondaryIds)
+      : null;
     this.catalogRows = Math.min(
       requestedRows,
       this.cardIds.length,
@@ -753,10 +807,17 @@ class WorkerRuntime {
       }
     }
 
-    return {
+    const secondaryId = this.secondaryIds?.[bestIndex] ?? null;
+    const best = {
       score: bestScore,
       cardId: this.cardIds[bestIndex],
+      secondaryId,
+      secondaryIdField: this.secondaryIdField,
     };
+    if (this.secondaryIdField && secondaryId !== null && secondaryId !== undefined) {
+      best[this.secondaryIdField] = secondaryId;
+    }
+    return best;
   }
 }
 
@@ -807,6 +868,8 @@ async function processFrame(bitmap, captureRequested = false, includeDebugBitmap
       sharpness: detection.sharpness,
       confidence: detection.confidence,
       cardId: null,
+      secondaryId: null,
+      secondaryIdField: runtime?.secondaryIdField ?? null,
       score: null,
       rawCorners: runtime._lastRawCorners,
       detectorInput: runtime._lastDetectorInput,
@@ -839,6 +902,8 @@ async function processFrame(bitmap, captureRequested = false, includeDebugBitmap
       sharpness: detection.sharpness,
       confidence: detection.confidence,
       cardId: null,
+      secondaryId: null,
+      secondaryIdField: runtime?.secondaryIdField ?? null,
       score: null,
       rawCorners: runtime._lastRawCorners,
       detectorInput: runtime._lastDetectorInput,
@@ -859,7 +924,7 @@ async function processFrame(bitmap, captureRequested = false, includeDebugBitmap
   if (detectorBitmap) transfer2.push(detectorBitmap);
   if (cropBitmap) transfer2.push(cropBitmap);
   if (captureFrameBitmap) transfer2.push(captureFrameBitmap);
-  self.postMessage({
+  const resultMessage = {
     type: "result",
     captureRequested,
     captureFrameBitmap,
@@ -869,6 +934,8 @@ async function processFrame(bitmap, captureRequested = false, includeDebugBitmap
     sharpness: detection.sharpness,
     confidence: detection.confidence,
     cardId: best.cardId,
+    secondaryId: best.secondaryId,
+    secondaryIdField: best.secondaryIdField,
     score: best.score,
     orientation: best.orientation,
     rawCorners: runtime._lastRawCorners,
@@ -882,7 +949,11 @@ async function processFrame(bitmap, captureRequested = false, includeDebugBitmap
       searchMs,
       totalMs: performance.now() - tFrameStart,
     }),
-  }, transfer2);
+  };
+  if (best.secondaryIdField && best.secondaryId !== null && best.secondaryId !== undefined) {
+    resultMessage[best.secondaryIdField] = best.secondaryId;
+  }
+  self.postMessage(resultMessage, transfer2);
 }
 
 function sumTiming(first, second) {
