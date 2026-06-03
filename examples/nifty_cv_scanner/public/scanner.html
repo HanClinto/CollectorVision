@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CollectorVision Nifty Scanner</title>
+  <link rel="stylesheet" href="/scanner.css">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">CollectorVision</p>
+        <h1>Camera Scanner</h1>
+      </div>
+      <nav class="topbar__links" aria-label="Nifty pages">
+        <a href="/card-view.html" target="_blank" rel="noreferrer">Overlay</a>
+        <a href="/card-controller.html" target="_blank" rel="noreferrer">Controller</a>
+      </nav>
+    </header>
+
+    <section class="workspace">
+      <div class="camera-panel">
+        <div class="camera-frame">
+          <video id="video" autoplay muted playsinline></video>
+          <canvas id="overlay" aria-hidden="true"></canvas>
+          <div class="fps-overlay" id="fps-overlay">FPS --</div>
+          <div class="camera-status" id="camera-status">Camera idle</div>
+        </div>
+
+        <div class="camera-toolbar">
+          <label class="select-label" for="camera-select">Camera</label>
+          <select id="camera-select"></select>
+          <button id="refresh-cameras" type="button">Refresh</button>
+          <button id="start-camera" type="button">Start</button>
+          <button id="stop-camera" type="button" disabled>Stop</button>
+        </div>
+      </div>
+
+      <aside class="result-panel">
+        <div class="result-card">
+          <div class="result-card__image">
+            <img id="crop-preview" alt="Latest dewarped card preview">
+          </div>
+          <div class="result-card__body">
+            <p class="eyebrow">Current Candidate</p>
+            <h2 id="candidate-id">No scan yet</h2>
+            <p class="candidate-note" id="candidate-note">Waiting for a recognition result.</p>
+            <dl class="metrics">
+              <div><dt>Score</dt><dd id="metric-match">-</dd></div>
+              <div><dt>Sharpness</dt><dd id="metric-sharpness">-</dd></div>
+              <div><dt>Total</dt><dd id="metric-total">-</dd></div>
+            </dl>
+          </div>
+        </div>
+
+        <div class="decision-strip" id="decision-strip" data-state="idle">
+          <span id="decision-state">Waiting</span>
+        </div>
+
+        <div class="bucket-panel">
+          <div class="panel-heading">
+            <h2>Recent Buckets</h2>
+            <button id="clear-buckets" type="button">Clear</button>
+          </div>
+          <ol id="bucket-list" class="bucket-list"></ol>
+        </div>
+      </aside>
+    </section>
+
+    <section class="controls-grid" aria-label="Scanner controls">
+      <div class="control-group">
+        <div class="panel-heading">
+          <h2>Capture</h2>
+          <label class="switch"><input id="auto-scan" type="checkbox" checked><span>Auto</span></label>
+        </div>
+        <div class="button-row">
+          <button id="scan-once" type="button">Scan Once</button>
+          <button id="broadcast-current" type="button" disabled>Broadcast Current</button>
+        </div>
+        <label class="range-row" for="scan-interval">
+          <span>Minimum frame interval</span><output id="scan-interval-value">50 ms</output>
+        </label>
+        <input id="scan-interval" type="range" min="0" max="2500" step="50" value="50">
+        <p class="control-hint">Start-to-start delay. 0 ms runs the next frame as soon as processing is free.</p>
+        <label class="range-row" for="jpeg-quality">
+          <span>JPEG quality</span><output id="jpeg-quality-value">0.95</output>
+        </label>
+        <input id="jpeg-quality" type="range" min="0.45" max="0.95" step="0.01" value="0.95">
+      </div>
+
+      <div class="control-group">
+        <div class="panel-heading">
+          <h2>Broadcast Target</h2>
+          <label class="switch"><input id="broadcast-confirmed" type="checkbox" checked><span>Broadcast</span></label>
+        </div>
+        <label class="switch switch--block"><input id="prefetch-images" type="checkbox" checked><span>Prefetch card images</span></label>
+        <label class="target-row" for="broadcast-target">
+          <span>Overlay server</span>
+          <input id="broadcast-target" type="url" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="button-row">
+          <button id="apply-broadcast-target" type="button">Apply Target</button>
+          <button id="reset-broadcast-target" type="button">Use This Server</button>
+        </div>
+        <p class="target-status" id="broadcast-target-status">Broadcasting to this server.</p>
+        <p class="target-status" id="last-broadcast-status">Last broadcast: none</p>
+      </div>
+
+      <div class="control-group">
+        <div class="panel-heading"><h2>Corner Detector</h2></div>
+        <label class="range-row" for="min-sharpness">
+          <span>Minimum sharpness</span><output id="min-sharpness-value">0.040</output>
+        </label>
+        <input id="min-sharpness" type="range" min="0" max="0.08" step="0.001" value="0.040">
+        <div class="sharpness-meter" aria-label="Current corner sharpness">
+          <div class="sharpness-meter__track">
+            <span class="sharpness-meter__fill" id="sharpness-fill"></span>
+            <span class="sharpness-meter__threshold" id="sharpness-threshold"></span>
+          </div>
+          <div class="sharpness-meter__labels">
+            <span>Current</span>
+            <strong id="sharpness-current">-</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <div class="panel-heading"><h2>Recognition</h2></div>
+        <label class="switch switch--block"><input id="rotation-invariant" type="checkbox" checked><span>Scan upside-down cards</span></label>
+        <label class="switch switch--block"><input id="bucket-by-secondary" type="checkbox" checked><span>Bucket by oracle ID</span></label>
+        <label class="range-row" for="match-threshold">
+          <span>Score threshold</span><output id="match-threshold-value">0.55</output>
+        </label>
+        <input id="match-threshold" type="range" min="0.40" max="0.95" step="0.01" value="0.55">
+        <div class="signal-meter" aria-label="Latest score">
+          <div class="signal-meter__track">
+            <span class="signal-meter__fill" id="score-fill"></span>
+            <span class="signal-meter__threshold" id="score-threshold"></span>
+          </div>
+          <div class="signal-meter__labels">
+            <span>Latest</span>
+            <strong id="score-current">-</strong>
+          </div>
+        </div>
+        <label class="range-row" for="confirm-count">
+          <span>Frames to confirm</span><output id="confirm-count-value">3</output>
+        </label>
+        <input id="confirm-count" type="range" min="1" max="8" step="1" value="3">
+        <div class="signal-meter" aria-label="Current bucket fill">
+          <div class="signal-meter__track">
+            <span class="signal-meter__fill" id="confirm-fill"></span>
+            <span class="signal-meter__threshold" id="confirm-threshold"></span>
+          </div>
+          <div class="signal-meter__labels">
+            <span>Best bucket</span>
+            <strong id="confirm-current">0 / 3</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <div class="panel-heading"><h2>Multi-frame</h2></div>
+        <label class="range-row" for="embedding-buffer">
+          <span>Embedding buffer</span><output id="embedding-buffer-value">5</output>
+        </label>
+        <input id="embedding-buffer" type="range" min="0" max="10" step="1" value="5">
+        <label class="range-row" for="prior-similarity">
+          <span>Prior similarity</span><output id="prior-similarity-value">0.65</output>
+        </label>
+        <input id="prior-similarity" type="range" min="0.40" max="0.95" step="0.01" value="0.65">
+        <div class="signal-meter" aria-label="Latest prior similarity">
+          <div class="signal-meter__track">
+            <span class="signal-meter__fill" id="prior-fill"></span>
+            <span class="signal-meter__threshold" id="prior-threshold"></span>
+          </div>
+          <div class="signal-meter__labels">
+            <span>Latest</span>
+            <strong id="prior-current">-</strong>
+          </div>
+        </div>
+        <label class="range-row" for="bucket-window">
+          <span>Bucket window</span><output id="bucket-window-value">8</output>
+        </label>
+        <input id="bucket-window" type="range" min="2" max="20" step="1" value="8">
+      </div>
+    </section>
+
+    <canvas id="capture-canvas" hidden></canvas>
+  </main>
+  <script src="/scanner.js"></script>
+</body>
+</html>

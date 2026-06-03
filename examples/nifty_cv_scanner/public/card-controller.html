@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset=utf-8>
+<title>CollectorVision Nifty Scanner Card Controller</title>
+  <script src="/socket.io/socket.io.js"></script>
+
+<style>
+* { -moz-box-sizing: border-box; -webkit-box-sizing: border-box; box-sizing: border-box; }
+html,body {
+height:100%;margin:0;
+font-family:sans-serif;
+}
+#holder { 
+position:absolute;
+border: 5px double #ccc; 
+text-align:center;
+width:calc(100% - 40px);
+height:calc(100% - 70px);
+margin:20px 20px 50px 20px;
+
+}
+#holder.hover { background-color:grey;}
+#holder img { 
+display: block; 
+margin: 0; 
+
+}
+#holder p {
+	margin:0;
+	position: relative;
+	top: 50%;
+	-webkit-transform: translateY(-50%);
+	-ms-transform: translateY(-50%);
+	transform: translateY(-50%);
+	color:#ccc;
+	font-size:40px;
+	font-weight:bold;
+}
+#buttons {
+	position:absolute;
+	bottom:10px;
+	left:0;
+	width:100%;
+	text-align:center;
+}
+#buttons button {
+	display:inline-block;
+	border: 1px solid #ccc; 
+	height:30px;
+	color:#AAA;
+	background-color:white;
+	text-decoration:none;
+	font-weight:bold;
+	width:150px;
+	text-align:center;
+	line-height:30px;
+	margin:0 20px;
+	cursor:pointer;
+}
+#buttons button:hover {
+	background-color:#ddd;
+	color:#fff;
+	
+}
+#buttons button[disabled],
+#buttons button[disabled]:hover {
+	background-color:white;
+	color:#eee;
+	border: 1px solid #eee; 
+	cursor:default;
+	
+}
+
+</style>
+</head>
+<body>
+  <div id="holder">
+  	<p>Drop Image Here</p>
+  </div> 
+<div id="buttons"><button onclick="return clearImage()">Clear</button><button disabled id="override" onclick="return overrideStop()">Remove Override</button></div>
+<script>
+  var socket = io.connect('',{transports: ['websocket']});
+  var override = document.getElementById('override');
+
+  var holder = document.getElementById('holder'),
+    tests = {
+      filereader: typeof FileReader != 'undefined',
+      dnd: 'draggable' in document.createElement('span'),
+      formdata: !!window.FormData,
+      progress: "upload" in new XMLHttpRequest
+    }, 
+    support = {
+      filereader: document.getElementById('filereader'),
+      formdata: document.getElementById('formdata'),
+      progress: document.getElementById('progress')
+    },
+    acceptedTypes = {
+      'image/png': true,
+      'image/jpeg': true,
+      'image/gif': true
+    };
+
+function drop(evt) {
+	this.className = '';
+	evt.stopPropagation();
+	evt.preventDefault(); 
+	var imageUrl = false;
+	
+	 var imageHtml = evt.dataTransfer.getData('text/html');
+	 var re = /src="(.*?)"/gm;
+	 var result = re.exec(imageHtml);
+	 if(result){
+		imageUrl = decodeEntities(result[1]);
+	 }
+	 
+	 if(!imageUrl){
+			previewfile(evt.dataTransfer.files[0]);
+	}
+	else {
+	  updateImage(imageUrl);
+	}
+}
+
+function updateImage(src){
+	override.disabled = false;
+
+	pub(src);
+}
+
+function clearImage(){
+	override.disabled = true;
+	pub('clear');
+}
+function overrideStop(){
+	override.disabled = true;
+	pub('overrideStop');
+}
+
+function pub(message) {
+      		socket.emit('card_image',{'auto':false,'src':message});
+    }
+    
+function previewfile(file) {
+  if (tests.filereader === true && acceptedTypes[file.type] === true) {
+    var reader = new FileReader();
+    
+    reader.onload = function (event) {
+      var image = new Image();
+      image.src = event.target.result;
+      updateImage(image.src);
+    };
+
+    reader.readAsDataURL(file);
+  } 
+}
+    
+    
+  holder.ondragover = function () { this.className = 'hover'; return false; };
+  holder.ondragend = function () { this.className = ''; return false; };
+  holder.addEventListener('drop', drop, false);
+  holder.ondrop = function (e) {e.preventDefault();}
+  
+  var decodeEntities = (function() {
+  // this prevents any overhead from creating the object each time
+  var element = document.createElement('div');
+
+  function decodeHTMLEntities (str) {
+    if(str && typeof str === 'string') {
+      // strip script/html tags
+      str = str.replace(/<script[^>]*>([\S\s]*?)<\/script>/gmi, '');
+      str = str.replace(/<\/?\w(?:[^"'>]|"[^"]*"|'[^']*')*>/gmi, '');
+      element.innerHTML = str;
+      str = element.textContent;
+      element.textContent = '';
+    }
+
+    return str;
+  }
+
+  return decodeHTMLEntities;
+})();
+</script>
+</body>
+</html>

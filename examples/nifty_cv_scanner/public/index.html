@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CollectorVision Nifty Scanner</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f5f2;
+      --panel: #ffffff;
+      --ink: #1e2528;
+      --muted: #687276;
+      --line: #d9dedb;
+      --accent: #2f7f6f;
+      --accent-strong: #1d5e52;
+      --shadow: 0 18px 40px rgba(31, 39, 42, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0;
+    }
+
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .eyebrow {
+      margin: 0 0 6px;
+      color: var(--accent-strong);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1, h2, p { margin: 0; letter-spacing: 0; }
+    h1 { font-size: clamp(30px, 5vw, 52px); line-height: 1; }
+    .summary { max-width: 560px; color: var(--muted); line-height: 1.5; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    a.card {
+      display: grid;
+      gap: 10px;
+      min-height: 160px;
+      padding: 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      color: inherit;
+      text-decoration: none;
+    }
+
+    a.card:hover { border-color: var(--accent); }
+    .card h2 { font-size: 22px; }
+    .card p { color: var(--muted); line-height: 1.45; }
+    .card span { align-self: end; color: var(--accent-strong); font-weight: 800; }
+
+    @media (max-width: 860px) {
+      header { display: grid; align-items: start; }
+      .grid { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      main { width: min(100% - 20px, 1120px); padding: 20px 0; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">CollectorVision</p>
+        <h1>Nifty Scanner</h1>
+      </div>
+      <p class="summary">Python-backed card recognition and stream overlay tools. Use the scanner to recognize cards, the overlay as your browser source, and the controller for manual overrides.</p>
+    </header>
+
+    <section class="grid" aria-label="Nifty pages">
+      <a class="card" href="/scanner.html">
+        <h2>Scanner</h2>
+        <p>Choose a camera, tune thresholds, process frames with CollectorVision, and broadcast confirmed cards.</p>
+        <span>Open scanner</span>
+      </a>
+      <a class="card" href="/card-view.html">
+        <h2>Overlay</h2>
+        <p>Browser-source card image overlay for OBS or other streaming software.</p>
+        <span>Open overlay</span>
+      </a>
+      <a class="card" href="/card-controller.html">
+        <h2>Controller</h2>
+        <p>Manual drag-and-drop override page compatible with the original Nifty workflow.</p>
+        <span>Open controller</span>
+      </a>
+      <a class="card" href="/card-view.xml">
+        <h2>OBS XML</h2>
+        <p>Browser source metadata preserved from the original Nifty Recognizer project.</p>
+        <span>Open XML</span>
+      </a>
+      <a class="card" href="/docs">
+        <h2>API Docs</h2>
+        <p>FastAPI documentation for identify, upload, health, and compatibility routes.</p>
+        <span>Open docs</span>
+      </a>
+      <a class="card" href="/health">
+        <h2>Health</h2>
+        <p>Small JSON endpoint for checking that the server is running.</p>
+        <span>Open health</span>
+      </a>
+    </section>
+  </main>
+</body>
+</html>
