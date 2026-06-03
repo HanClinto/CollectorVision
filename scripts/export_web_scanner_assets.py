@@ -52,6 +52,7 @@ ORT_TARBALL = f"https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-{OR
 # See ARCHITECTURE.md "Lessons Learned" section for the full history.
 ORT_FILES = [
     "package/dist/ort.webgpu.min.mjs",
+    "package/dist/ort.webgpu.min.mjs.map",
     "package/dist/ort-wasm-simd-threaded.asyncify.mjs",
     "package/dist/ort-wasm-simd-threaded.asyncify.wasm",
 ]
