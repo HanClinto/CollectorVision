@@ -175,15 +175,20 @@ function populateScanSettings() {
 }
 
 function updateCornerThresholdUi(value) {
-  const threshold = clamp(Number(value), 0, 1);
+  const threshold = clamp(Number(value), 0, MAX_GUI_CORNER_CONFIDENCE);
   cornerThresholdLabel.textContent = threshold.toFixed(2);
-  cornerSignalThreshold.style.left = `${(threshold * 100).toFixed(1)}%`;
+  const ratio = threshold / MAX_GUI_CORNER_CONFIDENCE;
+  cornerSignalThreshold.style.left = `${(ratio * 100).toFixed(1)}%`;
 }
 
 function updateCornerSignal(confidence) {
-  const current = clamp(Number(confidence), 0, 1);
-  cornerSignalFill.style.width = `${(current * 100).toFixed(1)}%`;
-  cornerSignalValue.textContent = `Current ${current.toFixed(2)}`;
+  const raw = Math.max(0, Number(confidence) || 0);
+  const current = clamp(raw, 0, MAX_GUI_CORNER_CONFIDENCE);
+  const ratio = current / MAX_GUI_CORNER_CONFIDENCE;
+  cornerSignalFill.style.width = `${(ratio * 100).toFixed(1)}%`;
+  cornerSignalValue.textContent = raw > MAX_GUI_CORNER_CONFIDENCE
+    ? `Current ${MAX_GUI_CORNER_CONFIDENCE.toFixed(2)}+`
+    : `Current ${current.toFixed(2)}`;
 }
 
 function scanSettingsFromInputs() {
