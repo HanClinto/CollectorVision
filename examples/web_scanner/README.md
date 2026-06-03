@@ -158,8 +158,9 @@ const scanner = await createCollectorVisionScannerApplet({
    target: "#collectorvision",
    matchThreshold: 0.50,
    consecutiveMatches: 2,
+   scanIntervalMs: 900, // set to 0 for max-speed continuous scanning
+   enableWebGpu: false, // optional; default off
    groupBySecondaryId: true,
-   scanIntervalMs: 900,
    overlay: true,
    onCardDetected(card) {
       console.log(card.cardId, card.secondaryIdField, card.secondaryId, card.score);

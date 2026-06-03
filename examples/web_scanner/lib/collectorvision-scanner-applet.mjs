@@ -8,6 +8,7 @@ const DEFAULT_CONFIG = {
   consecutiveMatches: 2,
   cooldownMs: 3500,
   groupBySecondaryId: true,
+  showFpsOverlay: true,
   overlay: true,
   camera: {
     facingMode: "environment",
@@ -191,6 +192,8 @@ export class CollectorVisionScannerApplet extends EventTarget {
     this.ready = false;
     this.started = false;
     this.lastResult = null;
+    this.lastFpsTimestamp = null;
+    this.fpsEma = null;
     this.captureCanvas = document.createElement("canvas");
     this.captureCtx = this.captureCanvas.getContext("2d");
     this.elements = this.createElements();
@@ -229,7 +232,7 @@ export class CollectorVisionScannerApplet extends EventTarget {
     this.resizeCanvas();
     this.started = true;
     this.setStatus(this.ready ? "Scanning…" : "Camera ready. Loading models…");
-    this.timer = window.setInterval(() => this.tick(), this.config.scanIntervalMs);
+    this.restartTickLoop();
     this.startPreviewLoop();
     this.tick();
   }
@@ -245,6 +248,8 @@ export class CollectorVisionScannerApplet extends EventTarget {
     }
     this.started = false;
     this.workerBusy = false;
+    this.lastFpsTimestamp = null;
+    this.fpsEma = null;
     for (const track of this.stream?.getTracks?.() ?? []) {
       track.stop();
     }
@@ -263,10 +268,21 @@ export class CollectorVisionScannerApplet extends EventTarget {
   updateConfig(config) {
     this.config = mergeConfig({ ...this.config, ...config });
     this.bucket.updateConfig(this.config);
+    this.updateFpsVisibility();
     if (config.scanIntervalMs !== undefined && this.started) {
-      clearInterval(this.timer);
-      this.timer = window.setInterval(() => this.tick(), this.config.scanIntervalMs);
+      this.restartTickLoop();
     }
+  }
+
+  restartTickLoop() {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    if (!this.started || Number(this.config.scanIntervalMs) <= 0) {
+      return;
+    }
+    this.timer = window.setInterval(() => this.tick(), this.config.scanIntervalMs);
   }
 
   createElements() {
@@ -278,11 +294,13 @@ export class CollectorVisionScannerApplet extends EventTarget {
         .cv-applet__stage { position: relative; overflow: hidden; border-radius: 1rem; background: #020617; aspect-ratio: 16 / 9; box-shadow: 0 1rem 3rem rgba(2, 6, 23, 0.28); }
         .cv-applet__video { display: block; width: 100%; height: 100%; object-fit: cover; }
         .cv-applet__canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; pointer-events: none; }
+        .cv-applet__fps { position: absolute; right: 0.5rem; top: 0.5rem; margin: 0; padding: 0.2rem 0.45rem; border-radius: 0.45rem; background: rgba(2, 6, 23, 0.75); color: #e2e8f0; font-size: 0.72rem; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; pointer-events: none; }
         .cv-applet__status { margin: 0; padding: 0.65rem 0.75rem; border-radius: 0.75rem; background: rgba(15, 23, 42, 0.86); color: #e2e8f0; font-size: 0.9rem; }
       </style>
       <div class="cv-applet__stage">
         <video class="cv-applet__video" playsinline muted></video>
         <canvas class="cv-applet__canvas"></canvas>
+        <p class="cv-applet__fps" aria-live="off">FPS --</p>
       </div>
       <p class="cv-applet__status">Idle.</p>
     `;
@@ -290,6 +308,7 @@ export class CollectorVisionScannerApplet extends EventTarget {
       root,
       video: root.querySelector("video"),
       canvas: root.querySelector("canvas"),
+      fps: root.querySelector(".cv-applet__fps"),
       status: root.querySelector(".cv-applet__status"),
     };
   }
@@ -297,6 +316,35 @@ export class CollectorVisionScannerApplet extends EventTarget {
   mount() {
     this.target.replaceChildren(this.elements.root);
     this.ctx = this.elements.canvas.getContext("2d");
+    this.updateFpsVisibility();
+  }
+
+  updateFpsVisibility() {
+    if (!this.elements?.fps) {
+      return;
+    }
+    this.elements.fps.hidden = this.config.showFpsOverlay !== true;
+  }
+
+  updateFps(now = performance.now()) {
+    if (this.config.showFpsOverlay !== true || !this.elements?.fps) {
+      return;
+    }
+    if (this.lastFpsTimestamp === null) {
+      this.lastFpsTimestamp = now;
+      this.elements.fps.textContent = "FPS --";
+      return;
+    }
+    const deltaMs = now - this.lastFpsTimestamp;
+    this.lastFpsTimestamp = now;
+    if (!Number.isFinite(deltaMs) || deltaMs <= 0) {
+      return;
+    }
+    const instantaneousFps = 1000 / deltaMs;
+    this.fpsEma = this.fpsEma === null
+      ? instantaneousFps
+      : this.fpsEma * 0.8 + instantaneousFps * 0.2;
+    this.elements.fps.textContent = `FPS ${this.fpsEma.toFixed(1)}`;
   }
 
   async loadManifest() {
@@ -322,12 +370,19 @@ export class CollectorVisionScannerApplet extends EventTarget {
     }
     if (data.type === "result") {
       this.workerBusy = false;
+      this.updateFps();
       this.handleResult(data);
+      if (this.started && Number(this.config.scanIntervalMs) <= 0) {
+        this.tick();
+      }
       return;
     }
     if (data.type === "error") {
       this.workerBusy = false;
       this.handleError(data.message);
+      if (this.started && Number(this.config.scanIntervalMs) <= 0) {
+        this.tick();
+      }
     }
   }
 

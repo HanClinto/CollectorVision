@@ -9,6 +9,9 @@ const SCRYFALL_CARD_URL = "https://api.scryfall.com/cards/${card.cardId}";
 const DEFAULT_SCAN_SETTINGS = {
   matchThreshold: 0.50,
   consecutiveMatches: 2,
+  scanIntervalMs: 900,
+  enableWebGpu: false,
+  showFpsOverlay: true,
   groupBySecondaryId: true,
 };
 
@@ -96,6 +99,10 @@ const editorElement = document.getElementById("handler-code");
 const presetSelect = document.getElementById("preset-code");
 const thresholdInput = document.getElementById("scan-threshold");
 const consecutiveInput = document.getElementById("scan-consecutive");
+const intervalInput = document.getElementById("scan-interval");
+const intervalLabel = document.getElementById("scan-interval-label");
+const webGpuInput = document.getElementById("scan-webgpu");
+const fpsOverlayInput = document.getElementById("scan-fps-overlay");
 const groupSecondaryInput = document.getElementById("scan-group-secondary");
 const tableWrap = document.getElementById("table-wrap");
 const effectsLayer = document.getElementById("effects-layer");
@@ -150,33 +157,58 @@ function populateScanSettings() {
   const settings = readScanSettings();
   thresholdInput.value = settings.matchThreshold.toFixed(2);
   consecutiveInput.value = String(settings.consecutiveMatches);
+  intervalInput.value = String(Math.max(0, Math.round(Number(settings.scanIntervalMs) || 0)));
+  intervalLabel.textContent = Number(intervalInput.value) <= 0 ? "Max speed" : `${intervalInput.value}ms`;
+  webGpuInput.checked = settings.enableWebGpu === true;
+  fpsOverlayInput.checked = settings.showFpsOverlay !== false;
   groupSecondaryInput.checked = settings.groupBySecondaryId === true;
 }
 
 function scanSettingsFromInputs() {
   const matchThreshold = clamp(Number(thresholdInput.value), 0, 1);
   const consecutiveMatches = Math.max(1, Math.round(Number(consecutiveInput.value) || 1));
+  const scanIntervalMs = Math.max(0, Math.round(Number(intervalInput.value) || 0));
+  const enableWebGpu = webGpuInput.checked === true;
+  const showFpsOverlay = fpsOverlayInput.checked === true;
   const groupBySecondaryId = groupSecondaryInput.checked === true;
-  return { matchThreshold, consecutiveMatches, groupBySecondaryId };
+  return { matchThreshold, consecutiveMatches, scanIntervalMs, enableWebGpu, showFpsOverlay, groupBySecondaryId };
 }
 
-function applyScanSettings({ announce = true } = {}) {
+async function applyScanSettings({ announce = true } = {}) {
   const settings = scanSettingsFromInputs();
   thresholdInput.value = settings.matchThreshold.toFixed(2);
   consecutiveInput.value = String(settings.consecutiveMatches);
+  intervalInput.value = String(settings.scanIntervalMs);
+  intervalLabel.textContent = settings.scanIntervalMs <= 0 ? "Max speed" : `${settings.scanIntervalMs}ms`;
+  webGpuInput.checked = settings.enableWebGpu;
+  fpsOverlayInput.checked = settings.showFpsOverlay;
   groupSecondaryInput.checked = settings.groupBySecondaryId;
+  const shouldRecreateScanner = !!scanner && scanner.config.enableWebGpu !== settings.enableWebGpu;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  scanner?.updateConfig(settings);
+  if (shouldRecreateScanner) {
+    scanner.dispose();
+    scanner = await createScanner(settings);
+  } else {
+    scanner?.updateConfig(settings);
+  }
   if (announce) {
     log(
       "Scan settings:",
       `threshold ${settings.matchThreshold.toFixed(2)},`,
       `${settings.consecutiveMatches} consecutive,`,
+      settings.scanIntervalMs <= 0 ? "max-speed scanning," : `${settings.scanIntervalMs}ms interval,`,
+      settings.enableWebGpu ? "WebGPU on," : "WebGPU off,",
+      settings.showFpsOverlay ? "FPS overlay on," : "FPS overlay off,",
       settings.groupBySecondaryId ? "grouping by secondary ID" : "grouping by card ID",
     );
   }
   return settings;
 }
+
+intervalInput.addEventListener("input", () => {
+  const value = Math.max(0, Math.round(Number(intervalInput.value) || 0));
+  intervalLabel.textContent = value <= 0 ? "Max speed" : `${value}ms`;
+});
 
 function highlightReadonlySignature() {
   document.querySelectorAll(".function-signature code").forEach((element) => {
@@ -398,7 +430,9 @@ document.getElementById("reset-code").addEventListener("click", () => {
 });
 
 document.getElementById("clear-table").addEventListener("click", mygui.clear);
-document.getElementById("apply-scan-settings").addEventListener("click", () => applyScanSettings());
+document.getElementById("apply-scan-settings").addEventListener("click", async () => {
+  await applyScanSettings();
+});
 
 presetSelect.addEventListener("change", () => {
   localStorage.setItem(PRESET_KEY, presetSelect.value);
@@ -407,22 +441,24 @@ presetSelect.addEventListener("change", () => {
 
 compileHandler();
 
-scanner = await createCollectorVisionScannerApplet({
-  target: "#collectorvision",
-  ...applyScanSettings({ announce: false }),
-  scanIntervalMs: 900,
-  overlay: true,
-  enableWebGpu: false,
-  async onCardDetected(card) {
-    try {
-      await handleCard?.(card, { ...mygui, scanner });
-    } catch (error) {
-      log("Handler error:", error.message);
-    }
-  },
-  onError(error) {
-    log("Scanner error:", error.message);
-  },
-});
+async function createScanner(settings) {
+  return createCollectorVisionScannerApplet({
+    target: "#collectorvision",
+    ...settings,
+    overlay: true,
+    async onCardDetected(card) {
+      try {
+        await handleCard?.(card, { ...mygui, scanner });
+      } catch (error) {
+        log("Handler error:", error.message);
+      }
+    },
+    onError(error) {
+      log("Scanner error:", error.message);
+    },
+  });
+}
+
+scanner = await createScanner(await applyScanSettings({ announce: false }));
 
 window.collectorVisionScanner = scanner;
