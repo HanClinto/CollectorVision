@@ -5,18 +5,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CollectorVision Scanner Playground</title>
     <script>
-      // The main scanner page installs a cross-origin-isolation service worker
-      // for threaded WASM. This playground loads public Scryfall card art, which
-      // is not compatible with `Cross-Origin-Embedder-Policy: require-corp`, so
-      // opt out if an older service worker already isolated this page.
-      if (window.crossOriginIsolated && "serviceWorker" in navigator) {
-        navigator.serviceWorker.getRegistration("./").then((registration) => {
-          if (!registration) {
-            return;
-          }
-          return registration.unregister().then(() => window.location.reload());
-        });
-      }
+      (function () {
+        if (!("serviceWorker" in navigator)) return;
+
+        var params = new URLSearchParams(location.search);
+        var skipFromQuery = params.get("coi") === "0" || params.get("skipCoi") === "1";
+
+        if (skipFromQuery) {
+          navigator.serviceWorker.getRegistration("./")
+            .then(function (reg) {
+              if (!reg) return;
+              return reg.unregister().then(function (removed) {
+                if (removed && navigator.serviceWorker.controller) {
+                  location.reload();
+                }
+              });
+            })
+            .catch(function (err) {
+              console.warn("COI service worker unregister failed:", err);
+            });
+          return;
+        }
+
+        if (self.crossOriginIsolated) return;
+
+        navigator.serviceWorker.register("./coi-serviceworker.js", { scope: "./" })
+          .then(function (reg) {
+            if (reg.active && !navigator.serviceWorker.controller) {
+              location.reload();
+            }
+          })
+          .catch(function (err) {
+            console.warn("COI service worker registration failed:", err);
+          });
+      })();
     </script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/themes/prism.min.css" />
     <link rel="stylesheet" href="./applet_example.css?v=__BUILD_ID__" />
@@ -27,7 +49,7 @@
       <header>
         <p class="eyebrow">Candidate API</p>
         <h1>Scanner Playground</h1>
-        <p>Try preset card handlers, edit the JavaScript, and see how the applet can fit into your own page. This playground keeps everything local in your browser: apply a handler, then scan a card.</p>
+        <p>Try preset card handlers, edit the JavaScript, and see how the applet can fit into your own page. This playground keeps everything local in your browser: apply a handler, then scan a card. Need to disable cross-origin isolation for debugging? Open with <code>?coi=0</code>.</p>
       </header>
 
       <section class="layout">
