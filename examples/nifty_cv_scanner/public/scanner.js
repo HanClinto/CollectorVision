@@ -125,7 +125,9 @@
   function normalizeTarget(target) {
     var raw = (target || '').trim();
     if (!raw) return defaultBroadcastTarget;
-    return new URL(raw, window.location.href).origin;
+    var url = new URL(raw, window.location.href);
+    url.hash = '';
+    return url.toString();
   }
 
   function updateBroadcastTargetStatus() {

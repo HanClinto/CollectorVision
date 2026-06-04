@@ -91,7 +91,9 @@ the client-side scanner loop simple:
   recognition FPS.
 - Broadcast target defaults to the same server that served `scanner.html`
   (`window.location.origin`, usually `http://127.0.0.1:8000`). Change it when
-  the overlay is connected to a different Nifty server, host, or port.
+  the overlay is connected to a different Nifty server, host, or port. For an
+  original Nifty/Socket.IO server, use the full websocket endpoint, for example
+  `ws://localhost/socket.io/?type=cardImage`.
 
 For camera permissions, use `http://127.0.0.1:8000/scanner.html` or another
 secure/local origin accepted by your browser.
@@ -150,7 +152,7 @@ Full explanation of all settings is outside of the scope of this document, but f
 
 ## Notes And Attribution
 
-The public page layout and controller behavior are intentionally kept close to the original `nifty-recognizer` project. The Node server has been replaced with a FastAPI server and a tiny `/socket.io/socket.io.js` compatibility shim that uses native WebSockets.
+The public page layout and controller behavior are intentionally kept close to the original `nifty-recognizer` project. The Node server has been replaced with a FastAPI server and a tiny `/socket.io/socket.io.js` compatibility shim that uses native WebSockets for the local Python server and minimal Socket.IO websocket framing for external `/socket.io/` Nifty servers.
 
 Original project: <https://github.com/paul-lrr/nifty-recognizer>
 
