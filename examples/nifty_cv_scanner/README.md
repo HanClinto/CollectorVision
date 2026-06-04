@@ -2,7 +2,7 @@
 
 Python/CollectorVision port of Paul Saunders' [`paul-lrr/nifty-recognizer`](https://github.com/paul-lrr/nifty-recognizer).
 
-The original project used Node, Express, Socket.IO, and DeckedBuilder notifications to update a stream overlay. This example keeps the same `card-view.html`, `card-controller.html`, and `card-view.xml` layout and browser behavior, but serves them with FastAPI and can recognize uploaded frames with CollectorVision's Python ONNX Runtime backend.
+The original project used Node, Express, Socket.IO, and DeckedBuilder notifications to update a stream overlay. This example keeps the same `card-view.html` and `card-controller.html` browser behavior, but serves them with FastAPI and can recognize uploaded frames with CollectorVision's Python ONNX Runtime backend.
 
 ## Features
 
@@ -52,7 +52,6 @@ Then open:
 - Scanner: <http://127.0.0.1:8000/scanner.html>
 - Overlay: <http://127.0.0.1:8000/card-view.html>
 - Controller: <http://127.0.0.1:8000/card-controller.html>
-- Browser source metadata: <http://127.0.0.1:8000/card-view.xml>
 
 Use `--catalog ./catalog.npz` instead of `--hfd` to run from a local catalog.
 
