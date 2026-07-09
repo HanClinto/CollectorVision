@@ -8,9 +8,14 @@
   </head>
   <body>
     <main id="overlay-card" class="overlay-card" hidden>
-      <p class="eyebrow">Detected card</p>
-      <h1 id="card-name">Waiting…</h1>
-      <p id="card-meta">CollectorVision</p>
+      <div class="card-art-shell">
+        <img id="card-art" class="card-art" alt="" />
+      </div>
+      <div class="card-copy">
+        <p class="eyebrow">Now showing</p>
+        <h1 id="card-name"></h1>
+        <p id="card-meta"></p>
+      </div>
     </main>
     <script type="module" src="./screen_capture_overlay.js?v=__BUILD_ID__"></script>
   </body>
