@@ -50,11 +50,21 @@
           <h1>Screen Capture Monitor</h1>
           <p class="lede">Detect cards from any shared tab, window, or screen. Draw one region of interest, emit overlay events, and export what appeared.</p>
         </div>
-        <nav class="hero-links" aria-label="Related pages">
-          <a href="./">Scanner</a>
-          <a href="./applet_example.html">Playground</a>
-          <a href="./screen_capture_overlay.html" target="_blank" rel="noopener noreferrer">Overlay</a>
-        </nav>
+        <div class="hero-aside">
+          <aside id="version-debug" class="version-debug" aria-label="CollectorVision asset versions">
+            <p>CollectorVision versions</p>
+            <dl>
+              <div><dt>Cornelius</dt><dd id="version-cornelius">loading…</dd></div>
+              <div><dt>Milo</dt><dd id="version-milo">loading…</dd></div>
+              <div><dt>Catalog</dt><dd id="version-catalog">loading…</dd></div>
+            </dl>
+          </aside>
+          <nav class="hero-links" aria-label="Related pages">
+            <a href="./">Scanner</a>
+            <a href="./applet_example.html">Playground</a>
+            <a href="./screen_capture_overlay.html" target="_blank" rel="noopener noreferrer">Overlay</a>
+          </nav>
+        </div>
       </header>
 
       <section class="stage-card" aria-label="Capture preview">
@@ -73,14 +83,6 @@
           <video id="capture-video" playsinline muted></video>
           <canvas id="preview-canvas"></canvas>
           <canvas id="corner-overlay"></canvas>
-          <aside id="version-debug" class="version-debug" aria-label="CollectorVision asset versions">
-            <p>CollectorVision</p>
-            <dl>
-              <div><dt>Cornelius</dt><dd id="version-cornelius">loading…</dd></div>
-              <div><dt>Milo</dt><dd id="version-milo">loading…</dd></div>
-              <div><dt>Catalog</dt><dd id="version-catalog">loading…</dd></div>
-            </dl>
-          </aside>
           <div id="roi-box" class="roi-box" role="img" aria-label="Detection region of interest">
             <span class="roi-handle roi-handle--nw" data-handle="nw"></span>
             <span class="roi-handle roi-handle--ne" data-handle="ne"></span>

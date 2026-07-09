@@ -3,6 +3,15 @@ const CHANNEL_NAME = "collectorvision-monitor";
 const ROI_KEY = "collectorvision_screen_monitor_roi";
 const SETTINGS_KEY = "collectorvision_screen_monitor_settings";
 const MAX_EVENTS = 250;
+const KNOWN_MODEL_VERSIONS = {
+  cornelius: {
+    "sha256:a90ee87a45781e09e9fc88508162dac87b0492162dff79a2627c52ae773e6a79": "1.205",
+    "sha256:8b2edd885d4c813157e15858d3e9a19806e994fcc98f423fc3442cdf704c69ec": "1.210",
+  },
+  milo: {
+    "sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df": "1.0.0",
+  },
+};
 const DEFAULT_SETTINGS = {
   matchThreshold: 0.50,
   consecutiveMatches: 2,
@@ -681,34 +690,42 @@ function renderVersionDebug(manifest, bundleMetadata) {
   const modelHashes = manifest.model_hashes ?? {};
   const metadataModels = bundleMetadata?.models ?? {};
   const catalog = manifest.catalog ?? {};
-  const catalogName = catalogKeyFromPath(catalog.embeddings || catalog.card_ids);
-  const catalogVersion = bundleMetadata?.catalog_fingerprint
+  const catalogSource = bundleMetadata?.catalog_fingerprint
     || bundleMetadata?.catalog_key
     || manifest.version
-    || catalogName;
+    || catalog.embeddings
+    || catalog.card_ids;
 
   els.versionCornelius.textContent = versionLabel(
+    "cornelius",
     modelHashes.cornelius || metadataModels.cornelius,
-    manifest.models?.cornelius,
     manifest.version,
   );
   els.versionMilo.textContent = versionLabel(
+    "milo",
     modelHashes.milo || metadataModels.milo,
-    manifest.models?.milo,
     manifest.version,
   );
   els.versionCatalog.textContent = [
-    compactVersion(catalogVersion),
-    catalogName,
+    catalogDateLabel(catalogSource),
     Number.isFinite(catalog.rows) ? `${catalog.rows.toLocaleString()} rows` : null,
   ].filter(Boolean).join(" · ");
 }
 
-function versionLabel(hash, path, fallback) {
-  return [
-    compactVersion(hash || fallback),
-    path ? path.split("/").pop() : null,
-  ].filter(Boolean).join(" · ");
+function versionLabel(modelKey, hash, fallback) {
+  const knownVersion = KNOWN_MODEL_VERSIONS[modelKey]?.[hash];
+  const hashLabel = compactHash(hash);
+  if (knownVersion && hashLabel) return `${knownVersion} · ${hashLabel}`;
+  if (knownVersion) return knownVersion;
+  return compactVersion(hash || fallback);
+}
+
+function compactHash(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (text.startsWith("sha256:")) return `sha256:${text.slice(7, 15)}`;
+  if (/^[a-f0-9]{40,64}$/i.test(text)) return text.slice(0, 8);
+  return "";
 }
 
 function compactVersion(value) {
@@ -720,12 +737,11 @@ function compactVersion(value) {
   return text;
 }
 
-function catalogKeyFromPath(path) {
-  const filename = String(path ?? "").split("/").pop() ?? "";
-  return filename
-    .replace(/-embeddings\.[^.]+(?:\.bin)?$/i, "")
-    .replace(/-card-ids\.json$/i, "")
-    || null;
+function catalogDateLabel(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  if (match) return match[1];
+  return compactVersion(text);
 }
 
 function csvCell(value) {

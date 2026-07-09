@@ -79,6 +79,12 @@ code {
   padding: 1rem 0 0.25rem;
 }
 
+.hero-aside {
+  display: grid;
+  justify-items: end;
+  gap: 0.75rem;
+}
+
 .hero h1 {
   max-width: 13ch;
   margin: 0;
@@ -176,19 +182,13 @@ code {
 }
 
 .version-debug {
-  position: absolute;
-  right: 0.75rem;
-  top: 0.75rem;
-  z-index: 3;
-  min-width: min(18rem, calc(100% - 1.5rem));
-  max-width: calc(100% - 1.5rem);
+  width: min(26rem, 100%);
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 0.9rem;
   padding: 0.65rem 0.75rem;
   background: rgba(17, 16, 15, 0.78);
   box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.24);
   color: #f8f2e8;
-  pointer-events: none;
 }
 
 .version-debug p {
@@ -208,18 +208,15 @@ code {
 
 .version-debug div {
   display: grid;
-  grid-template-columns: 4.8rem minmax(0, 1fr);
+  grid-template-columns: 5.2rem minmax(0, 1fr);
   gap: 0.45rem;
 }
 
 .version-debug dt,
 .version-debug dd {
-  overflow: hidden;
   margin: 0;
   font-size: 0.72rem;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .version-debug dt {
@@ -230,6 +227,7 @@ code {
 .version-debug dd {
   color: #fff;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
 }
 
 .roi-box {
@@ -435,6 +433,10 @@ select {
     flex-direction: column;
   }
 
+  .hero-aside {
+    justify-items: stretch;
+  }
+
   .layout,
   .metric-grid,
   .settings-grid {
@@ -443,10 +445,5 @@ select {
 
   .capture-stage {
     min-height: 58vh;
-  }
-
-  .version-debug {
-    left: 0.75rem;
-    right: 0.75rem;
   }
 }
