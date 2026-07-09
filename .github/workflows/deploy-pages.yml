@@ -56,6 +56,9 @@ jobs:
           sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/app.js
           sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/index.html
           sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/applet_example.html
+          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/screen_capture_monitor.html
+          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/screen_capture_monitor.js
+          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/screen_capture_overlay.html
           sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/build.json
           echo "Stamped build ID: ${SHORT_SHA}"
 
