@@ -12,6 +12,7 @@ on:
     branches:
       - main
     paths:
+      - "collector_vision/weights/**"
       - "scripts/export_web_scanner_assets.py"
       - "examples/web_scanner/assets.bundle.json"
   schedule:
