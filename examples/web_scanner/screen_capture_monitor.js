@@ -20,6 +20,9 @@ const els = {
   video: document.getElementById("capture-video"),
   preview: document.getElementById("preview-canvas"),
   overlay: document.getElementById("corner-overlay"),
+  versionCornelius: document.getElementById("version-cornelius"),
+  versionMilo: document.getElementById("version-milo"),
+  versionCatalog: document.getElementById("version-catalog"),
   roiBox: document.getElementById("roi-box"),
   stageStatus: document.getElementById("stage-status"),
   workerStatus: document.getElementById("worker-status"),
@@ -102,6 +105,8 @@ function bindUi() {
 async function initWorker() {
   try {
     const manifest = await fetchJson("./assets/manifest.json");
+    const bundleMetadata = await fetchOptionalJson("./bundle-metadata.json");
+    renderVersionDebug(manifest, bundleMetadata);
     worker = new Worker(`./scanner.worker.mjs?v=${BUILD_ID}`, { type: "module" });
     worker.addEventListener("message", handleWorkerMessage);
     worker.addEventListener("error", (event) => {
@@ -119,6 +124,7 @@ async function initWorker() {
   } catch (error) {
     els.workerStatus.textContent = "Load failed";
     els.latestStatus.textContent = error?.message || "Could not load scanner assets.";
+    renderVersionDebug(null, null);
   }
 }
 
@@ -653,6 +659,73 @@ async function fetchJson(url) {
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) throw new Error(`Failed to load ${url}: ${response.status}`);
   return response.json();
+}
+
+async function fetchOptionalJson(url) {
+  try {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function renderVersionDebug(manifest, bundleMetadata) {
+  if (!manifest) {
+    els.versionCornelius.textContent = "unavailable";
+    els.versionMilo.textContent = "unavailable";
+    els.versionCatalog.textContent = "unavailable";
+    return;
+  }
+  const modelHashes = manifest.model_hashes ?? {};
+  const metadataModels = bundleMetadata?.models ?? {};
+  const catalog = manifest.catalog ?? {};
+  const catalogName = catalogKeyFromPath(catalog.embeddings || catalog.card_ids);
+  const catalogVersion = bundleMetadata?.catalog_fingerprint
+    || bundleMetadata?.catalog_key
+    || manifest.version
+    || catalogName;
+
+  els.versionCornelius.textContent = versionLabel(
+    modelHashes.cornelius || metadataModels.cornelius,
+    manifest.models?.cornelius,
+    manifest.version,
+  );
+  els.versionMilo.textContent = versionLabel(
+    modelHashes.milo || metadataModels.milo,
+    manifest.models?.milo,
+    manifest.version,
+  );
+  els.versionCatalog.textContent = [
+    compactVersion(catalogVersion),
+    catalogName,
+    Number.isFinite(catalog.rows) ? `${catalog.rows.toLocaleString()} rows` : null,
+  ].filter(Boolean).join(" · ");
+}
+
+function versionLabel(hash, path, fallback) {
+  return [
+    compactVersion(hash || fallback),
+    path ? path.split("/").pop() : null,
+  ].filter(Boolean).join(" · ");
+}
+
+function compactVersion(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (text.startsWith("sha256:")) return `sha256:${text.slice(7, 19)}`;
+  if (/^[a-f0-9]{40,64}$/i.test(text)) return text.slice(0, 12);
+  if (text.length > 28) return `${text.slice(0, 25)}…`;
+  return text;
+}
+
+function catalogKeyFromPath(path) {
+  const filename = String(path ?? "").split("/").pop() ?? "";
+  return filename
+    .replace(/-embeddings\.[^.]+(?:\.bin)?$/i, "")
+    .replace(/-card-ids\.json$/i, "")
+    || null;
 }
 
 function csvCell(value) {
