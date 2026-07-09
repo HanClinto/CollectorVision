@@ -4,6 +4,28 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CollectorVision Overlay</title>
+    <script>
+      (function () {
+        if (!("serviceWorker" in navigator)) return;
+
+        navigator.serviceWorker.getRegistration("./")
+          .then(function (reg) {
+            if (!reg) {
+              sessionStorage.removeItem("cv-overlay-coi-unregistered");
+              return;
+            }
+            return reg.unregister().then(function (removed) {
+              if (removed && navigator.serviceWorker.controller && !sessionStorage.getItem("cv-overlay-coi-unregistered")) {
+                sessionStorage.setItem("cv-overlay-coi-unregistered", "1");
+                location.reload();
+              }
+            });
+          })
+          .catch(function (err) {
+            console.warn("COI service worker unregister failed:", err);
+          });
+      })();
+    </script>
     <link rel="stylesheet" href="./screen_capture_overlay.css?v=__BUILD_ID__" />
   </head>
   <body>
