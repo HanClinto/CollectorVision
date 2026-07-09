@@ -82,7 +82,9 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket) -> None:
         self._connections.discard(websocket)
 
-    async def broadcast(self, event: str, data: dict[str, Any], exclude: WebSocket | None = None) -> None:
+    async def broadcast(
+        self, event: str, data: dict[str, Any], exclude: WebSocket | None = None
+    ) -> None:
         message = {"event": event, "data": data}
         stale: list[WebSocket] = []
         for websocket in self._connections:
@@ -180,7 +182,9 @@ def _identify(
     if detector is not None:
         detection = detector.detect(
             bgr,
-            min_sharpness=min_sharpness if min_sharpness_override is None else min_sharpness_override,
+            min_sharpness=min_sharpness
+            if min_sharpness_override is None
+            else min_sharpness_override,
         )
         sharpness = detection.sharpness
         detector_presence = detection.extra.get("presence")
@@ -210,7 +214,9 @@ def _identify(
     if rotation_invariant:
         candidates.append(("rotated_180", cvg.rotate_card_180(crop)))
 
-    best_result: tuple[float, str, str, np.ndarray, list[tuple[float, str]], dict[str, Any]] | None = None
+    best_result: (
+        tuple[float, str, str, np.ndarray, list[tuple[float, str]], dict[str, Any]] | None
+    ) = None
     for orientation, candidate_crop in candidates:
         current_emb = catalog.embedder.embed(candidate_crop)
         search_emb = current_emb
@@ -291,9 +297,7 @@ def _records_response(result: dict[str, Any]) -> dict[str, Any]:
     return {"records": [record]}
 
 
-def _optional_float(
-    primary: dict[str, Any], fallback: dict[str, Any], *names: str
-) -> float | None:
+def _optional_float(primary: dict[str, Any], fallback: dict[str, Any], *names: str) -> float | None:
     for name in names:
         value = primary.get(name, fallback.get(name))
         if value is None or value == "":
@@ -302,7 +306,9 @@ def _optional_float(
     return None
 
 
-def _optional_bool(primary: dict[str, Any], fallback: dict[str, Any], default: bool, *names: str) -> bool:
+def _optional_bool(
+    primary: dict[str, Any], fallback: dict[str, Any], default: bool, *names: str
+) -> bool:
     for name in names:
         value = primary.get(name, fallback.get(name))
         if value is None or value == "":
@@ -385,7 +391,9 @@ async def card_image(card_id: str) -> RedirectResponse:
         return RedirectResponse(
             url=f"https://api.scryfall.com/cards/{card_id}?format=image&version=normal"
         )
-    raise HTTPException(status_code=404, detail="Only Multiverse IDs and Scryfall UUIDs are supported")
+    raise HTTPException(
+        status_code=404, detail="Only Multiverse IDs and Scryfall UUIDs are supported"
+    )
 
 
 @app.post("/identify")
