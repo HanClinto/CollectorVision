@@ -43,6 +43,7 @@ const els = {
   matchThreshold: document.getElementById("match-threshold"),
   consecutiveMatches: document.getElementById("consecutive-matches"),
   scanInterval: document.getElementById("scan-interval"),
+  scanIntervalValue: document.getElementById("scan-interval-value"),
   cornerThreshold: document.getElementById("corner-threshold"),
   groupSecondary: document.getElementById("group-secondary"),
   eventList: document.getElementById("event-list"),
@@ -99,6 +100,7 @@ function bindUi() {
   window.addEventListener("pointermove", moveRoiDrag);
   window.addEventListener("pointerup", endRoiDrag);
   window.addEventListener("resize", resizeCanvases);
+  els.scanInterval.addEventListener("input", updateScanIntervalLabel);
   for (const input of [els.matchThreshold, els.consecutiveMatches, els.scanInterval, els.cornerThreshold, els.groupSecondary]) {
     input.addEventListener("change", updateSettingsFromInputs);
   }
@@ -569,8 +571,14 @@ function applySettingsToInputs() {
   els.matchThreshold.value = settings.matchThreshold.toFixed(2);
   els.consecutiveMatches.value = String(settings.consecutiveMatches);
   els.scanInterval.value = String(settings.scanIntervalMs);
+  updateScanIntervalLabel();
   els.cornerThreshold.value = settings.minCornerConfidence.toFixed(2);
   els.groupSecondary.checked = settings.groupBySecondaryId === true;
+}
+
+function updateScanIntervalLabel() {
+  const interval = Math.max(0, Math.round(Number(els.scanInterval.value) || 0));
+  els.scanIntervalValue.textContent = interval === 0 ? "Free-running" : `${interval} ms`;
 }
 
 function updateSettingsFromInputs() {
@@ -581,6 +589,7 @@ function updateSettingsFromInputs() {
     minCornerConfidence: clamp(Number(els.cornerThreshold.value), 0, 0.2),
     groupBySecondaryId: els.groupSecondary.checked === true,
   };
+  applySettingsToInputs();
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   bucket.reset();
   worker?.postMessage({ type: "config", minCornerConfidence: settings.minCornerConfidence });

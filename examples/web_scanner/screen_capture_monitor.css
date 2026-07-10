@@ -376,6 +376,10 @@ select {
   color: #f8f2e8;
 }
 
+input[type="range"] {
+  padding-inline: 0;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
