@@ -191,6 +191,11 @@ produces wrong-but-coherent embeddings on Android ARM with the new WebGPU EP
 (issue #12, build `f6f1c76`).  Both models are comfortably fast on WASM within the
 900 ms scan interval.
 
+Firefox on macOS can also fail hard under WebGPU when ORT compiles the `milo.onnx`
+Split shader through Metal (`set_output_*_by_indices` type mismatch).  The scanner
+therefore ignores WebGPU opt-in on Firefox and stays on WASM; use the standalone
+model benchmark page for WebGPU experiments.
+
 ```
 executionProviders: ["wasm"]   ← use this for BOTH models
 ```

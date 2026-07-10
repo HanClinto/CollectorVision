@@ -1433,6 +1433,10 @@ function setupWebGpuToggle() {
   // devices without a GPU (or those that don't expose navigator.gpu) the
   // option is meaningless.
   if (!("gpu" in navigator)) return;
+  if (webGpuDisableReason()) {
+    localStorage.removeItem(WEBGPU_PREF_KEY);
+    return;
+  }
 
   section.hidden = false;
   checkbox.checked = localStorage.getItem(WEBGPU_PREF_KEY) === "true";
@@ -1445,7 +1449,16 @@ function setupWebGpuToggle() {
   });
 }
 
+function webGpuDisableReason() {
+  const ua = navigator.userAgent || "";
+  if (/\bFirefox\/\d+/.test(ua)) {
+    return "Firefox WebGPU is disabled for scanning because onnxruntime-web 1.24.3 can generate invalid Metal shaders.";
+  }
+  return null;
+}
+
 function isWebGpuEnabled() {
+  if (webGpuDisableReason()) return false;
   return localStorage.getItem(WEBGPU_PREF_KEY) === "true";
 }
 

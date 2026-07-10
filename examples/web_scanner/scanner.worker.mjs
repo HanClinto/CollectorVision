@@ -503,6 +503,14 @@ function isIOS() {
     || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
+function webGpuDisableReason() {
+  const ua = navigator.userAgent || "";
+  if (/\bFirefox\/\d+/.test(ua)) {
+    return "Firefox WebGPU disabled: onnxruntime-web 1.24.3 can generate invalid Metal shaders for the scanner model.";
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // WorkerRuntime — BrowserRuntime ported to run inside a web worker.
 // All canvas operations use OffscreenCanvas.
@@ -996,9 +1004,12 @@ self.onmessage = async ({ data }) => {
   try {
     if (data.type === "init") {
       const enableWebGpu = data.enableWebGpu === true;
-      const webgpuReady = enableWebGpu ? await configureWebGpu() : false;
+      const disableReason = enableWebGpu ? webGpuDisableReason() : null;
+      const webgpuReady = enableWebGpu && !disableReason ? await configureWebGpu() : false;
       const useWebGpu = webgpuReady; // only true if both requested and available
-      const inferenceMode = useWebGpu ? "WebGPU" : "WASM";
+      const inferenceMode = useWebGpu
+        ? "WebGPU"
+        : (disableReason ? "WASM (Firefox WebGPU disabled)" : "WASM");
       self.postMessage({ type: "progress", stage: "webgpu", inferenceMode });
       self.postMessage({ type: "progress", stage: "dewarp", ratio: 1 });
 
