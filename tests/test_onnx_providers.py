@@ -71,6 +71,40 @@ class CreateInferenceSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_gpu_rejects_session_that_silently_falls_back_to_cpu(self) -> None:
+        class FakeSession:
+            def __init__(self, path, sess_options, providers):  # noqa: ANN001
+                self.providers = list(providers)
+
+            def get_providers(self) -> list[str]:
+                return ["CPUExecutionProvider"]
+
+        fake_ort = types.SimpleNamespace(
+            get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            InferenceSession=FakeSession,
+        )
+
+        with mock.patch.dict(sys.modules, {"onnxruntime": fake_ort}):
+            with self.assertRaisesRegex(RuntimeError, "initialized without an accelerator"):
+                create_inference_session(Path("model.onnx"), object(), "gpu")
+
+    def test_auto_warns_when_session_silently_falls_back_to_cpu(self) -> None:
+        class FakeSession:
+            def __init__(self, path, sess_options, providers):  # noqa: ANN001
+                self.providers = list(providers)
+
+            def get_providers(self) -> list[str]:
+                return ["CPUExecutionProvider"]
+
+        fake_ort = types.SimpleNamespace(
+            get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            InferenceSession=FakeSession,
+        )
+
+        with mock.patch.dict(sys.modules, {"onnxruntime": fake_ort}):
+            with self.assertWarnsRegex(RuntimeWarning, "CPU only"):
+                create_inference_session(Path("model.onnx"), object(), "auto")
+
 
 if __name__ == "__main__":
     unittest.main()

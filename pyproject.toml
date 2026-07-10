@@ -35,9 +35,13 @@ cpu = [
 gpu = [
     "onnxruntime>=1.17; platform_system == 'Darwin'",
     "onnxruntime-gpu>=1.17,<1.27; platform_system != 'Darwin'",
+    "nvidia-cuda-runtime-cu12; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "nvidia-cudnn-cu12; platform_system == 'Linux' and platform_machine == 'x86_64'",
 ]
 cuda = [
     "onnxruntime-gpu>=1.17,<1.27; platform_system != 'Darwin'",
+    "nvidia-cuda-runtime-cu12; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "nvidia-cudnn-cu12; platform_system == 'Linux' and platform_machine == 'x86_64'",
 ]
 # Example server
 server = [

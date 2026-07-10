@@ -16,6 +16,11 @@ _AUTO_ACCELERATORS = (
     "DmlExecutionProvider",
     "ROCMExecutionProvider",
 )
+_NVIDIA_PROVIDERS = (_CUDA_PROVIDER, "TensorrtExecutionProvider")
+
+
+def _has_accelerator(providers: list[str]) -> bool:
+    return any(name in _AUTO_ACCELERATORS for name in providers)
 
 
 def _resolve_provider_names(provider: Provider, available: list[str]) -> list[str]:
@@ -66,11 +71,34 @@ def create_inference_session(
     providers = _resolve_provider_names(provider, available)
 
     try:
-        return ort.InferenceSession(
+        if any(name in _NVIDIA_PROVIDERS for name in providers) and hasattr(ort, "preload_dlls"):
+            ort.preload_dlls(cuda=True, cudnn=True)
+
+        sess = ort.InferenceSession(
             str(onnx_path),
             sess_options=sess_options,
             providers=providers,
         )
+        active_providers = list(sess.get_providers())
+        if provider == "gpu" and not _has_accelerator(active_providers):
+            raise RuntimeError(
+                "GPU provider was requested, but ONNX Runtime initialized without "
+                f"an accelerator provider. Requested providers: {providers}. "
+                f"Active providers: {active_providers}."
+            )
+        if (
+            provider == "auto"
+            and _has_accelerator(providers)
+            and not _has_accelerator(active_providers)
+        ):
+            warn(
+                "ONNX Runtime accelerator providers were available but session "
+                f"initialized with CPU only. Requested providers: {providers}. "
+                f"Active providers: {active_providers}.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        return sess
     except Exception as exc:
         if provider != "auto" or providers == [_CPU_PROVIDER]:
             raise
