@@ -16,13 +16,13 @@ Experimental javascript port version hosted here: https://hanclinto.github.io/Co
 > **Not yet on PyPI.** Install directly from GitHub:
 
 ```bash
-uv pip install git+https://github.com/HanClinto/CollectorVision.git
+uv pip install "collectorvision[cpu] @ git+https://github.com/HanClinto/CollectorVision.git"
 ```
 
 Or with plain `pip`:
 
 ```bash
-pip install git+https://github.com/HanClinto/CollectorVision.git
+pip install "collectorvision[cpu] @ git+https://github.com/HanClinto/CollectorVision.git"
 ```
 
 Requires Python 3.10+. No GPU required — inference runs on CPU via ONNX Runtime.

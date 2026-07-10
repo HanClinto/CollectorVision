@@ -23,14 +23,17 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "onnxruntime>=1.17",
     "Pillow>=9.0",
     "numpy>=1.24",
     "opencv-python-headless>=4.7",
 ]
 
 [project.optional-dependencies]
+cpu = [
+    "onnxruntime>=1.17",
+]
 gpu = [
+    "onnxruntime>=1.17; platform_system == 'Darwin'",
     "onnxruntime-gpu>=1.17; platform_system != 'Darwin'",
 ]
 cuda = [

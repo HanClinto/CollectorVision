@@ -53,7 +53,14 @@ def create_inference_session(
     ``provider='auto'`` prefers installed accelerator providers, then falls back
     to CPU. Explicit ``'cpu'`` and ``'gpu'`` requests are respected.
     """
-    import onnxruntime as ort
+    try:
+        import onnxruntime as ort
+    except ImportError as exc:
+        raise ImportError(
+            "CollectorVision neural inference requires an ONNX Runtime package. "
+            "Install `collectorvision[cpu]` for CPU inference or "
+            "`collectorvision[gpu]` for accelerator support."
+        ) from exc
 
     available = ort.get_available_providers()
     providers = _resolve_provider_names(provider, available)
