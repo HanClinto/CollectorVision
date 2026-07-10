@@ -17,15 +17,54 @@ Experimental javascript port version hosted here: https://hanclinto.github.io/Co
 
 ```bash
 uv pip install git+https://github.com/HanClinto/CollectorVision.git
+uv pip install onnxruntime
 ```
 
 Or with plain `pip`:
 
 ```bash
 pip install git+https://github.com/HanClinto/CollectorVision.git
+pip install onnxruntime
 ```
 
-Requires Python 3.10+. No GPU required — inference runs on CPU via ONNX Runtime.
+Requires Python 3.10+. Neural inference requires an ONNX Runtime backend. Add
+exactly one backend package to your environment, `requirements.txt`, or
+`pyproject.toml`: use `onnxruntime` for CPU or `onnxruntime-gpu` for NVIDIA GPU.
+
+### Hardware acceleration
+
+CollectorVision uses ONNX Runtime providers through a small, simple API:
+
+```python
+cvg.NeuralCornerDetector(provider="auto")  # default: accelerator if available, then CPU
+cvg.NeuralEmbedder(provider="auto")
+
+cvg.NeuralEmbedder(provider="cpu")         # force CPU
+cvg.NeuralEmbedder(provider="gpu")         # require acceleration, error if unavailable
+```
+
+The default `provider="auto"` prefers installed accelerator providers and falls
+back to CPU. `provider="gpu"` means "use an accelerated ONNX Runtime provider"
+and works with whatever accelerator provider ONNX Runtime exposes on the current
+machine, such as CoreML, CUDA, DirectML, or ROCm.
+
+For GPU acceleration, replace the CPU backend with a GPU backend that matches
+your machine:
+
+```bash
+pip install onnxruntime-gpu
+```
+
+ONNX Runtime GPU package compatibility depends on your CUDA runtime. For example,
+some CUDA 12 Linux systems need:
+
+```bash
+pip install "onnxruntime-gpu<1.27" nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12
+```
+
+Avoid installing both `onnxruntime` and `onnxruntime-gpu` in the same
+environment. CollectorVision warns when both distributions are present because
+they provide the same `onnxruntime` Python module and can hide GPU providers.
 
 ---
 
