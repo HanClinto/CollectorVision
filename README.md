@@ -51,6 +51,9 @@ runtime in an environment with compatible drivers:
 pip install "collectorvision[gpu] @ git+https://github.com/HanClinto/CollectorVision.git"
 ```
 
+The Linux GPU extra currently pins `onnxruntime-gpu<1.27` because the 1.27
+wheels require CUDA 13 runtime libraries, while CUDA 12 remains common.
+
 ---
 
 ## How it works
