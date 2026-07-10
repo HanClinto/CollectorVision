@@ -34,7 +34,7 @@ def _resolve_provider_names(provider: Provider, available: list[str]) -> list[st
                 "GPU provider was requested, but ONNX Runtime does not report any "
                 f"accelerator providers as available. Available providers: {available}. "
                 "Install an accelerator-enabled ONNX Runtime package for your platform, "
-                "such as `collectorvision[gpu]` or `onnxruntime-gpu` for NVIDIA CUDA."
+                "such as `onnxruntime-gpu` for NVIDIA CUDA."
             )
         selected.append(_CPU_PROVIDER)
         return selected
@@ -50,7 +50,7 @@ def _resolve_provider_names(provider: Provider, available: list[str]) -> list[st
 
 def create_inference_session(
     onnx_path: Path,
-    sess_options: object,
+    num_threads: int,
     provider: Provider,
 ):
     """Create an ONNX Runtime session with simple provider selection.
@@ -62,10 +62,22 @@ def create_inference_session(
         import onnxruntime as ort
     except ImportError as exc:
         raise ImportError(
-            "CollectorVision neural inference requires an ONNX Runtime package. "
-            "Install `collectorvision[cpu]` for CPU inference or "
-            "`collectorvision[gpu]` for accelerator support."
+            "CollectorVision neural inference requires exactly one ONNX Runtime backend.\n\n"
+            "For CPU inference, install:\n"
+            "  pip install onnxruntime\n"
+            "  uv add onnxruntime\n\n"
+            "For NVIDIA GPU inference, install an ONNX Runtime GPU build that matches "
+            "your CUDA runtime, for example:\n"
+            "  pip install onnxruntime-gpu\n"
+            "  uv add onnxruntime-gpu\n\n"
+            "If you manage dependencies in requirements.txt or pyproject.toml, add "
+            "one of those packages there. Avoid installing both onnxruntime and "
+            "onnxruntime-gpu in the same environment."
         ) from exc
+
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = num_threads
+    opts.inter_op_num_threads = 1
 
     available = ort.get_available_providers()
     providers = _resolve_provider_names(provider, available)
@@ -76,7 +88,7 @@ def create_inference_session(
 
         sess = ort.InferenceSession(
             str(onnx_path),
-            sess_options=sess_options,
+            sess_options=opts,
             providers=providers,
         )
         active_providers = list(sess.get_providers())
@@ -111,6 +123,6 @@ def create_inference_session(
         )
         return ort.InferenceSession(
             str(onnx_path),
-            sess_options=sess_options,
+            sess_options=opts,
             providers=[_CPU_PROVIDER],
         )

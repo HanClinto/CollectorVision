@@ -74,12 +74,7 @@ class NeuralEmbedder:
 
     @staticmethod
     def _load(onnx_path: Path, num_threads: int, provider: Provider):
-        import onnxruntime as ort
-
-        opts = ort.SessionOptions()
-        opts.intra_op_num_threads = num_threads
-        opts.inter_op_num_threads = 1
-        sess = create_inference_session(onnx_path, opts, provider)
+        sess = create_inference_session(onnx_path, num_threads, provider)
         input_meta = sess.get_inputs()[0]
         input_name = input_meta.name
         shape = input_meta.shape

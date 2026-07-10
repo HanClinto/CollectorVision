@@ -16,16 +16,20 @@ Experimental javascript port version hosted here: https://hanclinto.github.io/Co
 > **Not yet on PyPI.** Install directly from GitHub:
 
 ```bash
-uv pip install "collectorvision[cpu] @ git+https://github.com/HanClinto/CollectorVision.git"
+uv pip install git+https://github.com/HanClinto/CollectorVision.git
+uv pip install onnxruntime
 ```
 
 Or with plain `pip`:
 
 ```bash
-pip install "collectorvision[cpu] @ git+https://github.com/HanClinto/CollectorVision.git"
+pip install git+https://github.com/HanClinto/CollectorVision.git
+pip install onnxruntime
 ```
 
-Requires Python 3.10+. No GPU required — inference runs on CPU via ONNX Runtime.
+Requires Python 3.10+. Neural inference requires an ONNX Runtime backend. Add
+exactly one backend package to your environment, `requirements.txt`, or
+`pyproject.toml`: use `onnxruntime` for CPU or `onnxruntime-gpu` for NVIDIA GPU.
 
 ### Hardware acceleration
 
@@ -44,20 +48,22 @@ back to CPU. `provider="gpu"` means "use an accelerated ONNX Runtime provider"
 and works with whatever accelerator provider ONNX Runtime exposes on the current
 machine, such as CoreML, CUDA, DirectML, or ROCm.
 
-If your platform needs a separate accelerator runtime, install the optional GPU
-runtime in an environment with compatible drivers:
+For GPU acceleration, replace the CPU backend with a GPU backend that matches
+your machine:
 
 ```bash
-pip install "collectorvision[gpu] @ git+https://github.com/HanClinto/CollectorVision.git"
+pip install onnxruntime-gpu
 ```
 
-The default `gpu` extra intentionally allows the latest ONNX Runtime GPU wheel.
-If you are on a CUDA 12 Linux system and the latest wheel requires newer CUDA
-runtime libraries, use the CUDA-12 compatibility extra instead:
+ONNX Runtime GPU package compatibility depends on your CUDA runtime. For example,
+some CUDA 12 Linux systems need:
 
 ```bash
-pip install "collectorvision[gpu-cu12] @ git+https://github.com/HanClinto/CollectorVision.git"
+pip install "onnxruntime-gpu<1.27" nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12
 ```
+
+Avoid installing both `onnxruntime` and `onnxruntime-gpu` in the same
+environment.
 
 ---
 

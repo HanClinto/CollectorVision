@@ -1,3 +1,4 @@
+import builtins
 import sys
 import types
 import unittest
@@ -45,6 +46,18 @@ class ProviderResolutionTests(unittest.TestCase):
 
 
 class CreateInferenceSessionTests(unittest.TestCase):
+    def test_missing_onnxruntime_has_actionable_error(self) -> None:
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):  # noqa: ANN001
+            if name == "onnxruntime":
+                raise ImportError("missing onnxruntime")
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch("builtins.__import__", side_effect=fake_import):
+            with self.assertRaisesRegex(ImportError, "pip install onnxruntime"):
+                create_inference_session(Path("model.onnx"), 4, "auto")
+
     def test_auto_falls_back_to_cpu_when_accelerator_session_fails(self) -> None:
         calls: list[list[str]] = []
 
@@ -57,11 +70,12 @@ class CreateInferenceSessionTests(unittest.TestCase):
         fake_ort = types.SimpleNamespace(
             get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
             InferenceSession=FakeSession,
+            SessionOptions=types.SimpleNamespace,
         )
 
         with mock.patch.dict(sys.modules, {"onnxruntime": fake_ort}):
             with self.assertWarnsRegex(RuntimeWarning, "falling back"):
-                create_inference_session(Path("model.onnx"), object(), "auto")
+                create_inference_session(Path("model.onnx"), 4, "auto")
 
         self.assertEqual(
             calls,
@@ -82,11 +96,12 @@ class CreateInferenceSessionTests(unittest.TestCase):
         fake_ort = types.SimpleNamespace(
             get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
             InferenceSession=FakeSession,
+            SessionOptions=types.SimpleNamespace,
         )
 
         with mock.patch.dict(sys.modules, {"onnxruntime": fake_ort}):
             with self.assertRaisesRegex(RuntimeError, "initialized without an accelerator"):
-                create_inference_session(Path("model.onnx"), object(), "gpu")
+                create_inference_session(Path("model.onnx"), 4, "gpu")
 
     def test_auto_warns_when_session_silently_falls_back_to_cpu(self) -> None:
         class FakeSession:
@@ -99,11 +114,12 @@ class CreateInferenceSessionTests(unittest.TestCase):
         fake_ort = types.SimpleNamespace(
             get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
             InferenceSession=FakeSession,
+            SessionOptions=types.SimpleNamespace,
         )
 
         with mock.patch.dict(sys.modules, {"onnxruntime": fake_ort}):
             with self.assertWarnsRegex(RuntimeWarning, "CPU only"):
-                create_inference_session(Path("model.onnx"), object(), "auto")
+                create_inference_session(Path("model.onnx"), 4, "auto")
 
 
 if __name__ == "__main__":
