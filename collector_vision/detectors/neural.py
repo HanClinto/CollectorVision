@@ -86,7 +86,7 @@ class NeuralCornerDetector:
         Number of intra-op threads for onnxruntime.  Defaults to 4.
     provider:
         ONNX Runtime provider preference. ``"auto"`` prefers available
-        accelerators and falls back to CPU; use ``"cpu"`` or ``"cuda"`` to force
+        accelerators and falls back to CPU; use ``"cpu"`` or ``"gpu"`` to force
         one path.
     """
 

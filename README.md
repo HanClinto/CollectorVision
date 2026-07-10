@@ -36,15 +36,19 @@ cvg.NeuralCornerDetector(provider="auto")  # default: accelerator if available, 
 cvg.NeuralEmbedder(provider="auto")
 
 cvg.NeuralEmbedder(provider="cpu")         # force CPU
-cvg.NeuralEmbedder(provider="cuda")        # require CUDA, error if unavailable
+cvg.NeuralEmbedder(provider="gpu")         # require acceleration, error if unavailable
 ```
 
 The default `provider="auto"` prefers installed accelerator providers and falls
-back to CPU. For CUDA, install the optional GPU runtime in an environment with
-compatible NVIDIA drivers:
+back to CPU. `provider="gpu"` means "use an accelerated ONNX Runtime provider"
+and works with whatever accelerator provider ONNX Runtime exposes on the current
+machine, such as CoreML, CUDA, DirectML, or ROCm.
+
+If your platform needs a separate accelerator runtime, install the optional GPU
+runtime in an environment with compatible drivers:
 
 ```bash
-pip install "collectorvision[cuda] @ git+https://github.com/HanClinto/CollectorVision.git"
+pip install "collectorvision[gpu] @ git+https://github.com/HanClinto/CollectorVision.git"
 ```
 
 ---

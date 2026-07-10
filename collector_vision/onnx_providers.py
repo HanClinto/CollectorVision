@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 from warnings import warn
 
-Provider = Literal["auto", "cpu", "cuda"]
+Provider = Literal["auto", "cpu", "gpu"]
 
 _CPU_PROVIDER = "CPUExecutionProvider"
 _CUDA_PROVIDER = "CUDAExecutionProvider"
@@ -22,23 +22,24 @@ def _resolve_provider_names(provider: Provider, available: list[str]) -> list[st
     if provider == "cpu":
         return [_CPU_PROVIDER]
 
-    if provider == "cuda":
-        if _CUDA_PROVIDER not in available:
+    if provider == "gpu":
+        selected = [name for name in _AUTO_ACCELERATORS if name in available]
+        if not selected:
             raise RuntimeError(
-                "CUDA provider was requested, but ONNX Runtime does not report "
-                f"{_CUDA_PROVIDER} as available. Available providers: {available}. "
-                "Install a CUDA-enabled ONNX Runtime package, such as "
-                "`collectorvision[cuda]` or `onnxruntime-gpu`, in an environment "
-                "with compatible NVIDIA drivers."
+                "GPU provider was requested, but ONNX Runtime does not report any "
+                f"accelerator providers as available. Available providers: {available}. "
+                "Install an accelerator-enabled ONNX Runtime package for your platform, "
+                "such as `collectorvision[gpu]` or `onnxruntime-gpu` for NVIDIA CUDA."
             )
-        return [_CUDA_PROVIDER, _CPU_PROVIDER]
+        selected.append(_CPU_PROVIDER)
+        return selected
 
     if provider == "auto":
         selected = [name for name in _AUTO_ACCELERATORS if name in available]
         selected.append(_CPU_PROVIDER)
         return selected
 
-    valid = "', '".join(("auto", "cpu", "cuda"))
+    valid = "', '".join(("auto", "cpu", "gpu"))
     raise ValueError(f"Unknown provider {provider!r}. Expected one of: '{valid}'.")
 
 
@@ -50,7 +51,7 @@ def create_inference_session(
     """Create an ONNX Runtime session with simple provider selection.
 
     ``provider='auto'`` prefers installed accelerator providers, then falls back
-    to CPU. Explicit ``'cpu'`` and ``'cuda'`` requests are respected.
+    to CPU. Explicit ``'cpu'`` and ``'gpu'`` requests are respected.
     """
     import onnxruntime as ort
 

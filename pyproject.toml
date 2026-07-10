@@ -30,6 +30,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gpu = [
+    "onnxruntime-gpu>=1.17; platform_system != 'Darwin'",
+]
 cuda = [
     "onnxruntime-gpu>=1.17; platform_system != 'Darwin'",
 ]

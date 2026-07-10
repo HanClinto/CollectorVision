@@ -27,9 +27,17 @@ class ProviderResolutionTests(unittest.TestCase):
 
         self.assertEqual(providers, ["CPUExecutionProvider"])
 
-    def test_cuda_requires_cuda_provider(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "CUDA provider was requested"):
-            _resolve_provider_names("cuda", ["CPUExecutionProvider"])
+    def test_gpu_requires_an_accelerator_provider(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "GPU provider was requested"):
+            _resolve_provider_names("gpu", ["CPUExecutionProvider"])
+
+    def test_gpu_uses_available_accelerators_then_cpu_graph_fallback(self) -> None:
+        providers = _resolve_provider_names(
+            "gpu",
+            ["CPUExecutionProvider", "CoreMLExecutionProvider"],
+        )
+
+        self.assertEqual(providers, ["CoreMLExecutionProvider", "CPUExecutionProvider"])
 
     def test_unknown_provider_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unknown provider"):
