@@ -1,6 +1,6 @@
 """NeuralEmbedder — ONNX-based ArcFace card embedder (Milo).
 
-Runs entirely on CPU via onnxruntime — no PyTorch dependency required.
+Runs through ONNX Runtime providers — no PyTorch dependency required.
 
 Architecture: MobileViT-XXS backbone + shared linear projection trained with
 multi-task ArcFace loss (illustration_id + set_code).  Input 448×448 RGB,
@@ -13,6 +13,8 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image
+
+from collector_vision.onnx_providers import Provider, create_inference_session
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -41,6 +43,10 @@ class NeuralEmbedder:
         CollectorVision-Pipeline project, not here).
     num_threads:
         Number of intra-op threads for onnxruntime.
+    provider:
+        ONNX Runtime provider preference. ``"auto"`` prefers available
+        accelerators and falls back to CPU; use ``"cpu"`` or ``"cuda"`` to force
+        one path.
     """
 
     def __init__(
@@ -48,6 +54,7 @@ class NeuralEmbedder:
         checkpoint: str | Path | None = None,
         batch_size: int = 1,
         num_threads: int = 4,
+        provider: Provider = "auto",
     ) -> None:
         from collector_vision import weights as _w
 
@@ -61,20 +68,18 @@ class NeuralEmbedder:
             )
 
         self._batch_size = batch_size
-        self._sess, self._input_name, self._input_size = self._load(checkpoint, num_threads)
+        self._sess, self._input_name, self._input_size = self._load(
+            checkpoint, num_threads, provider
+        )
 
     @staticmethod
-    def _load(onnx_path: Path, num_threads: int):
+    def _load(onnx_path: Path, num_threads: int, provider: Provider):
         import onnxruntime as ort
 
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = num_threads
         opts.inter_op_num_threads = 1
-        sess = ort.InferenceSession(
-            str(onnx_path),
-            sess_options=opts,
-            providers=["CPUExecutionProvider"],
-        )
+        sess = create_inference_session(onnx_path, opts, provider)
         input_meta = sess.get_inputs()[0]
         input_name = input_meta.name
         shape = input_meta.shape

@@ -27,6 +27,26 @@ pip install git+https://github.com/HanClinto/CollectorVision.git
 
 Requires Python 3.10+. No GPU required — inference runs on CPU via ONNX Runtime.
 
+### Hardware acceleration
+
+CollectorVision uses ONNX Runtime providers through a small, simple API:
+
+```python
+cvg.NeuralCornerDetector(provider="auto")  # default: accelerator if available, then CPU
+cvg.NeuralEmbedder(provider="auto")
+
+cvg.NeuralEmbedder(provider="cpu")         # force CPU
+cvg.NeuralEmbedder(provider="cuda")        # require CUDA, error if unavailable
+```
+
+The default `provider="auto"` prefers installed accelerator providers and falls
+back to CPU. For CUDA, install the optional GPU runtime in an environment with
+compatible NVIDIA drivers:
+
+```bash
+pip install "collectorvision[cuda] @ git+https://github.com/HanClinto/CollectorVision.git"
+```
+
 ---
 
 ## How it works

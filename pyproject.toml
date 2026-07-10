@@ -30,6 +30,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cuda = [
+    "onnxruntime-gpu>=1.17; platform_system != 'Darwin'",
+]
 # Example server
 server = [
     "fastapi>=0.110",

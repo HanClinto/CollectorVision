@@ -1,6 +1,6 @@
 """NeuralCornerDetector — ONNX-based learned card corner detector (Cornelius).
 
-Runs entirely on CPU via onnxruntime — no PyTorch dependency required.
+Runs through ONNX Runtime providers — no PyTorch dependency required.
 
 Architecture: MobileViT-XXS backbone + SimCC coordinate heads trained on
 CCG card corners.  Input 384×384 RGB, outputs four normalised (x, y) corner
@@ -30,6 +30,7 @@ import cv2
 import numpy as np
 
 from collector_vision.interfaces import DetectionResult
+from collector_vision.onnx_providers import Provider, create_inference_session
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -83,6 +84,10 @@ class NeuralCornerDetector:
         Minimum ``sigmoid(presence_logit)`` to treat a detection as valid.
     num_threads:
         Number of intra-op threads for onnxruntime.  Defaults to 4.
+    provider:
+        ONNX Runtime provider preference. ``"auto"`` prefers available
+        accelerators and falls back to CPU; use ``"cpu"`` or ``"cuda"`` to force
+        one path.
     """
 
     def __init__(
@@ -90,6 +95,7 @@ class NeuralCornerDetector:
         checkpoint: str | Path | None = None,
         presence_threshold: float = 0.5,
         num_threads: int = 4,
+        provider: Provider = "auto",
     ) -> None:
         from collector_vision import weights as _w
 
@@ -104,21 +110,17 @@ class NeuralCornerDetector:
 
         self._presence_threshold = presence_threshold
         self._sess, self._input_name, self._input_size, self._has_sharpness = self._load(
-            checkpoint, num_threads
+            checkpoint, num_threads, provider
         )
 
     @staticmethod
-    def _load(onnx_path: Path, num_threads: int):
+    def _load(onnx_path: Path, num_threads: int, provider: Provider):
         import onnxruntime as ort
 
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = num_threads
         opts.inter_op_num_threads = 1
-        sess = ort.InferenceSession(
-            str(onnx_path),
-            sess_options=opts,
-            providers=["CPUExecutionProvider"],
-        )
+        sess = create_inference_session(onnx_path, opts, provider)
         input_meta = sess.get_inputs()[0]
         input_name = input_meta.name
         shape = input_meta.shape
