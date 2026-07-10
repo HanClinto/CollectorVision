@@ -63,7 +63,8 @@ pip install "onnxruntime-gpu<1.27" nvidia-cudnn-cu12 nvidia-cuda-runtime-cu12
 ```
 
 Avoid installing both `onnxruntime` and `onnxruntime-gpu` in the same
-environment.
+environment. CollectorVision warns when both distributions are present because
+they provide the same `onnxruntime` Python module and can hide GPU providers.
 
 ---
 

@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import collector_vision.onnx_providers as provider_module
 from collector_vision.onnx_providers import _resolve_provider_names, create_inference_session
 
 
@@ -46,6 +47,9 @@ class ProviderResolutionTests(unittest.TestCase):
 
 
 class CreateInferenceSessionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        provider_module._WARNED_RUNTIME_CONFLICT = False
+
     def test_missing_onnxruntime_has_actionable_error(self) -> None:
         real_import = builtins.__import__
 
@@ -120,6 +124,34 @@ class CreateInferenceSessionTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, {"onnxruntime": fake_ort}):
             with self.assertWarnsRegex(RuntimeWarning, "CPU only"):
                 create_inference_session(Path("model.onnx"), 4, "auto")
+
+    def test_conflicting_runtime_distributions_warn_once(self) -> None:
+        class FakeSession:
+            def __init__(self, path, sess_options, providers):  # noqa: ANN001
+                self.providers = list(providers)
+
+            def get_providers(self) -> list[str]:
+                return self.providers
+
+        fake_ort = types.SimpleNamespace(
+            get_available_providers=lambda: ["CPUExecutionProvider"],
+            InferenceSession=FakeSession,
+            SessionOptions=types.SimpleNamespace,
+        )
+
+        with (
+            mock.patch.dict(sys.modules, {"onnxruntime": fake_ort}),
+            mock.patch(
+                "collector_vision.onnx_providers._installed_onnx_runtime_distributions",
+                return_value=[("onnxruntime", "1.27.0"), ("onnxruntime-gpu", "1.26.0")],
+            ),
+        ):
+            with self.assertWarnsRegex(RuntimeWarning, "Both ONNX Runtime"):
+                create_inference_session(Path("model.onnx"), 4, "cpu")
+            with mock.patch("warnings.warn") as warn_mock:
+                create_inference_session(Path("model.onnx"), 4, "cpu")
+
+        warn_mock.assert_not_called()
 
 
 if __name__ == "__main__":

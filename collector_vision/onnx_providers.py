@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Literal
 from warnings import warn
@@ -17,6 +18,7 @@ _AUTO_ACCELERATORS = (
     "ROCMExecutionProvider",
 )
 _NVIDIA_PROVIDERS = (_CUDA_PROVIDER, "TensorrtExecutionProvider")
+_WARNED_RUNTIME_CONFLICT = False
 
 
 def _has_accelerator(providers: list[str]) -> bool:
@@ -48,6 +50,38 @@ def _resolve_provider_names(provider: Provider, available: list[str]) -> list[st
     raise ValueError(f"Unknown provider {provider!r}. Expected one of: '{valid}'.")
 
 
+def _installed_onnx_runtime_distributions() -> list[tuple[str, str]]:
+    installed: list[tuple[str, str]] = []
+    for dist_name in ("onnxruntime", "onnxruntime-gpu"):
+        try:
+            installed.append((dist_name, version(dist_name)))
+        except PackageNotFoundError:
+            pass
+    return installed
+
+
+def _warn_if_conflicting_runtimes_installed() -> None:
+    global _WARNED_RUNTIME_CONFLICT
+
+    if _WARNED_RUNTIME_CONFLICT:
+        return
+
+    installed = _installed_onnx_runtime_distributions()
+    if len(installed) <= 1:
+        return
+
+    _WARNED_RUNTIME_CONFLICT = True
+    formatted = ", ".join(f"{name}=={dist_version}" for name, dist_version in installed)
+    warn(
+        "Both ONNX Runtime CPU and GPU distributions are installed "
+        f"({formatted}). These packages provide the same `onnxruntime` Python "
+        "module and can conflict; install exactly one backend, such as "
+        "`onnxruntime` for CPU or `onnxruntime-gpu` for NVIDIA GPU.",
+        RuntimeWarning,
+        stacklevel=3,
+    )
+
+
 def create_inference_session(
     onnx_path: Path,
     num_threads: int,
@@ -74,6 +108,8 @@ def create_inference_session(
             "one of those packages there. Avoid installing both onnxruntime and "
             "onnxruntime-gpu in the same environment."
         ) from exc
+
+    _warn_if_conflicting_runtimes_installed()
 
     opts = ort.SessionOptions()
     opts.intra_op_num_threads = num_threads
