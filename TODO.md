@@ -19,7 +19,7 @@ Checklist for turning the scaffold into a shippable library.
 - [x] ONNX-based inference via `onnxruntime` — no PyTorch at runtime
 - [x] SimCC sharpness gate (mean peak of 8 softmax distributions) instead of
       unreliable presence logit
-- [x] Bundled as `collector_vision/weights/cornelius.onnx` (8.2 MB, single file)
+- [x] Bundled as `collector_vision/weights/cornelius.onnx` (7.5 MB, single file)
 
 ### 1c. NeuralEmbedder (Milo) ✅
 - [x] ONNX-based inference via `onnxruntime`
@@ -66,7 +66,7 @@ The pipeline returns IDs only. A thin lookup helper is planned but not blocking 
 
 ## 2. Model weights ✅
 
-- [x] Corner detector (Cornelius) — `cornelius.onnx` (8.2 MB, single file)
+- [x] Corner detector (Cornelius) — `cornelius.onnx` (7.5 MB, single file)
 - [x] Embedder (Milo) — `milo.onnx` (5.0 MB, single file)
 - [x] Both bundled in `collector_vision/weights/`; `package_data` configured in `pyproject.toml`
 - [x] Both uploaded to HF Hub (`HanClinto/cornelius`, `HanClinto/milo`) with model cards
@@ -256,7 +256,7 @@ GET /catalogs    — lists loaded catalog names
 ### Strategy B — On-device
 
 #### B1. ONNX models ✅
-- [x] Cornelius exported to ONNX (`cornelius.onnx`, 8.2 MB) and verified
+- [x] Cornelius exported to ONNX (`cornelius.onnx`, 7.5 MB) and verified
 - [x] Milo exported to ONNX (`milo.onnx`, 5.0 MB) and verified
 - [x] Both uploaded to HF Hub
 

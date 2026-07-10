@@ -7,6 +7,7 @@ const KNOWN_MODEL_VERSIONS = {
   cornelius: {
     "sha256:a90ee87a45781e09e9fc88508162dac87b0492162dff79a2627c52ae773e6a79": "1.205",
     "sha256:8b2edd885d4c813157e15858d3e9a19806e994fcc98f423fc3442cdf704c69ec": "1.210",
+    "sha256:56752ee6149ec5e02258c0886350f0ed55bdbab6f112c27b128a61e4e32a7834": "1.221",
   },
   milo: {
     "sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df": "1.0.0",
