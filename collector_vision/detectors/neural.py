@@ -25,6 +25,7 @@ the detector falls back to ``sigmoid(presence_logit) >= presence_threshold``.
 from __future__ import annotations
 
 from pathlib import Path
+from warnings import warn
 
 import cv2
 import numpy as np
@@ -34,6 +35,7 @@ from collector_vision.onnx_providers import Provider, create_inference_session
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+_CPU_PROVIDER = "CPUExecutionProvider"
 
 
 def _preprocess(bgr: np.ndarray, size: int) -> np.ndarray:
@@ -109,6 +111,9 @@ class NeuralCornerDetector:
             )
 
         self._presence_threshold = presence_threshold
+        self._checkpoint = checkpoint
+        self._num_threads = num_threads
+        self._provider = provider
         self._sess, self._input_name, self._input_size, self._has_sharpness = self._load(
             checkpoint, num_threads, provider
         )
@@ -123,6 +128,28 @@ class NeuralCornerDetector:
         out_names = {o.name for o in sess.get_outputs()}
         has_sharpness = "sharpness" in out_names
         return sess, input_name, input_size, has_sharpness
+
+    def _session_uses_accelerator(self) -> bool:
+        return any(name != _CPU_PROVIDER for name in self._sess.get_providers())
+
+    def _run_session(self, x: np.ndarray):
+        try:
+            return self._sess.run(None, {self._input_name: x})
+        except Exception as exc:
+            if self._provider != "auto" or not self._session_uses_accelerator():
+                raise
+
+            warn(
+                "ONNX Runtime accelerator inference failed for the corner detector; "
+                f"falling back to CPUExecutionProvider. Original error: "
+                f"{type(exc).__name__}: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            self._sess, self._input_name, self._input_size, self._has_sharpness = self._load(
+                self._checkpoint, self._num_threads, "cpu"
+            )
+            return self._sess.run(None, {self._input_name: x})
 
     def detect(self, image: np.ndarray, min_sharpness: float = 0.02) -> DetectionResult:
         """Detect card corners in a BGR uint8 image.
@@ -147,7 +174,7 @@ class NeuralCornerDetector:
         sigmoid for diagnostics.
         """
         x = _preprocess(image, self._input_size)
-        outs = self._sess.run(None, {self._input_name: x})
+        outs = self._run_session(x)
 
         corners_flat = np.clip(outs[0].squeeze(), 0.0, 1.0)  # (8,)
         presence_logit = float(outs[1].squeeze())

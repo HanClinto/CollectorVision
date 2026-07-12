@@ -1,10 +1,12 @@
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import numpy as np
 from PIL import Image
 
 import collector_vision as cvg
-from collector_vision.detectors.neural import _order_corners
+from collector_vision.detectors.neural import NeuralCornerDetector, _order_corners
 from collector_vision.interfaces import DetectionResult
 
 
@@ -63,6 +65,59 @@ class NeuralDetectorCornerOrderingTests(unittest.TestCase):
         ordered = _order_corners(corners, image_shape=(2000, 500, 3))
 
         np.testing.assert_allclose(ordered, corners)
+
+
+class NeuralDetectorProviderFallbackTests(unittest.TestCase):
+    def test_auto_retries_cpu_when_accelerator_inference_fails(self) -> None:
+        class FailingAcceleratorSession:
+            def get_providers(self) -> list[str]:
+                return ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+
+            def run(self, output_names, input_feed):  # noqa: ANN001
+                raise RuntimeError("accelerator run failed")
+
+        class CpuSession:
+            def get_providers(self) -> list[str]:
+                return ["CPUExecutionProvider"]
+
+            def run(self, output_names, input_feed):  # noqa: ANN001
+                return [
+                    np.array([[0.1, 0.1, 0.8, 0.1, 0.8, 0.8, 0.1, 0.8]], dtype=np.float32),
+                    np.array([1.0], dtype=np.float32),
+                    np.array([0.06], dtype=np.float32),
+                ]
+
+        def fake_load(onnx_path: Path, num_threads: int, provider: str):  # noqa: ARG001
+            if provider == "cpu":
+                return CpuSession(), "image", 384, True
+            return FailingAcceleratorSession(), "image", 384, True
+
+        with mock.patch.object(NeuralCornerDetector, "_load", side_effect=fake_load):
+            detector = NeuralCornerDetector(checkpoint=Path(__file__), provider="auto")
+
+            with self.assertWarnsRegex(RuntimeWarning, "falling back to CPUExecutionProvider"):
+                result = detector.detect(np.zeros((32, 32, 3), dtype=np.uint8))
+
+        self.assertTrue(result.card_present)
+        self.assertEqual(detector._sess.get_providers(), ["CPUExecutionProvider"])
+
+    def test_explicit_provider_does_not_retry_inference_failure(self) -> None:
+        class FailingCpuSession:
+            def get_providers(self) -> list[str]:
+                return ["CPUExecutionProvider"]
+
+            def run(self, output_names, input_feed):  # noqa: ANN001
+                raise RuntimeError("cpu run failed")
+
+        with mock.patch.object(
+            NeuralCornerDetector,
+            "_load",
+            return_value=(FailingCpuSession(), "image", 384, True),
+        ):
+            detector = NeuralCornerDetector(checkpoint=Path(__file__), provider="cpu")
+
+            with self.assertRaisesRegex(RuntimeError, "cpu run failed"):
+                detector.detect(np.zeros((32, 32, 3), dtype=np.uint8))
 
 
 class TransformTests(unittest.TestCase):
