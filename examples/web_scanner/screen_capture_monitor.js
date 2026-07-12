@@ -699,7 +699,9 @@ function renderVersionDebug(manifest, bundleMetadata) {
     return;
   }
   const modelHashes = manifest.model_hashes ?? {};
+  const modelVersions = manifest.model_versions ?? {};
   const metadataModels = bundleMetadata?.models ?? {};
+  const metadataModelVersions = bundleMetadata?.model_versions ?? {};
   const catalog = manifest.catalog ?? {};
   const catalogSource = bundleMetadata?.catalog_fingerprint
     || bundleMetadata?.catalog_key
@@ -710,11 +712,13 @@ function renderVersionDebug(manifest, bundleMetadata) {
   els.versionCornelius.textContent = versionLabel(
     "cornelius",
     modelHashes.cornelius || metadataModels.cornelius,
+    modelVersions.cornelius || metadataModelVersions.cornelius,
     manifest.version,
   );
   els.versionMilo.textContent = versionLabel(
     "milo",
     modelHashes.milo || metadataModels.milo,
+    modelVersions.milo || metadataModelVersions.milo,
     manifest.version,
   );
   els.versionCatalog.textContent = [
@@ -723,8 +727,8 @@ function renderVersionDebug(manifest, bundleMetadata) {
   ].filter(Boolean).join(" · ");
 }
 
-function versionLabel(modelKey, hash, fallback) {
-  const knownVersion = KNOWN_MODEL_VERSIONS[modelKey]?.[hash];
+function versionLabel(modelKey, hash, version, fallback) {
+  const knownVersion = version || KNOWN_MODEL_VERSIONS[modelKey]?.[hash];
   const hashLabel = compactHash(hash);
   if (knownVersion && hashLabel) return `${knownVersion} · ${hashLabel}`;
   if (knownVersion) return knownVersion;

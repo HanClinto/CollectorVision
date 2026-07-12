@@ -175,6 +175,7 @@ def main() -> None:
             "cornelius": cornelius_hash,
             "milo": milo_hash,
         },
+        "model_versions": weights.BUNDLED_VERSIONS,
         "catalog": {
             "embeddings": f"catalog/{args.catalog_key}-embeddings.f16.bin",
             "card_ids": f"catalog/{args.catalog_key}-card-ids.json",
@@ -202,6 +203,7 @@ def main() -> None:
             "cornelius": cornelius_hash,
             "milo": milo_hash,
         },
+        "model_versions": weights.BUNDLED_VERSIONS,
         "vendor": {
             "onnxruntime_web": ORT_VERSION,
         },

@@ -8,6 +8,10 @@
     "cornelius": "sha256:placeholder",
     "milo": "sha256:placeholder"
   },
+  "model_versions": {
+    "cornelius": "2.12",
+    "milo": "1.0.0"
+  },
   "catalog": {
     "embeddings": "assets/catalog/scryfall-mtg-embeddings.f32",
     "card_ids": "assets/catalog/scryfall-mtg-card-ids.json",

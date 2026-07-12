@@ -29,6 +29,17 @@ const PERF_OVERLAY_KEY = "cv_perf_overlay_enabled";
 const DEBUG_MODE = new URLSearchParams(location.search).get("debug") === "1";
 const BOOT_TRACE_KEY = "cv_boot_trace";
 const BOOT_TRACE_LIMIT = DEBUG_MODE ? 160 : 48;
+const KNOWN_MODEL_VERSIONS = {
+  cornelius: {
+    "sha256:a90ee87a45781e09e9fc88508162dac87b0492162dff79a2627c52ae773e6a79": "1.205",
+    "sha256:8b2edd885d4c813157e15858d3e9a19806e994fcc98f423fc3442cdf704c69ec": "1.210",
+    "sha256:56752ee6149ec5e02258c0886350f0ed55bdbab6f112c27b128a61e4e32a7834": "1.221",
+    "sha256:650da3cc3e9ac778c6951de631f824ec1e63bdabf3aaa39a35d7435af625612e": "2.12",
+  },
+  milo: {
+    "sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df": "1.0.0",
+  },
+};
 
 const NOTES = [
   "The scanner now uses the real ONNX weights and the real MTG gallery bundle.",
@@ -387,6 +398,23 @@ function renderNotes() {
 function renderManifestContract(manifest) {
   const el = document.getElementById("asset-contract");
   el.textContent = JSON.stringify(manifest, null, 2);
+}
+
+function modelVersionLabel(modelKey, manifest) {
+  const hash = manifest.model_hashes?.[modelKey];
+  const version = manifest.model_versions?.[modelKey] ?? KNOWN_MODEL_VERSIONS[modelKey]?.[hash];
+  const hashLabel = compactModelHash(hash);
+  if (version && hashLabel) return `${version} · ${hashLabel}`;
+  if (version) return version;
+  if (hashLabel) return hashLabel;
+  return manifest.version ?? "unknown";
+}
+
+function compactModelHash(hash) {
+  const text = String(hash ?? "").trim();
+  if (!text) return "";
+  if (text.startsWith("sha256:")) return `sha256:${text.slice(7, 15)}`;
+  return text.length > 16 ? `${text.slice(0, 16)}…` : text;
 }
 
 function renderBuildId() {
@@ -2032,9 +2060,8 @@ async function boot() {
   if (catalogLimit) {
     debugLog.warn("debug catalog limit active", `${catalogLimit} rows`);
   }
-  const modelHashes = manifest.model_hashes ?? {};
-  setText("settings-cornelius-hash", modelHashes.cornelius ? modelHashes.cornelius.slice(0, 16) + "\u2026" : manifest.version);
-  setText("settings-milo-hash",      modelHashes.milo      ? modelHashes.milo.slice(0, 16)      + "\u2026" : manifest.version);
+  setText("settings-cornelius-hash", modelVersionLabel("cornelius", manifest));
+  setText("settings-milo-hash",      modelVersionLabel("milo", manifest));
 
   // Create two workers.  The scanner worker does all GPU/CPU inference;
   // the enricher worker handles Scryfall price lookups independently.
