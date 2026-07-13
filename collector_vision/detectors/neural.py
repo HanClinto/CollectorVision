@@ -1,4 +1,4 @@
-"""NeuralCornerDetector — ONNX-based learned card corner detector (Cornelius).
+"""NeuralCornerDetector — ONNX-based learned card corner detector.
 
 Runs through ONNX Runtime providers — no PyTorch dependency required.
 
@@ -8,10 +8,11 @@ coordinates, a card-presence logit, and a SimCC sharpness scalar.
 
 Card presence heuristic
 -----------------------
-For Cornelius (SimCC architecture) the exported ONNX model includes a *sharpness*
-output — the mean peak of the eight softmax coordinate distributions (4 corners
-× 2 axes).  A high peak means the model has a sharp, confident prediction for
-each axis; a low peak means the distributions are flat (no card in view).
+For compatible SimCC architectures, including Cornelius and Fastweb, the exported
+ONNX model includes a *sharpness* output — the mean peak of the eight softmax
+coordinate distributions (4 corners × 2 axes). A high peak means the model has a
+sharp, confident prediction for each axis; a low peak means the distributions are
+flat (no card in view).
 
 In practice, the raw presence logit is unreliable: it fires strongly even on
 blank images.  Sharpness is a much better gate.  When the model emits a
@@ -75,7 +76,7 @@ def _order_corners(pts: np.ndarray, image_shape: tuple[int, ...] | None = None) 
 
 
 class NeuralCornerDetector:
-    """Cornelius — SimCC card corner detector, runs via onnxruntime.
+    """SimCC card corner detector, runs via onnxruntime.
 
     Parameters
     ----------
