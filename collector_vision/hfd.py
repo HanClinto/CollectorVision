@@ -34,15 +34,11 @@ Override the root with ``$COLLECTORVISION_CACHE`` or the ``cache_dir`` argument.
 from __future__ import annotations
 
 import json
-import logging
 import os
 import time
 import urllib.request
 from datetime import timedelta
 from pathlib import Path
-
-log = logging.getLogger(__name__)
-
 
 _DEFAULT_REFRESH = timedelta(days=7)
 _HF_MODEL_BASE = "https://huggingface.co/{repo}/resolve/main/"
@@ -100,7 +96,7 @@ class HFD:
                 f"Available: {available or '(manifest is empty)'}"
             )
         filename = entry["latest"]
-        local_path = self._cache_dir / filename
+        local_path = self._catalog_dir() / filename
 
         if not local_path.exists():
             if self._offline:
@@ -109,7 +105,7 @@ class HFD:
                     "Initialise HFD without offline=True to download it."
                 )
             self._evict_old(filename)
-            _download(self._base_url + filename, local_path)
+            local_path = self._download_catalog(filename)
         else:
             self._evict_old(filename)
 
@@ -124,6 +120,9 @@ class HFD:
 
     def _manifest_path(self) -> Path:
         return self._cache_dir.parent / "manifest.json"
+
+    def _catalog_dir(self) -> Path:
+        return self._cache_dir / _CATALOGS_SUBFOLDER
 
     def _manifest_stale(self) -> bool:
         p = self._manifest_path()
@@ -165,12 +164,29 @@ class HFD:
 
     def _evict_old(self, keep_filename: str) -> None:
         """Delete stale NPZ files in this catalog's cache dir."""
-        for old in self._cache_dir.glob("*.npz"):
+        for old in self._catalog_dir().glob("*.npz"):
             if old.name != keep_filename:
                 try:
                     old.unlink()
                 except OSError:
                     pass
+
+    def _download_catalog(self, filename: str) -> Path:
+        try:
+            from huggingface_hub import hf_hub_download
+        except ImportError as exc:
+            raise ImportError(
+                "Hugging Face catalog downloads require the optional dependency. "
+                'Install it with: pip install "collectorvision[hf]"'
+            ) from exc
+
+        path = hf_hub_download(
+            repo_id=self._repo,
+            filename=filename,
+            subfolder=_CATALOGS_SUBFOLDER,
+            local_dir=self._cache_dir,
+        )
+        return Path(path)
 
 
 # ---------------------------------------------------------------------------
@@ -181,28 +197,3 @@ class HFD:
 def _default_cache_dir() -> Path:
     base = Path(os.environ.get("COLLECTORVISION_CACHE", "~/.cache/collectorvision"))
     return base.expanduser()
-
-
-def _download(url: str, dest: Path, chunk_size: int = 1 << 20) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".download")
-    try:
-        log.info("Downloading %s ...", dest.name)
-        with urllib.request.urlopen(url, timeout=60) as resp:
-            total = int(resp.headers.get("Content-Length", 0))
-            written = 0
-            with tmp.open("wb") as f:
-                while True:
-                    chunk = resp.read(chunk_size)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    written += len(chunk)
-                    if total:
-                        pct = written * 100 // total
-                        log.debug("  %3d%%  %d MB", pct, written // 1024 // 1024)
-        tmp.rename(dest)
-        log.info("  saved → %s", dest)
-    except Exception:
-        tmp.unlink(missing_ok=True)
-        raise
