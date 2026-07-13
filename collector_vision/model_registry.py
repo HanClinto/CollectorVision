@@ -1,17 +1,19 @@
-"""Registry of supported model identities and their stable aliases.
+"""Registry of supported model identities and their channel aliases.
 
 An alias such as ``"cornelius"`` selects the current supported release for a
 model family. Exact IDs such as ``"cornelius-2.12"`` remain stable for callers
 that need reproducible model selection.
 
-This module intentionally separates model identity from artifact resolution.
-The current package still supplies bundled ONNX files; a later resolver will
-attach immutable Hugging Face revisions and SHA-256 verification to each entry.
+The packaged JSON document is a bootstrap snapshot of the remote registry. This
+module intentionally separates model identity from artifact resolution; a later
+resolver will attach immutable Hugging Face revisions and SHA-256 verification.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from importlib.resources import files
 
 
 @dataclass(frozen=True)
@@ -26,46 +28,72 @@ class ModelSpec:
     input_size: int
 
 
-_MODELS: dict[str, ModelSpec] = {
-    "cornelius-2.12": ModelSpec(
-        id="cornelius-2.12",
-        family="cornelius",
-        version="2.12",
-        task="corner-detection",
-        architecture="mobilevit-xxs-simcc",
-        input_size=384,
-    ),
-    "milo-1.0.0": ModelSpec(
-        id="milo-1.0.0",
-        family="milo",
-        version="1.0.0",
-        task="card-embedding",
-        architecture="mobilevit-xxs-arcface",
-        input_size=448,
-    ),
-}
+def _load_registry() -> tuple[dict[str, ModelSpec], dict[str, dict[str, str]]]:
+    registry_path = files("collector_vision").joinpath("data/model_registry.json")
+    data = json.loads(registry_path.read_text(encoding="utf-8"))
+    if data.get("schema_version") != 1:
+        raise RuntimeError("Unsupported model registry schema")
 
-_DEFAULTS: dict[str, str] = {
-    "cornelius": "cornelius-2.12",
-    "milo": "milo-1.0.0",
-}
+    models = {
+        model_id: ModelSpec(id=model_id, **metadata)
+        for model_id, metadata in data["models"].items()
+    }
+    return models, data["channels"]
 
 
-def get_model(model: str) -> ModelSpec:
-    """Resolve a stable family alias or exact model ID to its specification.
+_MODELS, _CHANNELS = _load_registry()
 
-    ``"cornelius"`` resolves to the current default Cornelius release, while
-    ``"cornelius-2.12"`` always resolves to that specific version.
+
+def get_model(
+    model: str | None = None,
+    *,
+    family: str | None = None,
+    version: str | None = None,
+    channel: str = "stable",
+) -> ModelSpec:
+    """Resolve a model ID or family selection to its specification.
+
+    ``model`` accepts an exact ID or a family alias on the requested channel.
+    Alternatively, pass ``family`` and an optional exact ``version``. A version
+    bypasses channel selection and is stable across future channel updates.
     """
-    normalized = model.lower().strip()
-    model_id = _DEFAULTS.get(normalized, normalized)
+    if model is not None and (family is not None or version is not None):
+        raise ValueError("Pass either model or family/version, not both")
+    if model is None and family is None:
+        raise ValueError("Pass a model ID or family")
+
+    normalized = (model or family or "").lower().strip()
+    if model is None and version is not None:
+        model_id = f"{normalized}-{version.strip()}"
+    elif normalized in _MODELS:
+        model_id = normalized
+    else:
+        try:
+            model_id = _CHANNELS[channel.lower().strip()][normalized]
+        except KeyError:
+            available = ", ".join(available_models(channel=channel))
+            raise ValueError(
+                f"Unknown model {normalized!r}. Available models: {available}"
+            ) from None
+
     try:
         return _MODELS[model_id]
     except KeyError:
-        available = ", ".join(available_models())
-        raise ValueError(f"Unknown model {model!r}. Available models: {available}") from None
+        raise RuntimeError(f"Registry channel points to unknown model {model_id!r}") from None
 
 
-def available_models() -> tuple[str, ...]:
-    """Return stable aliases and exact IDs supported by this registry."""
-    return tuple(sorted({*_DEFAULTS, *_MODELS}))
+def available_models(channel: str = "stable") -> tuple[str, ...]:
+    """Return aliases for a channel and every exact model ID in the registry."""
+    try:
+        aliases = _CHANNELS[channel.lower().strip()]
+    except KeyError:
+        known = ", ".join(available_channels())
+        raise ValueError(
+            f"Unknown model channel {channel!r}. Available channels: {known}"
+        ) from None
+    return tuple(sorted({*aliases, *_MODELS}))
+
+
+def available_channels() -> tuple[str, ...]:
+    """Return supported model channels."""
+    return tuple(sorted(_CHANNELS))

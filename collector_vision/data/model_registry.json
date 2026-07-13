@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "channels": {
+    "stable": {
+      "cornelius": "cornelius-2.12",
+      "milo": "milo-1.0.0"
+    },
+    "testing": {
+      "cornelius": "cornelius-2.12",
+      "milo": "milo-1.0.0"
+    }
+  },
+  "models": {
+    "cornelius-2.12": {
+      "family": "cornelius",
+      "version": "2.12",
+      "task": "corner-detection",
+      "architecture": "mobilevit-xxs-simcc",
+      "input_size": 384
+    },
+    "milo-1.0.0": {
+      "family": "milo",
+      "version": "1.0.0",
+      "task": "card-embedding",
+      "architecture": "mobilevit-xxs-arcface",
+      "input_size": 448
+    }
+  }
+}
