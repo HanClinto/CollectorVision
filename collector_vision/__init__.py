@@ -10,6 +10,7 @@ from collector_vision.embedders import NeuralEmbedder
 from collector_vision.games import Embedding, Game
 from collector_vision.hfd import HFD
 from collector_vision.interfaces import DetectionResult
+from collector_vision.model_registry import ModelSpec, available_models, get_model
 from collector_vision.transforms import rotate_card_180
 
 try:
@@ -23,8 +24,11 @@ __all__ = [
     "Embedding",
     "Game",
     "HFD",
+    "ModelSpec",
     "NeuralCornerDetector",
     "NeuralEmbedder",
+    "available_models",
+    "get_model",
     "rotate_card_180",
     "__version__",
 ]
