@@ -11,12 +11,15 @@ class ModelRegistryTests(unittest.TestCase):
         self.assertEqual(model.id, "cornelius-2.12")
         self.assertEqual(model.family, "cornelius")
         self.assertEqual(model.task, "corner-detection")
+        self.assertEqual(model.repository, "HanClinto/cornelius")
+        self.assertEqual(len(model.sha256), 64)
 
     def test_exact_model_id_remains_available(self) -> None:
         model = get_model("milo-1.0.0")
 
         self.assertEqual(model.version, "1.0.0")
         self.assertEqual(model.architecture, "mobilevit-xxs-arcface")
+        self.assertEqual(model.filename, "model.onnx")
 
     def test_family_and_version_select_an_exact_model(self) -> None:
         model = get_model(family="cornelius", version="2.12")

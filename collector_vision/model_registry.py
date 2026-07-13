@@ -26,6 +26,11 @@ class ModelSpec:
     task: str
     architecture: str
     input_size: int
+    repository: str
+    revision: str
+    filename: str
+    sha256: str
+    size_bytes: int
 
 
 def _load_registry() -> tuple[dict[str, ModelSpec], dict[str, dict[str, str]]]:

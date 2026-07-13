@@ -15,15 +15,25 @@
       "family": "cornelius",
       "version": "2.12",
       "task": "corner-detection",
-      "architecture": "mobilevit-xxs-simcc",
-      "input_size": 384
+      "architecture": "mobilevit-xxs-global-token-simcc",
+      "input_size": 384,
+      "repository": "HanClinto/cornelius",
+      "revision": "9280009f5a66f75f952820d9dadb894909b759b7",
+      "filename": "cornelius-2.12.onnx",
+      "sha256": "650da3cc3e9ac778c6951de631f824ec1e63bdabf3aaa39a35d7435af625612e",
+      "size_bytes": 4407545
     },
     "milo-1.0.0": {
       "family": "milo",
       "version": "1.0.0",
       "task": "card-embedding",
       "architecture": "mobilevit-xxs-arcface",
-      "input_size": 448
+      "input_size": 448,
+      "repository": "HanClinto/milo",
+      "revision": "9bcc5e809e936b8c5630d1e7101aae1de1e76621",
+      "filename": "model.onnx",
+      "sha256": "bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "size_bytes": 5191100
     }
   }
 }
