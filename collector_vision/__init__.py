@@ -10,6 +10,7 @@ from collector_vision.embedders import NeuralEmbedder
 from collector_vision.games import Embedding, Game
 from collector_vision.hfd import HFD
 from collector_vision.interfaces import DetectionResult
+from collector_vision.model_artifacts import resolve_model_artifact
 from collector_vision.model_registry import (
     ModelSpec,
     available_channels,
@@ -35,6 +36,7 @@ __all__ = [
     "available_channels",
     "available_models",
     "get_model",
+    "resolve_model_artifact",
     "rotate_card_180",
     "__version__",
 ]

@@ -29,6 +29,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Hugging Face model and catalog artifact resolution.
+hf = ["huggingface_hub>=1.0,<2"]
 # Example server
 server = [
     "fastapi>=0.110",
