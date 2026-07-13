@@ -16,6 +16,7 @@ from collector_vision.model_registry import (
     available_channels,
     available_models,
     get_model,
+    load_model_registry,
 )
 from collector_vision.transforms import rotate_card_180
 
@@ -36,6 +37,7 @@ __all__ = [
     "available_channels",
     "available_models",
     "get_model",
+    "load_model_registry",
     "resolve_model_artifact",
     "rotate_card_180",
     "__version__",

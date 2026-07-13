@@ -1,7 +1,17 @@
+import json
+import tempfile
 import unittest
+from datetime import timedelta
+from pathlib import Path
+from unittest import mock
 
 import collector_vision as cvg
-from collector_vision.model_registry import available_channels, available_models, get_model
+from collector_vision.model_registry import (
+    available_channels,
+    available_models,
+    get_model,
+    load_model_registry,
+)
 
 
 class ModelRegistryTests(unittest.TestCase):
@@ -48,6 +58,48 @@ class ModelRegistryTests(unittest.TestCase):
         self.assertEqual(cvg.get_model("milo").id, "milo-1.0.0")
         self.assertIn("testing", cvg.available_channels())
         self.assertIn("cornelius", cvg.available_models())
+
+    def test_remote_registry_is_cached_and_selected_by_channel(self) -> None:
+        data = {
+            "schema_version": 1,
+            "channels": {"stable": {"cornelius": "cornelius-9.0"}},
+            "models": {
+                "cornelius-9.0": {
+                    "family": "cornelius",
+                    "version": "9.0",
+                    "task": "corner-detection",
+                    "architecture": "test",
+                    "input_size": 384,
+                    "repository": "example/cornelius",
+                    "revision": "abcdef",
+                    "filename": "model.onnx",
+                    "sha256": "0" * 64,
+                    "size_bytes": 1,
+                }
+            },
+        }
+
+        class Response:
+            def read(self) -> bytes:
+                return json.dumps(data).encode("utf-8")
+
+            def __enter__(self):  # noqa: ANN201
+                return self
+
+            def __exit__(self, *args):  # noqa: ANN002, ANN003
+                return None
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            cache_dir = Path(temporary_dir)
+            with mock.patch("urllib.request.urlopen", return_value=Response()) as urlopen:
+                registry = load_model_registry(cache_dir=cache_dir, cache_refresh=timedelta(0))
+
+            self.assertEqual(registry.get_model("cornelius").id, "cornelius-9.0")
+            self.assertTrue((cache_dir / "registry.json").exists())
+            urlopen.assert_called_once()
+
+            cached = load_model_registry(cache_dir=cache_dir, offline=True)
+            self.assertEqual(cached.get_model("cornelius").id, "cornelius-9.0")
 
 
 if __name__ == "__main__":
