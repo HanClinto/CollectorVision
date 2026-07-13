@@ -33,10 +33,10 @@ class ModelSelectionTests(unittest.TestCase):
                 return_value=(mock.Mock(), "image", 384, True),
             ),
         ):
-            NeuralCornerDetector(family="cornelius", channel="testing", offline=True)
+            NeuralCornerDetector(family="fastweb-single", channel="testing", offline=True)
 
         resolve.assert_called_once_with(
-            "cornelius",
+            "fastweb-single",
             task="corner-detection",
             version=None,
             channel="testing",
