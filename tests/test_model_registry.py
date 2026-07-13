@@ -75,6 +75,7 @@ class ModelRegistryTests(unittest.TestCase):
                     "filename": "model.onnx",
                     "sha256": "0" * 64,
                     "size_bytes": 1,
+                    "codename": "corndog",
                 }
             },
         }
@@ -95,6 +96,7 @@ class ModelRegistryTests(unittest.TestCase):
                 registry = load_model_registry(cache_dir=cache_dir, cache_refresh=timedelta(0))
 
             self.assertEqual(registry.get_model("cornelius").id, "cornelius-9.0")
+            self.assertEqual(registry.get_model("cornelius").metadata["codename"], "corndog")
             self.assertTrue((cache_dir / "registry.json").exists())
             urlopen.assert_called_once()
 

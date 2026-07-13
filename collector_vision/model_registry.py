@@ -15,15 +15,16 @@ import json
 import os
 import time
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
 class ModelSpec:
-    """A supported model release and its compatibility metadata."""
+    """A supported model release and its artifact compatibility metadata."""
 
     id: str
     family: str
@@ -36,6 +37,7 @@ class ModelSpec:
     filename: str
     sha256: str
     size_bytes: int
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 _DEFAULT_REFRESH = timedelta(days=7)
@@ -49,7 +51,7 @@ class ModelRegistry:
         if data.get("schema_version") != 1:
             raise RuntimeError("Unsupported model registry schema")
         self._models = {
-            model_id: ModelSpec(id=model_id, **metadata)
+            model_id: _parse_model_spec(model_id, metadata)
             for model_id, metadata in data["models"].items()
         }
         self._channels: dict[str, dict[str, str]] = data["channels"]
@@ -101,6 +103,39 @@ class ModelRegistry:
     def available_channels(self) -> tuple[str, ...]:
         """Return supported model channels."""
         return tuple(sorted(self._channels))
+
+
+def _parse_model_spec(model_id: str, data: dict[str, Any]) -> ModelSpec:
+    known_fields = {
+        "family",
+        "version",
+        "task",
+        "architecture",
+        "input_size",
+        "repository",
+        "revision",
+        "filename",
+        "sha256",
+        "size_bytes",
+    }
+    missing = known_fields - data.keys()
+    if missing:
+        raise RuntimeError(f"Registry model {model_id!r} is missing fields: {sorted(missing)}")
+    metadata = {key: value for key, value in data.items() if key not in known_fields}
+    return ModelSpec(
+        id=model_id,
+        family=data["family"],
+        version=data["version"],
+        task=data["task"],
+        architecture=data["architecture"],
+        input_size=data["input_size"],
+        repository=data["repository"],
+        revision=data["revision"],
+        filename=data["filename"],
+        sha256=data["sha256"],
+        size_bytes=data["size_bytes"],
+        metadata=metadata,
+    )
 
 
 def _load_packaged_registry() -> ModelRegistry:
