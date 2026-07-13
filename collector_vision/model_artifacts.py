@@ -6,7 +6,24 @@ import hashlib
 import os
 from pathlib import Path
 
-from collector_vision.model_registry import ModelSpec
+from collector_vision.model_registry import ModelSpec, load_model_registry
+
+
+def resolve_registered_model(
+    family: str,
+    *,
+    task: str,
+    version: str | None = None,
+    channel: str = "stable",
+    cache_dir: Path | None = None,
+    offline: bool = False,
+) -> Path:
+    """Resolve a family/channel selection to a verified compatible local model."""
+    registry = load_model_registry(cache_dir=cache_dir, offline=offline)
+    model = registry.get_model(family=family, version=version, channel=channel)
+    if model.task != task:
+        raise ValueError(f"Model {model.id!r} has task {model.task!r}; expected {task!r}")
+    return resolve_model_artifact(model, cache_dir=cache_dir, offline=offline)
 
 
 def resolve_model_artifact(

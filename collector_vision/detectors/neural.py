@@ -80,7 +80,18 @@ class NeuralCornerDetector:
     Parameters
     ----------
     checkpoint:
-        Path to the ``.onnx`` file.  Defaults to the bundled Cornelius weights.
+        Path to the ``.onnx`` file. Defaults to the bundled Cornelius weights.
+    family:
+        Registry model family to download and cache, for example ``"cornelius"``.
+        Cannot be combined with ``checkpoint``.
+    version:
+        Exact version within ``family``. When omitted, resolves the selected channel.
+    channel:
+        Registry channel used when selecting a family without an exact version.
+    cache_dir:
+        Override the CollectorVision model cache root.
+    offline:
+        If ``True``, require a selected registry model to already be cached.
     presence_threshold:
         Fallback gate used when the model does not emit a sharpness output.
         Minimum ``sigmoid(presence_logit)`` to treat a detection as valid.
@@ -98,11 +109,33 @@ class NeuralCornerDetector:
         presence_threshold: float = 0.5,
         num_threads: int = 4,
         provider: Provider = "auto",
+        *,
+        family: str | None = None,
+        version: str | None = None,
+        channel: str = "stable",
+        cache_dir: Path | None = None,
+        offline: bool = False,
     ) -> None:
         from collector_vision import weights as _w
+        from collector_vision.model_artifacts import resolve_registered_model
 
+        if checkpoint is not None and (family is not None or version is not None):
+            raise ValueError("Pass either checkpoint or family/version, not both")
+        if family is None and version is not None:
+            raise ValueError("Pass family when selecting a model version")
         if checkpoint is None:
-            checkpoint = _w.CORNER_DETECTOR
+            checkpoint = (
+                _w.CORNER_DETECTOR
+                if family is None
+                else resolve_registered_model(
+                    family,
+                    task="corner-detection",
+                    version=version,
+                    channel=channel,
+                    cache_dir=cache_dir,
+                    offline=offline,
+                )
+            )
         checkpoint = Path(checkpoint)
         if not checkpoint.exists():
             raise FileNotFoundError(

@@ -34,8 +34,18 @@ class NeuralEmbedder:
     Parameters
     ----------
     checkpoint:
-        Path to the ``.onnx`` file.  The ``.onnx.data`` weight file must sit
-        in the same directory.  Defaults to the bundled Milo weights.
+        Path to the ``.onnx`` file. Defaults to the bundled Milo weights.
+    family:
+        Registry model family to download and cache, for example ``"milo"``.
+        Cannot be combined with ``checkpoint``.
+    version:
+        Exact version within ``family``. When omitted, resolves the selected channel.
+    channel:
+        Registry channel used when selecting a family without an exact version.
+    cache_dir:
+        Override the CollectorVision model cache root.
+    offline:
+        If ``True``, require a selected registry model to already be cached.
     batch_size:
         Images to process per ONNX session call.  The default (1) keeps
         latency low for single-image use; increase for throughput-oriented
@@ -55,11 +65,33 @@ class NeuralEmbedder:
         batch_size: int = 1,
         num_threads: int = 4,
         provider: Provider = "auto",
+        *,
+        family: str | None = None,
+        version: str | None = None,
+        channel: str = "stable",
+        cache_dir: Path | None = None,
+        offline: bool = False,
     ) -> None:
         from collector_vision import weights as _w
+        from collector_vision.model_artifacts import resolve_registered_model
 
+        if checkpoint is not None and (family is not None or version is not None):
+            raise ValueError("Pass either checkpoint or family/version, not both")
+        if family is None and version is not None:
+            raise ValueError("Pass family when selecting a model version")
         if checkpoint is None:
-            checkpoint = _w.EMBEDDER
+            checkpoint = (
+                _w.EMBEDDER
+                if family is None
+                else resolve_registered_model(
+                    family,
+                    task="card-embedding",
+                    version=version,
+                    channel=channel,
+                    cache_dir=cache_dir,
+                    offline=offline,
+                )
+            )
         checkpoint = Path(checkpoint)
         if not checkpoint.exists():
             raise FileNotFoundError(
