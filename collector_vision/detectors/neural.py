@@ -30,6 +30,7 @@ from warnings import warn
 import cv2
 import numpy as np
 
+from collector_vision.geometry import DEFAULT_MIN_CORNER_QUALITY, quad_quality
 from collector_vision.interfaces import DetectionResult
 from collector_vision.onnx_providers import Provider, create_inference_session
 
@@ -151,7 +152,12 @@ class NeuralCornerDetector:
             )
             return self._sess.run(None, {self._input_name: x})
 
-    def detect(self, image: np.ndarray, min_sharpness: float = 0.02) -> DetectionResult:
+    def detect(
+        self,
+        image: np.ndarray,
+        min_sharpness: float = 0.02,
+        min_corner_quality: float = DEFAULT_MIN_CORNER_QUALITY,
+    ) -> DetectionResult:
         """Detect card corners in a BGR uint8 image.
 
         Parameters
@@ -164,6 +170,10 @@ class NeuralCornerDetector:
             should be skipped.  Range [0, 1]; default 0.02 sits comfortably
             between blank frames (≈0.008) and valid cards (≈0.03–0.07).
             Pass ``0.0`` to disable the gate entirely.
+        min_corner_quality:
+            Minimum geometric plausibility score for the four corners.  Defaults
+            to ``0.0`` so quality is recorded but not used as an early rejection
+            gate.  Pass a positive value to reject implausible quads before dewarp.
 
         Returns
         -------
@@ -183,20 +193,29 @@ class NeuralCornerDetector:
         sharpness: float | None = None
         if self._has_sharpness:
             sharpness = float(outs[2].squeeze())
-            card_present = sharpness >= min_sharpness
+            detector_card_present = sharpness >= min_sharpness
             confidence = sharpness
         else:
-            card_present = presence >= self._presence_threshold
+            detector_card_present = presence >= self._presence_threshold
             confidence = presence
 
         corners = _order_corners(corners_flat.reshape(4, 2).astype(np.float32), image.shape)
+        quality = quad_quality(corners, image.shape, min_score=min_corner_quality)
+        card_present = detector_card_present and quality.accepted
 
         return DetectionResult(
             corners=corners,
             card_present=card_present,
             confidence=confidence,
             sharpness=sharpness,
-            extra={"presence": presence},
+            extra={
+                "presence": presence,
+                "detector_card_present": detector_card_present,
+                "corner_quality": quality.score,
+                "corner_quality_accepted": quality.accepted,
+                "corner_quality_reason": quality.reason,
+                "corner_quality_metrics": quality.metrics,
+            },
         )
 
     def __repr__(self) -> str:

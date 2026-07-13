@@ -8,6 +8,7 @@ from collector_vision.catalog import Catalog
 from collector_vision.detectors import NeuralCornerDetector
 from collector_vision.embedders import NeuralEmbedder
 from collector_vision.games import Embedding, Game
+from collector_vision.geometry import DEFAULT_MIN_CORNER_QUALITY, QuadQuality, quad_quality
 from collector_vision.hfd import HFD
 from collector_vision.interfaces import DetectionResult
 from collector_vision.transforms import rotate_card_180
@@ -19,12 +20,15 @@ except PackageNotFoundError:
 
 __all__ = [
     "Catalog",
+    "DEFAULT_MIN_CORNER_QUALITY",
     "DetectionResult",
     "Embedding",
     "Game",
     "HFD",
     "NeuralCornerDetector",
     "NeuralEmbedder",
+    "QuadQuality",
+    "quad_quality",
     "rotate_card_180",
     "__version__",
 ]
