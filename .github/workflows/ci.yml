@@ -66,7 +66,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - name: Install deps
-        run: uv pip install --system -e ".[dev,server]" onnxruntime opencv-python-headless
+        run: uv pip install --system -e ".[dev,server,hf]" onnxruntime opencv-python-headless
 
       - name: Run all tests
         run: pytest tests/ -v

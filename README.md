@@ -16,20 +16,22 @@ Experimental javascript port version hosted here: https://hanclinto.github.io/Co
 > **Not yet on PyPI.** Install directly from GitHub:
 
 ```bash
-uv pip install git+https://github.com/HanClinto/CollectorVision.git
+uv pip install "collectorvision[hf] @ git+https://github.com/HanClinto/CollectorVision.git"
 uv pip install onnxruntime
 ```
 
 Or with plain `pip`:
 
 ```bash
-pip install git+https://github.com/HanClinto/CollectorVision.git
+pip install "collectorvision[hf] @ git+https://github.com/HanClinto/CollectorVision.git"
 pip install onnxruntime
 ```
 
 Requires Python 3.10+. Neural inference requires an ONNX Runtime backend. Add
 exactly one backend package to your environment, `requirements.txt`, or
 `pyproject.toml`: use `onnxruntime` for CPU or `onnxruntime-gpu` for NVIDIA GPU.
+The optional `hf` extra enables Hugging Face model and catalog downloads. It is
+not needed for offline use with local checkpoints and cached catalogs.
 
 ### Hardware acceleration
 
