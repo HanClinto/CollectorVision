@@ -27,9 +27,10 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from collector_vision import weights
 from collector_vision.catalog import Catalog
 from collector_vision.hfd import HFD
+from collector_vision.model_artifacts import resolve_model_artifact
+from collector_vision.model_registry import ModelSpec, load_model_registry
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT_DIR = ROOT / "examples" / "web_scanner"
@@ -99,6 +100,22 @@ def _latest_catalog_filename(repo: str, catalog_key: str) -> str:
     return entry["latest"]
 
 
+def _resolve_web_models(channel: str) -> tuple[ModelSpec, Path, ModelSpec, Path]:
+    registry = load_model_registry()
+    corner_model = registry.get_model(family="cornelius", channel=channel)
+    embedder_model = registry.get_model(family="milo", channel=channel)
+    if corner_model.task != "corner-detection":
+        raise ValueError(f"Model {corner_model.id!r} is not a corner detector")
+    if embedder_model.task != "card-embedding":
+        raise ValueError(f"Model {embedder_model.id!r} is not an embedder")
+    return (
+        corner_model,
+        resolve_model_artifact(corner_model),
+        embedder_model,
+        resolve_model_artifact(embedder_model),
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -117,6 +134,11 @@ def parse_args() -> argparse.Namespace:
         "--bundle-version",
         default=None,
         help="Optional explicit bundle version string written into bundle-metadata.json",
+    )
+    parser.add_argument(
+        "--model-channel",
+        default="stable",
+        help="Model registry channel used for Cornelius and Milo (default: stable)",
     )
     return parser.parse_args()
 
@@ -141,11 +163,14 @@ def main() -> None:
     hfd = HFD(args.repo, args.catalog_key)
 
     catalog = Catalog.load(hfd)
+    corner_model, corner_source, embedder_model, embedder_source = _resolve_web_models(
+        args.model_channel
+    )
 
     cornelius_path = models_dir / "cornelius.onnx"
     milo_path = models_dir / "milo.onnx"
-    shutil.copy2(weights.CORNER_DETECTOR, cornelius_path)
-    shutil.copy2(weights.EMBEDDER, milo_path)
+    shutil.copy2(corner_source, cornelius_path)
+    shutil.copy2(embedder_source, milo_path)
     _write_vendor_files(ORT_TARBALL, ORT_FILES, ort_vendor_dir)
 
     embeddings_path = catalog_dir / f"{args.catalog_key}-embeddings.f16.bin"
@@ -175,7 +200,14 @@ def main() -> None:
             "cornelius": cornelius_hash,
             "milo": milo_hash,
         },
-        "model_versions": weights.BUNDLED_VERSIONS,
+        "model_ids": {
+            "cornelius": corner_model.id,
+            "milo": embedder_model.id,
+        },
+        "model_versions": {
+            "cornelius": corner_model.version,
+            "milo": embedder_model.version,
+        },
         "catalog": {
             "embeddings": f"catalog/{args.catalog_key}-embeddings.f16.bin",
             "card_ids": f"catalog/{args.catalog_key}-card-ids.json",
@@ -203,7 +235,14 @@ def main() -> None:
             "cornelius": cornelius_hash,
             "milo": milo_hash,
         },
-        "model_versions": weights.BUNDLED_VERSIONS,
+        "model_ids": {
+            "cornelius": corner_model.id,
+            "milo": embedder_model.id,
+        },
+        "model_versions": {
+            "cornelius": corner_model.version,
+            "milo": embedder_model.version,
+        },
         "vendor": {
             "onnxruntime_web": ORT_VERSION,
         },

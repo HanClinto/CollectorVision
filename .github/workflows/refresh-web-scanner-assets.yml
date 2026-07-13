@@ -38,7 +38,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Install project
-        run: uv pip install --system -e .
+        run: uv pip install --system -e ".[hf]"
 
       - name: Resolve bundle target
         id: bundle
