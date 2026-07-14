@@ -336,7 +336,7 @@ h2 {
   top: 0.65rem;
   right: 0.65rem;
   z-index: 3;
-  max-width: min(17rem, calc(100% - 1.3rem));
+  width: min(26rem, calc(100% - 1.3rem));
   padding: 0.55rem 0.65rem;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 0.75rem;
