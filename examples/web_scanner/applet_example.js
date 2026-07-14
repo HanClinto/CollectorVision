@@ -4,6 +4,10 @@ import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanne
 const CODE_KEY = "collectorvision_applet_example_code";
 const PRESET_KEY = "collectorvision_applet_example_preset";
 const SETTINGS_KEY = "collectorvision_applet_example_settings";
+const ASSET_CHANNELS = {
+  stable: "./assets",
+  testing: "./testing/assets",
+};
 const LOG_LIMIT = 12;
 const SCRYFALL_CARD_URL = "https://api.scryfall.com/cards/${card.cardId}";
 const DEFAULT_SCAN_SETTINGS = {
@@ -16,6 +20,14 @@ const DEFAULT_SCAN_SETTINGS = {
   groupBySecondaryId: true,
 };
 const MAX_GUI_CORNER_CONFIDENCE = 0.10;
+
+function resolveAssetChannel() {
+  const requested = new URLSearchParams(location.search).get("channel") ?? "stable";
+  return Object.hasOwn(ASSET_CHANNELS, requested) ? requested : "stable";
+}
+
+const assetChannel = resolveAssetChannel();
+const assetBasePath = ASSET_CHANNELS[assetChannel];
 
 const PRESETS = [
   {
@@ -521,6 +533,8 @@ compileHandler();
 async function createScanner(settings) {
   return createCollectorVisionScannerApplet({
     target: "#collectorvision",
+    manifestUrl: `${assetBasePath}/manifest.json`,
+    assetBasePath,
     ...settings,
     overlay: true,
     onResult(result) {
@@ -540,5 +554,7 @@ async function createScanner(settings) {
 }
 
 scanner = await createScanner(await applyScanSettings({ announce: false }));
+
+log(`Using ${assetChannel} assets.`);
 
 window.collectorVisionScanner = scanner;

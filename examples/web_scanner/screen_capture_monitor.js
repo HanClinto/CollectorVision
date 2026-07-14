@@ -1,5 +1,9 @@
 const BUILD_ID = "__BUILD_ID__";
 const CHANNEL_NAME = "collectorvision-monitor";
+const ASSET_CHANNELS = {
+  stable: "./assets",
+  testing: "./testing/assets",
+};
 const ROI_KEY = "collectorvision_screen_monitor_roi";
 const SETTINGS_KEY = "collectorvision_screen_monitor_settings";
 const MAX_EVENTS = 250;
@@ -74,6 +78,11 @@ let dragState = null;
 let lastSource = null;
 let bucket = createBucket();
 
+function resolveAssetChannel() {
+  const requested = new URLSearchParams(location.search).get("channel") ?? "stable";
+  return Object.hasOwn(ASSET_CHANNELS, requested) ? requested : "stable";
+}
+
 init();
 
 async function init() {
@@ -117,8 +126,12 @@ function bindUi() {
 
 async function initWorker() {
   try {
-    const manifest = await fetchJson("./assets/manifest.json");
-    const bundleMetadata = await fetchOptionalJson("./bundle-metadata.json");
+    const assetChannel = resolveAssetChannel();
+    const assetBasePath = ASSET_CHANNELS[assetChannel];
+    const manifest = await fetchJson(`${assetBasePath}/manifest.json`);
+    const bundleMetadata = await fetchOptionalJson(
+      assetChannel === "stable" ? "./bundle-metadata.json" : "./testing/bundle-metadata.json",
+    );
     renderVersionDebug(manifest, bundleMetadata);
     worker = new Worker(`./scanner.worker.mjs?v=${BUILD_ID}`, { type: "module" });
     worker.addEventListener("message", handleWorkerMessage);
@@ -130,6 +143,7 @@ async function initWorker() {
     worker.postMessage({
       type: "init",
       manifest,
+      assetBasePath,
       enableWebGpu: false,
       minCornerConfidence: settings.minCornerConfidence,
       rotationInvariant: true,

@@ -24,9 +24,11 @@ const ASSET_DB_NAME = "collectorvision-web-scanner";
 const ASSET_STORE_NAME = "assets";
 const WEBGPU_PREF_KEY = "cv_webgpu_enabled";
 const MATCH_SCORE_KEY = "cv_min_match_score";
+const CORNER_CONFIDENCE_KEY = "cv_min_corner_confidence";
 const ROTATION_INVARIANT_KEY = "cv_rotation_invariant_enabled";
 const MIN_MATCHES_DEFAULT = 2;
 const MATCHES_KEY = "cv_min_matches";
+const MIN_CORNER_CONFIDENCE_DEFAULT = 0.02;
 const SCAN_BUFFER_SIZE = 5;
 const SCANS_KEY = "cv_scans";
 const PERF_OVERLAY_KEY = "cv_perf_overlay_enabled";
@@ -1503,6 +1505,11 @@ function getMinMatchScore() {
   return Number.isFinite(stored) ? stored : MIN_MATCH_SCORE_DEFAULT;
 }
 
+function getMinCornerConfidence() {
+  const stored = Number.parseFloat(localStorage.getItem(CORNER_CONFIDENCE_KEY));
+  return Number.isFinite(stored) ? Math.min(0.1, Math.max(0, stored)) : MIN_CORNER_CONFIDENCE_DEFAULT;
+}
+
 function getMinMatches() {
   const stored = parseInt(localStorage.getItem(MATCHES_KEY), 10);
   return Number.isFinite(stored) && stored >= 1 ? stored : MIN_MATCHES_DEFAULT;
@@ -1525,6 +1532,23 @@ function setupMatchScoreSlider() {
     label.textContent = value.toFixed(2);
     localStorage.setItem(MATCH_SCORE_KEY, value);
   });
+}
+
+function setupCornerConfidenceSlider(scannerWorker = null) {
+  const slider = document.getElementById("corner-confidence-slider");
+  const label = document.getElementById("corner-confidence-value");
+  if (!slider || !label) return;
+
+  const update = () => {
+    const value = Number.parseFloat(slider.value);
+    label.textContent = value.toFixed(2);
+    localStorage.setItem(CORNER_CONFIDENCE_KEY, value);
+    scannerWorker?.postMessage({ type: "config", minCornerConfidence: value });
+  };
+
+  slider.value = getMinCornerConfidence();
+  label.textContent = getMinCornerConfidence().toFixed(2);
+  slider.addEventListener("input", update);
 }
 
 function setupMinMatchesSlider() {
@@ -2159,11 +2183,14 @@ async function boot() {
     enableWebGpu: isWebGpuEnabled(),
     catalogLimit,
     rotationInvariant: isRotationInvariantEnabled(),
+    minCornerConfidence: getMinCornerConfidence(),
   });
+  setupCornerConfidenceSlider(scannerWorker);
   recordBootTrace("worker:init-posted", {
     enableWebGpu: isWebGpuEnabled(),
     catalogLimit,
     rotationInvariant: isRotationInvariantEnabled(),
+    minCornerConfidence: getMinCornerConfidence(),
   });
   const { inferenceMode, numThreads, catalogRows, catalogTotalRows, catalogLimit: activeCatalogLimit } = await scannerReady;
 
