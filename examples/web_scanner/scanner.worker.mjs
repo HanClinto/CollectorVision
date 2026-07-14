@@ -380,13 +380,18 @@ async function writeCachedAsset(key, value) {
 // HTTP helpers with progress reporting + IndexedDB caching
 // ---------------------------------------------------------------------------
 
-async function fetchWithProgress(url, responseType, onProgress) {
+async function fetchWithProgress(url, responseType, expectedTotal, onProgress) {
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
   }
 
-  let total = Number.parseInt(response.headers.get("content-length") ?? "0", 10) || 0;
+  const declaredTotal = Number.isSafeInteger(expectedTotal) && expectedTotal > 0
+    ? expectedTotal
+    : 0;
+  let total = declaredTotal
+    || Number.parseInt(response.headers.get("content-length") ?? "0", 10)
+    || 0;
   if (!response.body || total === 0) {
     const payload = responseType === "json" ? await response.json() : await response.arrayBuffer();
     onProgress?.(1, total || 1, total || 1);
@@ -406,7 +411,7 @@ async function fetchWithProgress(url, responseType, onProgress) {
     loaded += value.length;
     // Fetch streams expose decoded bytes, while Content-Length can describe a
     // compressed HTTP response. Do not present an invalid total to the UI.
-    if (total > 0 && loaded > total) {
+    if (declaredTotal === 0 && total > 0 && loaded > total) {
       total = 0;
     }
     onProgress?.(total > 0 ? loaded / total : 0, loaded, total);
@@ -420,28 +425,28 @@ async function fetchWithProgress(url, responseType, onProgress) {
   return await blob.arrayBuffer();
 }
 
-async function fetchJsonCached(url, version, onProgress) {
+async function fetchJsonCached(url, version, expectedTotal, onProgress) {
   const key = `${version}:${url}:json`;
   const cached = await readCachedAsset(key);
   if (cached) {
     onProgress?.(1, 1, 1, true);
     return cached;
   }
-  const json = await fetchWithProgress(url, "json", (ratio, loaded, total) => {
+  const json = await fetchWithProgress(url, "json", expectedTotal, (ratio, loaded, total) => {
     onProgress?.(ratio, loaded, total, false);
   });
   await writeCachedAsset(key, json);
   return json;
 }
 
-async function fetchBufferCached(url, version, onProgress) {
+async function fetchBufferCached(url, version, expectedTotal, onProgress) {
   const key = `${version}:${url}:buffer`;
   const cached = await readCachedAsset(key);
   if (cached) {
     onProgress?.(1, cached.byteLength ?? 1, cached.byteLength ?? 1, true);
     return cached;
   }
-  const buffer = await fetchWithProgress(url, "buffer", (ratio, loaded, total) => {
+  const buffer = await fetchWithProgress(url, "buffer", expectedTotal, (ratio, loaded, total) => {
     onProgress?.(ratio, loaded, total, false);
   });
   await writeCachedAsset(key, buffer);
@@ -595,16 +600,19 @@ class WorkerRuntime {
     // model weight file (same filename, different content) always busts the
     // IndexedDB entry, even if the bundle version string hasn't changed.
     const hashes = this.manifest.model_hashes ?? {};
+    const modelSizes = this.manifest.model_sizes ?? {};
     const detectorVersion = hashes[this.detectorConfig.modelKey] ?? version;
     const embedderVersion = hashes.milo       ?? version;
     const detectorBuffer = await fetchBufferCached(
       `${this.assetBasePath}/${this.manifest.models[this.detectorConfig.modelKey]}`,
       detectorVersion,
+      modelSizes[this.detectorConfig.modelKey],
       (ratio, loaded, total, cached) => onStage?.("detector", ratio, loaded, total, cached),
     );
     const embedderBuffer = await fetchBufferCached(
       `${this.assetBasePath}/${this.manifest.models.milo}`,
       embedderVersion,
+      modelSizes.milo,
       (ratio, loaded, total, cached) => onStage?.("embedder", ratio, loaded, total, cached),
     );
 
@@ -634,19 +642,26 @@ class WorkerRuntime {
     this.inputNames.detector = this.detector.inputNames[0];
     this.inputNames.embedder = this.embedder.inputNames[0];
 
+    const catalogAssetSizes = this.manifest.catalog.asset_sizes ?? {};
     const embeddingBuffer = await fetchBufferCached(
       `${this.assetBasePath}/${this.manifest.catalog.embeddings}`,
       version,
+      catalogAssetSizes.embeddings,
       (ratio, loaded, total, cached) => onStage?.("catalog", ratio * 0.92, loaded, total, cached),
     );
     const ids = await fetchJsonCached(
       `${this.assetBasePath}/${this.manifest.catalog.card_ids}`,
       version,
+      catalogAssetSizes.card_ids,
       (ratio, loaded, total, cached) => onStage?.("catalog", 0.92 + ratio * 0.08, loaded, total, cached),
     );
     const secondarySource = resolveSecondaryIdSource(this.manifest.catalog);
     const secondaryIds = secondarySource
-      ? await fetchJsonCached(`${this.assetBasePath}/${secondarySource.assetPath}`, version)
+      ? await fetchJsonCached(
+        `${this.assetBasePath}/${secondarySource.assetPath}`,
+        version,
+        catalogAssetSizes.oracle_ids,
+      )
       : null;
     // Keep the catalog in its packed float16 form.  Expanding the full MTG
     // matrix to Float32Array roughly doubles steady-state catalog memory and

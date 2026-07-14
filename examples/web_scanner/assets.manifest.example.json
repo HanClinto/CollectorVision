@@ -4,6 +4,10 @@
     "detector": "assets/models/detector.onnx",
     "milo": "assets/models/milo.onnx"
   },
+  "model_sizes": {
+    "detector": 3200000,
+    "milo": 5200000
+  },
   "model_hashes": {
     "detector": "sha256:placeholder",
     "milo": "sha256:placeholder"
@@ -26,6 +30,10 @@
   "catalog": {
     "embeddings": "assets/catalog/scryfall-mtg-embeddings.f32",
     "card_ids": "assets/catalog/scryfall-mtg-card-ids.json",
+    "asset_sizes": {
+      "embeddings": 55300000,
+      "card_ids": 4400000
+    },
     "metadata": "assets/catalog/scryfall-mtg-metadata.json",
     "rows": 108000,
     "dims": 128

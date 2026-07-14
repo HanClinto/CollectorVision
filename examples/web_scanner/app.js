@@ -2149,7 +2149,7 @@ async function boot() {
   loadingScreen.step("dewarp", "active", "Queued");
   loadingScreen.step("detector", "active", "Queued");
   loadingScreen.step("embedder", "active", "Queued");
-  loadingScreen.step("catalog", "active", "Queued");
+  loadingScreen.step("catalog", "active", "Waiting for models");
   setText("models-status", "Loading models");
 
   scannerWorker.postMessage({

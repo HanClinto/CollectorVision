@@ -216,6 +216,10 @@ def main() -> None:
             "detector": "models/detector.onnx",
             "milo": "models/milo.onnx",
         },
+        "model_sizes": {
+            "detector": detector_path.stat().st_size,
+            "milo": milo_path.stat().st_size,
+        },
         "model_hashes": {
             "detector": detector_hash,
             "milo": milo_hash,
@@ -242,6 +246,15 @@ def main() -> None:
         "catalog": {
             "embeddings": f"catalog/{args.catalog_key}-embeddings.f16.bin",
             "card_ids": f"catalog/{args.catalog_key}-card-ids.json",
+            "asset_sizes": {
+                "embeddings": embeddings_path.stat().st_size,
+                "card_ids": card_ids_path.stat().st_size,
+                **(
+                    {"oracle_ids": oracle_ids_path.stat().st_size}
+                    if oracle_ids_path is not None
+                    else {}
+                ),
+            },
             **(
                 {"oracle_ids": f"catalog/{args.catalog_key}-oracle-ids.json"}
                 if oracle_ids_path is not None
@@ -266,6 +279,7 @@ def main() -> None:
             "detector": detector_hash,
             "milo": milo_hash,
         },
+        "model_sizes": manifest["model_sizes"],
         "model_ids": {
             "detector": corner_model.id,
             "milo": embedder_model.id,
@@ -282,6 +296,10 @@ def main() -> None:
             "embeddings": _sha256(embeddings_path),
             "card_ids": _sha256(card_ids_path),
             **({"oracle_ids": _sha256(oracle_ids_path)} if oracle_ids_path is not None else {}),
+        },
+        "asset_sizes": {
+            "manifest": manifest_path.stat().st_size,
+            **manifest["catalog"]["asset_sizes"],
         },
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
