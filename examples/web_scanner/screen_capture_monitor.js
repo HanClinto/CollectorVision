@@ -58,6 +58,16 @@ const els = {
   cornerSignalThreshold: document.getElementById("corner-signal-threshold"),
   cornerSignalValue: document.getElementById("corner-signal-value"),
   groupSecondary: document.getElementById("group-secondary"),
+  openOverlay: document.getElementById("open-overlay"),
+  copyOverlayLink: document.getElementById("copy-overlay-link"),
+  overlaySize: document.getElementById("overlay-size"),
+  overlayPosition: document.getElementById("overlay-position"),
+  overlayBackground: document.getElementById("overlay-background"),
+  overlayDuration: document.getElementById("overlay-duration"),
+  overlayShowName: document.getElementById("overlay-show-name"),
+  overlayShowSet: document.getElementById("overlay-show-set"),
+  overlayShowRarity: document.getElementById("overlay-show-rarity"),
+  overlayShowPrice: document.getElementById("overlay-show-price"),
   eventList: document.getElementById("event-list"),
   copyList: document.getElementById("copy-list"),
   downloadCsv: document.getElementById("download-csv"),
@@ -99,6 +109,7 @@ async function init() {
 }
 
 function bindUi() {
+  updateOverlayLink();
   els.captureToggle.addEventListener("click", () => {
     if (stream) {
       stopCapture();
@@ -121,6 +132,20 @@ function bindUi() {
   for (const input of [els.matchThreshold, els.consecutiveMatches, els.scanInterval, els.cornerThreshold, els.groupSecondary]) {
     input.addEventListener("change", updateSettingsFromInputs);
   }
+  for (const input of [
+    els.overlaySize,
+    els.overlayPosition,
+    els.overlayBackground,
+    els.overlayDuration,
+    els.overlayShowName,
+    els.overlayShowSet,
+    els.overlayShowRarity,
+    els.overlayShowPrice,
+  ]) {
+    input.addEventListener("input", updateOverlayLink);
+    input.addEventListener("change", updateOverlayLink);
+  }
+  els.copyOverlayLink.addEventListener("click", copyOverlayLink);
   els.copyList.addEventListener("click", copyCardList);
   els.downloadCsv.addEventListener("click", () => downloadText("collectorvision-screen-capture.csv", buildCsv(), "text/csv"));
   els.downloadJsonl.addEventListener("click", () => downloadText("collectorvision-screen-capture.jsonl", buildJsonl(), "application/x-ndjson"));
@@ -128,6 +153,30 @@ function bindUi() {
     events.splice(0, events.length);
     renderEvents();
   });
+}
+
+function updateOverlayLink() {
+  const url = new URL("./screen_capture_overlay.html", location.href);
+  url.searchParams.set("size", els.overlaySize.value);
+  url.searchParams.set("position", els.overlayPosition.value);
+  url.searchParams.set("background", els.overlayBackground.value);
+  url.searchParams.set("duration", els.overlayDuration.value);
+  url.searchParams.set("name", els.overlayShowName.checked ? "1" : "0");
+  url.searchParams.set("set", els.overlayShowSet.checked ? "1" : "0");
+  url.searchParams.set("rarity", els.overlayShowRarity.checked ? "1" : "0");
+  url.searchParams.set("price", els.overlayShowPrice.checked ? "1" : "0");
+  els.openOverlay.href = url.href;
+}
+
+async function copyOverlayLink() {
+  try {
+    await navigator.clipboard.writeText(els.openOverlay.href);
+    const original = els.copyOverlayLink.textContent;
+    els.copyOverlayLink.textContent = "Copied";
+    setTimeout(() => { els.copyOverlayLink.textContent = original; }, 1500);
+  } catch (error) {
+    console.warn("[CollectorVision monitor] Could not copy overlay link", error);
+  }
 }
 
 async function initWorker() {

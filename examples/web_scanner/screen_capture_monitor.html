@@ -166,6 +166,57 @@
         </article>
       </section>
 
+      <section class="panel overlay-settings">
+        <div class="panel-heading">
+          <div>
+            <p class="label">Stream overlay</p>
+            <h2>Browser source appearance</h2>
+          </div>
+          <div class="toolbar-actions">
+            <a id="open-overlay" class="button-link" href="./screen_capture_overlay.html" target="_blank" rel="noopener noreferrer">Open overlay</a>
+            <button id="copy-overlay-link" class="secondary" type="button">Copy link</button>
+          </div>
+        </div>
+        <div class="settings-grid overlay-settings-grid">
+          <label>
+            Card size
+            <select id="overlay-size">
+              <option value="medium">Medium</option>
+              <option value="large" selected>Large</option>
+              <option value="huge">Huge</option>
+            </select>
+          </label>
+          <label>
+            Position
+            <select id="overlay-position">
+              <option value="bottom-right" selected>Bottom right</option>
+              <option value="bottom-left">Bottom left</option>
+              <option value="top-right">Top right</option>
+              <option value="top-left">Top left</option>
+            </select>
+          </label>
+          <label>
+            Background
+            <select id="overlay-background">
+              <option value="glass" selected>Glass</option>
+              <option value="solid">Solid</option>
+              <option value="transparent">Transparent</option>
+            </select>
+          </label>
+          <label>
+            Display time (seconds; 0 stays on screen)
+            <input id="overlay-duration" type="number" min="0" max="120" step="1" value="8" />
+          </label>
+        </div>
+        <div class="overlay-toggles">
+          <label class="toggle-row"><input id="overlay-show-name" type="checkbox" checked /> <span>Card name</span></label>
+          <label class="toggle-row"><input id="overlay-show-set" type="checkbox" checked /> <span>Set name</span></label>
+          <label class="toggle-row"><input id="overlay-show-rarity" type="checkbox" checked /> <span>Rarity</span></label>
+          <label class="toggle-row"><input id="overlay-show-price" type="checkbox" checked /> <span>USD price</span></label>
+        </div>
+        <p class="muted">Use the generated link as a browser source. Appearance settings live in its URL; recognition alerts only send the identified card.</p>
+      </section>
+
       <section class="panel">
         <div class="panel-heading">
           <div>

@@ -38,7 +38,8 @@ button {
 }
 
 button.secondary,
-.hero-links a {
+.hero-links a,
+.button-link {
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.08);
   color: #f8f2e8;
@@ -119,6 +120,16 @@ code {
 }
 
 .hero-links a {
+  min-height: 2.55rem;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.65rem 1rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.button-link {
   min-height: 2.55rem;
   display: inline-flex;
   align-items: center;
@@ -420,6 +431,12 @@ input[type="range"] {
 .toggle-row input {
   min-height: auto;
   width: 1rem;
+}
+
+.overlay-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
 }
 
 .event-list {

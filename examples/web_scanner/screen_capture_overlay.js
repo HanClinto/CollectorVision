@@ -6,10 +6,48 @@ const DEFAULT_HIDE_MS = 8000;
 const card = document.getElementById("overlay-card");
 const artEl = document.getElementById("card-art");
 const nameEl = document.getElementById("card-name");
-const metaEl = document.getElementById("card-meta");
+const setEl = document.getElementById("card-set");
+const rarityEl = document.getElementById("card-rarity");
+const priceEl = document.getElementById("card-price");
 let hideTimer = null;
 let latestRequest = 0;
 let scryfallCache = readCache();
+const display = readDisplayOptions();
+
+function readDisplayOptions() {
+  const params = new URLSearchParams(location.search);
+  const enabled = (name, fallback = true) => {
+    const value = params.get(name);
+    return value === null ? fallback : value !== "0" && value !== "false";
+  };
+  const choice = (name, choices, fallback) => {
+    const value = params.get(name);
+    return choices.includes(value) ? value : fallback;
+  };
+  const durationSeconds = Number(params.get("duration"));
+  return {
+    showName: enabled("name"),
+    showSet: enabled("set"),
+    showRarity: enabled("rarity"),
+    showPrice: enabled("price"),
+    background: choice("background", ["glass", "solid", "transparent"], "glass"),
+    position: choice("position", ["top-left", "top-right", "bottom-left", "bottom-right"], "bottom-right"),
+    size: choice("size", ["medium", "large", "huge"], "large"),
+    hideMs: Number.isFinite(durationSeconds) && durationSeconds >= 0
+      ? durationSeconds * 1000
+      : DEFAULT_HIDE_MS,
+  };
+}
+
+card.classList.add(
+  `background-${display.background}`,
+  `position-${display.position}`,
+  `size-${display.size}`,
+);
+card.classList.toggle("show-name", display.showName);
+card.classList.toggle("show-set", display.showSet);
+card.classList.toggle("show-rarity", display.showRarity);
+card.classList.toggle("show-price", display.showPrice);
 
 function readCache() {
   try {
@@ -42,6 +80,7 @@ function normalizeScryfall(cardData) {
     name: cardData.name,
     setName: cardData.set_name,
     rarity: cardData.rarity,
+    priceUsd: cardData.prices?.usd ?? cardData.prices?.usd_foil ?? null,
     imageUrl,
     cachedAt: Date.now(),
   };
@@ -77,7 +116,9 @@ async function preloadImage(src) {
 
 function showScryfallCard(cardData) {
   nameEl.textContent = cardData.name;
-  metaEl.textContent = [cardData.setName, cardData.rarity].filter(Boolean).join(" · ");
+  setEl.textContent = cardData.setName ?? "";
+  rarityEl.textContent = cardData.rarity ?? "";
+  priceEl.textContent = formatPrice(cardData.priceUsd);
   if (cardData.imageUrl) {
     artEl.src = cardData.imageUrl;
     artEl.alt = cardData.name;
@@ -89,9 +130,20 @@ function showScryfallCard(cardData) {
   requestAnimationFrame(() => card.classList.add("is-visible"));
 
   clearTimeout(hideTimer);
-  hideTimer = setTimeout(() => {
-    card.classList.remove("is-visible");
-  }, DEFAULT_HIDE_MS);
+  if (display.hideMs > 0) {
+    hideTimer = setTimeout(() => {
+      card.classList.remove("is-visible");
+    }, display.hideMs);
+  }
+}
+
+function formatPrice(price) {
+  const value = Number(price);
+  if (!Number.isFinite(value)) return "";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(value);
 }
 
 async function handleCardEvent(event) {
