@@ -2,6 +2,10 @@
 const BUILD_ID = "__BUILD_ID__";
 
 const GITHUB_REPO = "HanClinto/CollectorVision";
+const ASSET_CHANNELS = {
+  stable: "./assets",
+  testing: "./testing/assets",
+};
 
 // DETECTOR_SIZE is kept here for the capture-bundle debug export.
 const DETECTOR_SIZE = 384;
@@ -1953,19 +1957,25 @@ function createScannerLoop(
   };
 }
 
-async function loadManifest() {
-  const cached = await readCachedAsset("manifest");
+function resolveAssetChannel() {
+  const requested = new URLSearchParams(location.search).get("channel") ?? "stable";
+  return Object.hasOwn(ASSET_CHANNELS, requested) ? requested : "stable";
+}
+
+async function loadManifest(channel) {
+  const assetBasePath = ASSET_CHANNELS[channel];
+  const cached = await readCachedAsset(`manifest:${channel}`);
   if (cached?.version) {
     setText("manifest-status", `Cached v${cached.version}`);
   }
-  const response = await fetch("./assets/manifest.json", { cache: "no-store" });
+  const response = await fetch(`${assetBasePath}/manifest.json`, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error(`Failed to load manifest: HTTP ${response.status}`);
+    throw new Error(`Failed to load ${channel} manifest: HTTP ${response.status}`);
   }
   const manifest = await response.json();
-  await writeCachedAsset("manifest", manifest);
-  setText("manifest-status", `Local assets v${manifest.version}`);
-  return manifest;
+  await writeCachedAsset(`manifest:${channel}`, manifest);
+  setText("manifest-status", `${channel} assets v${manifest.version}`);
+  return { assetBasePath, manifest };
 }
 
 function formatBytes(value) {
@@ -2049,18 +2059,20 @@ async function boot() {
 
   // Load the manifest on the main thread first — it drives both the loading
   // screen text and the worker init message.
-  const manifest = await loadManifest();
+  const channel = resolveAssetChannel();
+  const { assetBasePath, manifest } = await loadManifest(channel);
   const catalogLimit = getCatalogLimitFromQuery();
   recordBootTrace("boot:manifest", {
     version: manifest.version,
     rows: manifest.catalog?.rows,
     dims: manifest.catalog?.dims,
     catalogLimit,
+    channel,
   });
   renderManifestContract(manifest);
   loadingScreen.step("manifest", "done", `v${manifest.version}`);
   loadingScreen.progress(14, "Manifest loaded");
-  debugLog.info("manifest loaded", manifest.version);
+  debugLog.info("manifest loaded", `${channel} ${manifest.version}`);
   if (catalogLimit) {
     debugLog.warn("debug catalog limit active", `${catalogLimit} rows`);
   }
@@ -2139,6 +2151,7 @@ async function boot() {
   scannerWorker.postMessage({
     type: "init",
     manifest,
+    assetBasePath,
     enableWebGpu: isWebGpuEnabled(),
     catalogLimit,
     rotationInvariant: isRotationInvariantEnabled(),

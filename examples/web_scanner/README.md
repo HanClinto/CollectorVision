@@ -103,6 +103,10 @@ published separately to `web-scanner-assets-testing`; it selects
 `fastweb-single` from the testing model channel and is intended for local or
 preview-host testing without changing the production Pages detector.
 
+The deployed scanner selects its asset bundle with the `channel` query
+parameter. The default URL loads stable assets; append `?channel=testing` to
+load the separately published Fastweb testing bundle from the same Pages site.
+
 See:
 
 - [ASSET_DEPLOY_PLAN.md](./ASSET_DEPLOY_PLAN.md)

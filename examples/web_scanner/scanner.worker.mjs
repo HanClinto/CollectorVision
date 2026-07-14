@@ -535,12 +535,14 @@ function webGpuDisableReason() {
 class WorkerRuntime {
   constructor(
     manifest,
+    assetBasePath,
     useWebGpu = false,
     catalogLimit = null,
     rotationInvariant = true,
     minCornerConfidence = DEFAULT_MIN_CORNER_CONFIDENCE,
   ) {
     this.manifest = manifest;
+    this.assetBasePath = assetBasePath ?? "./assets";
     this.detectorConfig = resolveDetectorConfig(manifest);
     this.useWebGpu = useWebGpu;
     this.rotationInvariant = rotationInvariant;
@@ -590,12 +592,12 @@ class WorkerRuntime {
     const detectorVersion = hashes[this.detectorConfig.modelKey] ?? version;
     const embedderVersion = hashes.milo       ?? version;
     const detectorBuffer = await fetchBufferCached(
-      `./assets/${this.manifest.models[this.detectorConfig.modelKey]}`,
+      `${this.assetBasePath}/${this.manifest.models[this.detectorConfig.modelKey]}`,
       detectorVersion,
       (ratio, loaded, total, cached) => onStage?.("detector", ratio, loaded, total, cached),
     );
     const embedderBuffer = await fetchBufferCached(
-      `./assets/${this.manifest.models.milo}`,
+      `${this.assetBasePath}/${this.manifest.models.milo}`,
       embedderVersion,
       (ratio, loaded, total, cached) => onStage?.("embedder", ratio, loaded, total, cached),
     );
@@ -627,18 +629,18 @@ class WorkerRuntime {
     this.inputNames.embedder = this.embedder.inputNames[0];
 
     const embeddingBuffer = await fetchBufferCached(
-      `./assets/${this.manifest.catalog.embeddings}`,
+      `${this.assetBasePath}/${this.manifest.catalog.embeddings}`,
       version,
       (ratio, loaded, total, cached) => onStage?.("catalog", ratio * 0.92, loaded, total, cached),
     );
     const ids = await fetchJsonCached(
-      `./assets/${this.manifest.catalog.card_ids}`,
+      `${this.assetBasePath}/${this.manifest.catalog.card_ids}`,
       version,
       (ratio, loaded, total, cached) => onStage?.("catalog", 0.92 + ratio * 0.08, loaded, total, cached),
     );
     const secondarySource = resolveSecondaryIdSource(this.manifest.catalog);
     const secondaryIds = secondarySource
-      ? await fetchJsonCached(`./assets/${secondarySource.assetPath}`, version)
+      ? await fetchJsonCached(`${this.assetBasePath}/${secondarySource.assetPath}`, version)
       : null;
     // Keep the catalog in its packed float16 form.  Expanding the full MTG
     // matrix to Float32Array roughly doubles steady-state catalog memory and
@@ -1043,6 +1045,7 @@ self.onmessage = async ({ data }) => {
         : null;
       runtime = new WorkerRuntime(
         data.manifest,
+        data.assetBasePath,
         useWebGpu,
         catalogLimit,
         data.rotationInvariant !== false,

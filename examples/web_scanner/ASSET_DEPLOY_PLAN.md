@@ -52,6 +52,10 @@ The stable release is the production Pages input. The testing release is built
 with a testing-channel detector such as `fastweb-single` and is never selected
 by the production Pages deploy workflow.
 
+Pages unpacks stable assets at `assets/` and testing assets at `testing/assets/`.
+The main scanner defaults to the stable bundle; `?channel=testing` selects the
+testing bundle without publishing a separate JavaScript application.
+
 Recommended uploaded files:
 
 - `web-scanner-assets.tar.zst`
