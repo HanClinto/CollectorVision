@@ -294,6 +294,23 @@
             <p class="capture-hint">Embeds the crop upright and rotated 180 degrees, then keeps the stronger match. Default on.</p>
           </section>
 
+          <section class="panel panel--nested">
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Performance</p>
+                <h2>Scan Rate</h2>
+              </div>
+            </header>
+            <label class="slider-row" for="scan-interval-slider">
+              <span class="slider-row__label">Minimum frame interval</span>
+              <span class="slider-row__value" id="scan-interval-value">50 ms</span>
+            </label>
+            <input type="range" id="scan-interval-slider"
+              class="threshold-slider"
+              min="0" max="1000" step="25" value="50" />
+            <p class="capture-hint">Lower values analyze more camera frames. Max speed sends the next frame as soon as the scanner worker is ready; the worker never queues overlapping inference.</p>
+          </section>
+
           <dl class="settings-grid">
             <div>
               <dt>Build</dt>

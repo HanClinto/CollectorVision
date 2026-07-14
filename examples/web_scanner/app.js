@@ -11,7 +11,8 @@ const ASSET_CHANNELS = {
 const DETECTOR_SIZE = 384;
 const MIN_MATCH_SCORE_DEFAULT = 0.50;
 const PREVIEW_ASPECT = 16 / 9;
-const SCAN_INTERVAL_MS = 900;
+const SCAN_INTERVAL_DEFAULT_MS = 50;
+const SCAN_INTERVAL_MAX_MS = 1000;
 const MOBILE_PREVIEW_INTERVAL_MS = 1000 / 15;
 
 const SOUND_PATHS = {
@@ -25,6 +26,7 @@ const ASSET_STORE_NAME = "assets";
 const WEBGPU_PREF_KEY = "cv_webgpu_enabled";
 const MATCH_SCORE_KEY = "cv_min_match_score";
 const CORNER_CONFIDENCE_KEY = "cv_min_corner_confidence";
+const SCAN_INTERVAL_KEY = "cv_scan_interval_ms";
 const ROTATION_INVARIANT_KEY = "cv_rotation_invariant_enabled";
 const MIN_MATCHES_DEFAULT = 2;
 const MATCHES_KEY = "cv_min_matches";
@@ -1505,6 +1507,13 @@ function getMinMatchScore() {
   return Number.isFinite(stored) ? stored : MIN_MATCH_SCORE_DEFAULT;
 }
 
+function getScanIntervalMs() {
+  const stored = Number.parseInt(localStorage.getItem(SCAN_INTERVAL_KEY), 10);
+  return Number.isFinite(stored)
+    ? Math.min(SCAN_INTERVAL_MAX_MS, Math.max(0, stored))
+    : SCAN_INTERVAL_DEFAULT_MS;
+}
+
 function getMinCornerConfidence() {
   const stored = Number.parseFloat(localStorage.getItem(CORNER_CONFIDENCE_KEY));
   return Number.isFinite(stored) ? Math.min(0.1, Math.max(0, stored)) : MIN_CORNER_CONFIDENCE_DEFAULT;
@@ -1533,6 +1542,25 @@ function setupMatchScoreSlider() {
     label.textContent = value.toFixed(2);
     localStorage.setItem(MATCH_SCORE_KEY, value);
     updateThresholdMeter("match-score", value, null, 1);
+  });
+}
+
+function setupScanIntervalSlider(onChange) {
+  const slider = document.getElementById("scan-interval-slider");
+  const label = document.getElementById("scan-interval-value");
+  if (!slider || !label) return;
+
+  const render = (value) => {
+    slider.value = String(value);
+    label.textContent = value === 0 ? "Max speed" : `${value} ms`;
+  };
+  render(getScanIntervalMs());
+
+  slider.addEventListener("input", () => {
+    const value = Math.min(SCAN_INTERVAL_MAX_MS, Math.max(0, Number.parseInt(slider.value, 10) || 0));
+    localStorage.setItem(SCAN_INTERVAL_KEY, String(value));
+    render(value);
+    onChange(value);
   });
 }
 
@@ -1650,7 +1678,7 @@ class PerformanceOverlay {
     const card = data?.cardPresent ? (data.cornersValid ? "card" : "bad-quad") : "no-card";
     const orientation = data?.orientation ? `  ${data.orientation}` : "";
     this.el.textContent = [
-      `scan ${SCAN_INTERVAL_MS}ms  result ${resultGap}`,
+      `minimum interval ${getScanIntervalMs()}ms  result ${resultGap}`,
       `total ${formatMs(timing.totalMs)}  det ${formatMs(timing.detectMs)} (run ${formatMs(timing.detectorRunMs)})`,
       `dew ${formatMs(timing.dewarpMs)} (warp ${formatMs(timing.dewarpWarpMs)})  emb ${formatMs(timing.embedMs)} (run ${formatMs(timing.embedRunMs)})`,
       `prep det ${formatMs(timing.detectorInputMs)}  prep emb ${formatMs(timing.embedInputMs)}  lookup ${formatMs(timing.searchMs)}`,
@@ -1812,6 +1840,7 @@ function createScannerLoop(
   const bucket = new ScanBucket();
   let timer = null;
   let workerBusy = false;
+  let scanIntervalMs = getScanIntervalMs();
 
   scannerWorker.addEventListener("error", (event) => {
     workerBusy = false;
@@ -1973,8 +2002,8 @@ function createScannerLoop(
         return;
       }
       setText("camera-badge", "Scanning");
-      debugLog.info("scan interval", `${SCAN_INTERVAL_MS}ms`);
-      recordBootTrace("scan:loop-started", { intervalMs: SCAN_INTERVAL_MS });
+      debugLog.info("scan interval", `${scanIntervalMs}ms`);
+      recordBootTrace("scan:loop-started", { intervalMs: scanIntervalMs });
       timer = setInterval(async () => {
         if (workerBusy || !camera.stream) {
           return;
@@ -1998,7 +2027,15 @@ function createScannerLoop(
           debugLog.error("scan tick failed", error);
           setText("camera-badge", error?.message || "Scan error");
         }
-      }, SCAN_INTERVAL_MS);
+      }, scanIntervalMs);
+    },
+    setIntervalMs(value) {
+      scanIntervalMs = Math.min(SCAN_INTERVAL_MAX_MS, Math.max(0, value));
+      if (!timer) {
+        return;
+      }
+      this.stop();
+      this.start();
     },
   };
 }
@@ -2241,6 +2278,7 @@ async function boot() {
   const loop = createScannerLoop(
     camera, scannerWorker, enricherWorker, scans, audioBus, manifest, debugLog, diag, captureState, perfOverlay,
   );
+  setupScanIntervalSlider((value) => loop.setIntervalMs(value));
   camera.bind(
     async () => {
       debugLog.info("starting scan loop");
