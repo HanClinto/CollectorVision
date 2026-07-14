@@ -1526,11 +1526,13 @@ function setupMatchScoreSlider() {
 
   slider.value = getMinMatchScore();
   label.textContent = getMinMatchScore().toFixed(2);
+  updateThresholdMeter("match-score", getMinMatchScore(), null, 1);
 
   slider.addEventListener("input", () => {
     const value = Number.parseFloat(slider.value);
     label.textContent = value.toFixed(2);
     localStorage.setItem(MATCH_SCORE_KEY, value);
+    updateThresholdMeter("match-score", value, null, 1);
   });
 }
 
@@ -1544,11 +1546,29 @@ function setupCornerConfidenceSlider(scannerWorker = null) {
     label.textContent = value.toFixed(2);
     localStorage.setItem(CORNER_CONFIDENCE_KEY, value);
     scannerWorker?.postMessage({ type: "config", minCornerConfidence: value });
+    updateThresholdMeter("corner-confidence", value, null, 0.1);
   };
 
   slider.value = getMinCornerConfidence();
   label.textContent = getMinCornerConfidence().toFixed(2);
+  updateThresholdMeter("corner-confidence", getMinCornerConfidence(), null, 0.1);
   slider.addEventListener("input", update);
+}
+
+function updateThresholdMeter(name, threshold, current, maximum) {
+  const fill = document.getElementById(`${name}-signal-fill`);
+  const marker = document.getElementById(`${name}-signal-threshold`);
+  const value = document.getElementById(`${name}-signal-value`);
+  if (!fill || !marker || !value) return;
+
+  marker.style.left = `${(Math.min(1, Math.max(0, threshold / maximum)) * 100).toFixed(1)}%`;
+  if (!Number.isFinite(current)) {
+    fill.style.width = "0%";
+    value.textContent = "Current —";
+    return;
+  }
+  fill.style.width = `${(Math.min(1, Math.max(0, current / maximum)) * 100).toFixed(1)}%`;
+  value.textContent = `Current ${current.toFixed(3)}`;
 }
 
 function setupMinMatchesSlider() {
@@ -1885,6 +1905,8 @@ function createScannerLoop(
     diag.set("diag-detector-input", data.detectorInput ?? "—");
     diag.set("diag-raw-corners", data.rawCorners ?? "—");
     diag.set("diag-sharpness", `${data.sharpness?.toFixed(3) ?? "—"} (card ${data.cardPresent ? "yes" : "no"})`);
+    updateThresholdMeter("corner-confidence", getMinCornerConfidence(), data.sharpness, 0.1);
+    updateThresholdMeter("match-score", getMinMatchScore(), data.score, 1);
 
     if (data.timing) {
       const t = data.timing;

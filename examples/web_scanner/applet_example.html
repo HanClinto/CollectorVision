@@ -68,6 +68,13 @@
                 <span id="scan-corner-signal-value" class="scan-settings-meter-value">Current 0.00</span>
               </label>
               <label class="scan-settings-field">ID Threshold <input id="scan-threshold" type="number" min="0" max="1" step="0.01" /></label>
+              <div class="scan-settings-signal" aria-live="polite">
+                <span>Match score <span id="scan-match-signal-value">Current —</span></span>
+                <span class="scan-settings-meter" aria-hidden="true">
+                  <span id="scan-match-signal-fill" class="scan-settings-meter__fill"></span>
+                  <span id="scan-match-signal-threshold" class="scan-settings-meter__threshold"></span>
+                </span>
+              </div>
               <label class="scan-settings-field">Consecutive scans <input id="scan-consecutive" type="number" min="1" max="6" step="1" /></label>
               <label class="scan-settings-slider">
                 Scan interval <span id="scan-interval-label">900ms</span>

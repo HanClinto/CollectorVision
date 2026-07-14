@@ -51,6 +51,12 @@ const els = {
   scanInterval: document.getElementById("scan-interval"),
   scanIntervalValue: document.getElementById("scan-interval-value"),
   cornerThreshold: document.getElementById("corner-threshold"),
+  matchSignalFill: document.getElementById("match-signal-fill"),
+  matchSignalThreshold: document.getElementById("match-signal-threshold"),
+  matchSignalValue: document.getElementById("match-signal-value"),
+  cornerSignalFill: document.getElementById("corner-signal-fill"),
+  cornerSignalThreshold: document.getElementById("corner-signal-threshold"),
+  cornerSignalValue: document.getElementById("corner-signal-value"),
   groupSecondary: document.getElementById("group-secondary"),
   eventList: document.getElementById("event-list"),
   copyList: document.getElementById("copy-list"),
@@ -345,6 +351,8 @@ function updateLatestResult(data) {
   els.latestCard.textContent = data.cardId || (data.cardPresent ? "Card candidate" : "—");
   els.latestScore.textContent = Number.isFinite(score) ? score.toFixed(3) : "—";
   els.latestSharpness.textContent = Number.isFinite(sharpness) ? sharpness.toFixed(3) : "—";
+  updateThresholdMeter("match", settings.matchThreshold, score, 1);
+  updateThresholdMeter("corner", settings.minCornerConfidence, sharpness, 0.2);
 
   if (!data.cardPresent) {
     els.latestStatus.textContent = "No card detected in the ROI.";
@@ -355,6 +363,22 @@ function updateLatestResult(data) {
   } else {
     els.latestStatus.textContent = "Candidate accepted; waiting for confirmation bucket.";
   }
+}
+
+function updateThresholdMeter(name, threshold, current, maximum) {
+  const fill = els[`${name}SignalFill`];
+  const marker = els[`${name}SignalThreshold`];
+  const value = els[`${name}SignalValue`];
+  const thresholdRatio = clamp(threshold / maximum, 0, 1);
+  marker.style.left = `${(thresholdRatio * 100).toFixed(1)}%`;
+  if (!Number.isFinite(current)) {
+    fill.style.width = "0%";
+    value.textContent = "Current —";
+    return;
+  }
+  const currentRatio = clamp(current / maximum, 0, 1);
+  fill.style.width = `${(currentRatio * 100).toFixed(1)}%`;
+  value.textContent = `Current ${current.toFixed(3)}`;
 }
 
 function candidateFromResult(data) {
@@ -590,6 +614,8 @@ function applySettingsToInputs() {
   updateScanIntervalLabel();
   els.cornerThreshold.value = settings.minCornerConfidence.toFixed(2);
   els.groupSecondary.checked = settings.groupBySecondaryId === true;
+  updateThresholdMeter("match", settings.matchThreshold, null, 1);
+  updateThresholdMeter("corner", settings.minCornerConfidence, null, 0.2);
 }
 
 function updateScanIntervalLabel() {

@@ -116,6 +116,9 @@ const cornerThresholdLabel = document.getElementById("scan-corner-threshold-labe
 const cornerSignalFill = document.getElementById("scan-corner-signal-fill");
 const cornerSignalThreshold = document.getElementById("scan-corner-signal-threshold");
 const cornerSignalValue = document.getElementById("scan-corner-signal-value");
+const matchSignalFill = document.getElementById("scan-match-signal-fill");
+const matchSignalThreshold = document.getElementById("scan-match-signal-threshold");
+const matchSignalValue = document.getElementById("scan-match-signal-value");
 const thresholdInput = document.getElementById("scan-threshold");
 const consecutiveInput = document.getElementById("scan-consecutive");
 const intervalInput = document.getElementById("scan-interval");
@@ -178,6 +181,7 @@ function populateScanSettings() {
   cornerThresholdInput.value = cornerThreshold.toFixed(2);
   updateCornerThresholdUi(cornerThreshold);
   thresholdInput.value = settings.matchThreshold.toFixed(2);
+  updateMatchSignal(null);
   consecutiveInput.value = String(settings.consecutiveMatches);
   intervalInput.value = String(Math.max(0, Math.round(Number(settings.scanIntervalMs) || 0)));
   intervalLabel.textContent = Number(intervalInput.value) <= 0 ? "Max speed" : `${intervalInput.value}ms`;
@@ -201,6 +205,19 @@ function updateCornerSignal(confidence) {
   cornerSignalValue.textContent = raw > MAX_GUI_CORNER_CONFIDENCE
     ? `Current ${MAX_GUI_CORNER_CONFIDENCE.toFixed(2)}+`
     : `Current ${current.toFixed(2)}`;
+}
+
+function updateMatchSignal(score) {
+  const threshold = clamp(Number(thresholdInput.value), 0, 1);
+  matchSignalThreshold.style.left = `${(threshold * 100).toFixed(1)}%`;
+  if (!Number.isFinite(score)) {
+    matchSignalFill.style.width = "0%";
+    matchSignalValue.textContent = "Current —";
+    return;
+  }
+  const current = clamp(score, 0, 1);
+  matchSignalFill.style.width = `${(current * 100).toFixed(1)}%`;
+  matchSignalValue.textContent = `Current ${current.toFixed(3)}`;
 }
 
 function scanSettingsFromInputs() {
@@ -227,6 +244,7 @@ async function applyScanSettings({ announce = true } = {}) {
   cornerThresholdInput.value = settings.minCornerConfidence.toFixed(2);
   updateCornerThresholdUi(settings.minCornerConfidence);
   thresholdInput.value = settings.matchThreshold.toFixed(2);
+  updateMatchSignal(null);
   consecutiveInput.value = String(settings.consecutiveMatches);
   intervalInput.value = String(settings.scanIntervalMs);
   intervalLabel.textContent = settings.scanIntervalMs <= 0 ? "Max speed" : `${settings.scanIntervalMs}ms`;
@@ -538,7 +556,8 @@ async function createScanner(settings) {
     ...settings,
     overlay: true,
     onResult(result) {
-      updateCornerSignal(result?.confidence ?? 0);
+      updateCornerSignal(result?.sharpness ?? 0);
+      updateMatchSignal(result?.score);
     },
     async onCardDetected(card) {
       try {

@@ -380,6 +380,37 @@ input[type="range"] {
   padding-inline: 0;
 }
 
+.threshold-meter {
+  position: relative;
+  overflow: hidden;
+  height: 0.46rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.threshold-meter__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: linear-gradient(90deg, #f06d5d 0%, #efbd57 52%, #58f29a 100%);
+  transition: width 100ms linear;
+}
+
+.threshold-meter__threshold {
+  position: absolute;
+  top: -0.14rem;
+  bottom: -0.14rem;
+  width: 2px;
+  background: #f8f2e8;
+  transform: translateX(-1px);
+}
+
+.threshold-meter__value {
+  color: #c8bbab;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;

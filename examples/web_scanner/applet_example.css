@@ -233,6 +233,26 @@ tr:last-child td { border-bottom: 0; }
   font-variant-numeric: tabular-nums;
 }
 
+.scan-settings-signal {
+  display: grid;
+  gap: 0.38rem;
+  color: #665f56;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.scan-settings-signal > span:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.scan-settings-signal > span:first-child span {
+  color: #81796f;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .scan-settings-slider {
   display: grid;
   gap: 0.45rem;

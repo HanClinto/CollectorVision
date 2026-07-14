@@ -664,6 +664,39 @@ dd {
   cursor: pointer;
 }
 
+.threshold-meter {
+  position: relative;
+  overflow: hidden;
+  height: 0.48rem;
+  margin: 0.45rem 0 0;
+  border-radius: 999px;
+  background: rgba(64, 57, 48, 0.16);
+}
+
+.threshold-meter__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: linear-gradient(90deg, #c34d3d 0%, #d8a33c 50%, #4d9470 100%);
+  transition: width 100ms linear;
+}
+
+.threshold-meter__threshold {
+  position: absolute;
+  top: -0.16rem;
+  bottom: -0.16rem;
+  width: 2px;
+  background: #332f29;
+  transform: translateX(-1px);
+}
+
+.threshold-meter__value {
+  margin: 0.3rem 0 0;
+  color: var(--muted, #665f56);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .code {
   margin: 0;
   padding: 0.9rem;

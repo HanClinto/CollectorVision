@@ -260,6 +260,11 @@
             <input type="range" id="match-score-slider"
               class="threshold-slider"
               min="0.40" max="0.85" step="0.01" value="0.50" />
+            <div class="threshold-meter" aria-live="polite">
+              <span class="threshold-meter__fill" id="match-score-signal-fill"></span>
+              <span class="threshold-meter__threshold" id="match-score-signal-threshold"></span>
+            </div>
+            <p class="threshold-meter__value" id="match-score-signal-value">Current —</p>
             <p class="capture-hint">Lower values accept weaker matches (more false positives); higher values require a stronger match. Default 0.50.</p>
             <label class="slider-row" for="corner-confidence-slider">
               <span class="slider-row__label">Minimum corner sharpness</span>
@@ -268,6 +273,11 @@
             <input type="range" id="corner-confidence-slider"
               class="threshold-slider"
               min="0" max="0.10" step="0.01" value="0.02" />
+            <div class="threshold-meter" aria-live="polite">
+              <span class="threshold-meter__fill" id="corner-confidence-signal-fill"></span>
+              <span class="threshold-meter__threshold" id="corner-confidence-signal-threshold"></span>
+            </div>
+            <p class="threshold-meter__value" id="corner-confidence-signal-value">Current —</p>
             <p class="capture-hint">Rejects frames whose corner detector is too uncertain. Lower values find more candidates; higher values require sharper card edges. Default 0.02.</p>
             <label class="slider-row" for="min-matches-slider">
               <span class="slider-row__label">Matches needed</span>
