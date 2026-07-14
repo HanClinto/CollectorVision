@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS = {
   scanIntervalMs: 500,
   minCornerConfidence: 0.02,
   groupBySecondaryId: true,
+  showRejectedDetections: true,
 };
 const DEFAULT_ROI = { x: 0.15, y: 0.15, width: 0.70, height: 0.70 };
 
@@ -41,6 +42,7 @@ const els = {
   roiBox: document.getElementById("roi-box"),
   stageStatus: document.getElementById("stage-status"),
   workerStatus: document.getElementById("worker-status"),
+  liveResultTitle: document.getElementById("live-result-title"),
   latestCard: document.getElementById("latest-card"),
   latestScore: document.getElementById("latest-score"),
   latestSharpness: document.getElementById("latest-sharpness"),
@@ -58,6 +60,7 @@ const els = {
   cornerSignalThreshold: document.getElementById("corner-signal-threshold"),
   cornerSignalValue: document.getElementById("corner-signal-value"),
   groupSecondary: document.getElementById("group-secondary"),
+  showRejectedDetections: document.getElementById("show-rejected-detections"),
   openOverlay: document.getElementById("open-overlay"),
   copyOverlayLink: document.getElementById("copy-overlay-link"),
   overlaySize: document.getElementById("overlay-size"),
@@ -88,6 +91,8 @@ let stream = null;
 let previewFrame = null;
 let scanTimer = null;
 let workerBusy = false;
+let scanStartedAt = null;
+let detectionFps = null;
 let roi = readRoi();
 let settings = readSettings();
 let dragState = null;
@@ -123,13 +128,21 @@ function bindUi() {
     roi = { x: 0, y: 0, width: 1, height: 1 };
     saveRoi();
     applyRoiToBox();
+    updateSourceMeta();
   });
   els.stage.addEventListener("pointerdown", startRoiDrag);
   window.addEventListener("pointermove", moveRoiDrag);
   window.addEventListener("pointerup", endRoiDrag);
   window.addEventListener("resize", resizeCanvases);
   els.scanInterval.addEventListener("input", updateScanIntervalLabel);
-  for (const input of [els.matchThreshold, els.consecutiveMatches, els.scanInterval, els.cornerThreshold, els.groupSecondary]) {
+  for (const input of [
+    els.matchThreshold,
+    els.consecutiveMatches,
+    els.scanInterval,
+    els.cornerThreshold,
+    els.groupSecondary,
+    els.showRejectedDetections,
+  ]) {
     input.addEventListener("change", updateSettingsFromInputs);
   }
   for (const input of [
@@ -232,6 +245,7 @@ function handleWorkerMessage({ data }) {
   if (data.type !== "result") return;
 
   workerBusy = false;
+  updateDetectionFps();
   updateLatestResult(data);
   drawCorners(data);
 
@@ -264,7 +278,7 @@ async function startCapture() {
   await els.video.play();
   lastSource = track.getSettings?.() ?? {};
   els.captureToggle.textContent = "Stop capture";
-  els.sourceMeta.textContent = describeSource();
+  updateSourceMeta();
   els.stageStatus.hidden = true;
   resizeCanvases();
   renderPreview();
@@ -287,6 +301,9 @@ function stopCapture() {
   }
   stream = null;
   workerBusy = false;
+  scanStartedAt = null;
+  detectionFps = null;
+  els.liveResultTitle.textContent = "Live result";
   els.video.srcObject = null;
   els.captureToggle.textContent = "Start capture";
   els.sourceMeta.textContent = "No source selected";
@@ -375,9 +392,20 @@ async function scanOnce() {
     return;
   }
   workerBusy = true;
+  scanStartedAt = performance.now();
   drawRoiToProcessCanvas();
   const bitmap = await createImageBitmap(processCanvas);
   worker.postMessage({ type: "frame", bitmap }, [bitmap]);
+}
+
+function updateDetectionFps() {
+  if (scanStartedAt === null) return;
+  const elapsedMs = performance.now() - scanStartedAt;
+  scanStartedAt = null;
+  if (elapsedMs <= 0) return;
+  const currentFps = 1000 / elapsedMs;
+  detectionFps = detectionFps === null ? currentFps : detectionFps * 0.7 + currentFps * 0.3;
+  els.liveResultTitle.textContent = `Live result (${detectionFps.toFixed(1)} FPS)`;
 }
 
 function drawRoiToProcessCanvas() {
@@ -397,7 +425,10 @@ function drawRoiToProcessCanvas() {
 function updateLatestResult(data) {
   const score = Number(data.score);
   const sharpness = Number(data.sharpness);
-  els.latestCard.textContent = data.cardId || (data.cardPresent ? "Card candidate" : "—");
+  const showCard = isAcceptedDetection(data) || settings.showRejectedDetections;
+  els.latestCard.textContent = showCard
+    ? (data.cardId || (data.cardPresent ? "Card candidate" : "—"))
+    : "—";
   els.latestScore.textContent = Number.isFinite(score) ? score.toFixed(3) : "—";
   els.latestSharpness.textContent = Number.isFinite(sharpness) ? sharpness.toFixed(3) : "—";
   updateThresholdMeter("match", settings.matchThreshold, score, 1);
@@ -412,6 +443,14 @@ function updateLatestResult(data) {
   } else {
     els.latestStatus.textContent = "Candidate accepted; waiting for confirmation bucket.";
   }
+}
+
+function isAcceptedDetection(data) {
+  const score = Number(data.score);
+  return data.cardPresent
+    && data.cornersValid
+    && Number.isFinite(score)
+    && score >= settings.matchThreshold;
 }
 
 function updateThresholdMeter(name, threshold, current, maximum) {
@@ -431,9 +470,7 @@ function updateThresholdMeter(name, threshold, current, maximum) {
 }
 
 function candidateFromResult(data) {
-  if (!data.cardPresent || !data.cornersValid) return null;
-  const score = Number(data.score);
-  if (!Number.isFinite(score) || score < settings.matchThreshold) return null;
+  if (!isAcceptedDetection(data)) return null;
   return {
     cardId: data.cardId,
     secondaryId: data.secondaryId,
@@ -492,6 +529,7 @@ async function enrichEvent(event) {
 function drawCorners(data) {
   overlayCtx.clearRect(0, 0, els.overlay.width, els.overlay.height);
   if (!data.corners || data.corners.length !== 4) return;
+  if (!isAcceptedDetection(data) && !settings.showRejectedDetections) return;
   const draw = previewDrawRect();
   const points = data.corners.map(([x, y]) => ({
     x: draw.x + ((roi.x + x * roi.width) * draw.width),
@@ -598,6 +636,7 @@ function moveRoiDrag(event) {
   next.height = clamp(next.height, minSize, 1 - next.y);
   roi = next;
   applyRoiToBox();
+  updateSourceMeta();
 }
 
 function endRoiDrag() {
@@ -647,9 +686,11 @@ function sanitizeRoi(value) {
 
 function readSettings() {
   try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     return {
       ...DEFAULT_SETTINGS,
-      ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"),
+      ...saved,
+      showRejectedDetections: saved.showRejectedDetections ?? saved.showBelowThresholdMatches ?? true,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -663,6 +704,7 @@ function applySettingsToInputs() {
   updateScanIntervalLabel();
   els.cornerThreshold.value = settings.minCornerConfidence.toFixed(2);
   els.groupSecondary.checked = settings.groupBySecondaryId === true;
+  els.showRejectedDetections.checked = settings.showRejectedDetections !== false;
   updateThresholdMeter("match", settings.matchThreshold, null, 1);
   updateThresholdMeter("corner", settings.minCornerConfidence, null, 0.2);
 }
@@ -679,6 +721,7 @@ function updateSettingsFromInputs() {
     scanIntervalMs: Math.max(0, Math.round(Number(els.scanInterval.value) || 0)),
     minCornerConfidence: clamp(Number(els.cornerThreshold.value), 0, 0.2),
     groupBySecondaryId: els.groupSecondary.checked === true,
+    showRejectedDetections: els.showRejectedDetections.checked === true,
   };
   applySettingsToInputs();
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -757,11 +800,18 @@ function setStageStatus(message) {
   els.stageStatus.hidden = false;
 }
 
+function updateSourceMeta() {
+  if (stream) els.sourceMeta.textContent = describeSource();
+}
+
 function describeSource() {
   const width = els.video.videoWidth || lastSource?.width;
   const height = els.video.videoHeight || lastSource?.height;
   const fps = lastSource?.frameRate ? ` · ${Math.round(lastSource.frameRate)} fps` : "";
-  return width && height ? `${width} × ${height}${fps}` : "Shared source active";
+  if (!width || !height) return "Shared source active";
+  const roiWidth = Math.max(1, Math.round(roi.width * width));
+  const roiHeight = Math.max(1, Math.round(roi.height * height));
+  return `${width} × ${height} · ROI ${roiWidth} × ${roiHeight}${fps}`;
 }
 
 async function fetchJson(url) {

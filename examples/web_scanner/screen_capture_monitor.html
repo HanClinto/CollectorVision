@@ -99,7 +99,7 @@
           <div class="panel-heading">
             <div>
               <p class="label">Detection</p>
-              <h2>Live result</h2>
+              <h2 id="live-result-title">Live result</h2>
             </div>
             <span id="worker-status" class="pill">Loading models…</span>
           </div>
@@ -162,6 +162,10 @@
           <label class="toggle-row">
             <input id="group-secondary" type="checkbox" checked />
             <span>Group alternate printings by secondary/oracle ID when available</span>
+          </label>
+          <label class="toggle-row">
+            <input id="show-rejected-detections" type="checkbox" checked />
+            <span>Show rejected detections</span>
           </label>
         </article>
       </section>

@@ -58,8 +58,8 @@ body {
   position: relative;
   width: 100%;
   overflow: hidden;
-  border-radius: 0.38rem;
-  background: rgba(255, 255, 255, 0.08);
+  border-radius: 1.25rem;
+  background: #080808;
   box-shadow: 0 0.8rem 2rem rgba(0, 0, 0, 0.28);
 }
 
@@ -74,6 +74,7 @@ body {
   inset: 0;
   width: 100%;
   height: 100%;
+  border-radius: inherit;
   object-fit: cover;
 }
 
