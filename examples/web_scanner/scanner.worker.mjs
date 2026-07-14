@@ -386,7 +386,7 @@ async function fetchWithProgress(url, responseType, onProgress) {
     throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
   }
 
-  const total = Number.parseInt(response.headers.get("content-length") ?? "0", 10) || 0;
+  let total = Number.parseInt(response.headers.get("content-length") ?? "0", 10) || 0;
   if (!response.body || total === 0) {
     const payload = responseType === "json" ? await response.json() : await response.arrayBuffer();
     onProgress?.(1, total || 1, total || 1);
@@ -404,9 +404,15 @@ async function fetchWithProgress(url, responseType, onProgress) {
     }
     chunks.push(value);
     loaded += value.length;
-    onProgress?.(loaded / total, loaded, total);
+    // Fetch streams expose decoded bytes, while Content-Length can describe a
+    // compressed HTTP response. Do not present an invalid total to the UI.
+    if (total > 0 && loaded > total) {
+      total = 0;
+    }
+    onProgress?.(total > 0 ? loaded / total : 0, loaded, total);
   }
 
+  onProgress?.(1, loaded, total);
   const blob = new Blob(chunks);
   if (responseType === "json") {
     return JSON.parse(await blob.text());
