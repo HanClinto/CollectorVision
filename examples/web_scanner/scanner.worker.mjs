@@ -643,24 +643,48 @@ class WorkerRuntime {
     this.inputNames.embedder = this.embedder.inputNames[0];
 
     const catalogAssetSizes = this.manifest.catalog.asset_sizes ?? {};
+    const secondarySource = resolveSecondaryIdSource(this.manifest.catalog);
+    const catalogParts = [
+      { key: "embeddings", size: catalogAssetSizes.embeddings },
+      { key: "card_ids", size: catalogAssetSizes.card_ids },
+      ...(secondarySource ? [{ key: "oracle_ids", size: catalogAssetSizes.oracle_ids }] : []),
+    ];
+    const catalogTotal = catalogParts.reduce(
+      (total, part) => total + (Number.isSafeInteger(part.size) && part.size > 0 ? part.size : 0),
+      0,
+    );
+    const reportCatalogProgress = (partIndex, loaded, total, cached) => {
+      const completed = catalogParts.slice(0, partIndex).reduce(
+        (sum, part) => sum + (Number.isSafeInteger(part.size) && part.size > 0 ? part.size : 0),
+        0,
+      );
+      const expected = catalogParts[partIndex].size;
+      if (catalogTotal > 0 && Number.isSafeInteger(expected) && expected > 0) {
+        const current = cached ? expected : Math.min(loaded, expected);
+        const aggregate = completed + current;
+        onStage?.("catalog", aggregate / catalogTotal, aggregate, catalogTotal, false);
+        return;
+      }
+      onStage?.("catalog", total > 0 ? loaded / total : 0, loaded, total, cached);
+    };
     const embeddingBuffer = await fetchBufferCached(
       `${this.assetBasePath}/${this.manifest.catalog.embeddings}`,
       version,
       catalogAssetSizes.embeddings,
-      (ratio, loaded, total, cached) => onStage?.("catalog", ratio * 0.92, loaded, total, cached),
+      (ratio, loaded, total, cached) => reportCatalogProgress(0, loaded, total, cached),
     );
     const ids = await fetchJsonCached(
       `${this.assetBasePath}/${this.manifest.catalog.card_ids}`,
       version,
       catalogAssetSizes.card_ids,
-      (ratio, loaded, total, cached) => onStage?.("catalog", 0.92 + ratio * 0.08, loaded, total, cached),
+      (ratio, loaded, total, cached) => reportCatalogProgress(1, loaded, total, cached),
     );
-    const secondarySource = resolveSecondaryIdSource(this.manifest.catalog);
     const secondaryIds = secondarySource
       ? await fetchJsonCached(
         `${this.assetBasePath}/${secondarySource.assetPath}`,
         version,
         catalogAssetSizes.oracle_ids,
+        (ratio, loaded, total, cached) => reportCatalogProgress(2, loaded, total, cached),
       )
       : null;
     // Keep the catalog in its packed float16 form.  Expanding the full MTG
