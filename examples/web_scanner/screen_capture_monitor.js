@@ -702,6 +702,12 @@ function renderVersionDebug(manifest, bundleMetadata) {
   const modelVersions = manifest.model_versions ?? {};
   const metadataModels = bundleMetadata?.models ?? {};
   const metadataModelVersions = bundleMetadata?.model_versions ?? {};
+  const detectorKey = manifest.models?.detector ? "detector" : "cornelius";
+  const detectorFamily = manifest.detector?.family ?? "cornelius";
+  const detectorLabel = document.getElementById("version-detector-label");
+  if (detectorLabel) {
+    detectorLabel.textContent = detectorFamily;
+  }
   const catalog = manifest.catalog ?? {};
   const catalogSource = bundleMetadata?.catalog_fingerprint
     || bundleMetadata?.catalog_key
@@ -710,9 +716,9 @@ function renderVersionDebug(manifest, bundleMetadata) {
     || catalog.card_ids;
 
   els.versionCornelius.textContent = versionLabel(
-    "cornelius",
-    modelHashes.cornelius || metadataModels.cornelius,
-    modelVersions.cornelius || metadataModelVersions.cornelius,
+    detectorKey,
+    modelHashes[detectorKey] || metadataModels[detectorKey],
+    modelVersions[detectorKey] || metadataModelVersions[detectorKey],
     manifest.version,
   );
   els.versionMilo.textContent = versionLabel(

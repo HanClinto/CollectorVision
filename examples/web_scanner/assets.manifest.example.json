@@ -1,16 +1,27 @@
 {
   "version": "0.1.0",
   "models": {
-    "cornelius": "assets/models/cornelius.onnx",
+    "detector": "assets/models/detector.onnx",
     "milo": "assets/models/milo.onnx"
   },
   "model_hashes": {
-    "cornelius": "sha256:placeholder",
+    "detector": "sha256:placeholder",
     "milo": "sha256:placeholder"
   },
   "model_versions": {
-    "cornelius": "2.12",
+    "detector": "2.12",
     "milo": "1.0.0"
+  },
+  "detector": {
+    "family": "cornelius",
+    "architecture": "mobilevit-xxs-simcc",
+    "input_size": 384,
+    "preprocess": "imagenet-rgb",
+    "outputs": {
+      "corners": "corners",
+      "presence": "presence",
+      "sharpness": "sharpness"
+    }
   },
   "catalog": {
     "embeddings": "assets/catalog/scryfall-mtg-embeddings.f32",

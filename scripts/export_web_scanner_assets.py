@@ -100,9 +100,17 @@ def _latest_catalog_filename(repo: str, catalog_key: str) -> str:
     return entry["latest"]
 
 
-def _resolve_web_models(channel: str) -> tuple[ModelSpec, Path, ModelSpec, Path]:
+def _resolve_web_models(
+    channel: str,
+    corner_detector_family: str = "cornelius",
+    corner_detector_version: str | None = None,
+) -> tuple[ModelSpec, Path, ModelSpec, Path]:
     registry = load_model_registry()
-    corner_model = registry.get_model(family="cornelius", channel=channel)
+    corner_model = registry.get_model(
+        family=corner_detector_family,
+        version=corner_detector_version,
+        channel=channel,
+    )
     embedder_model = registry.get_model(family="milo", channel=channel)
     if corner_model.task != "corner-detection":
         raise ValueError(f"Model {corner_model.id!r} is not a corner detector")
@@ -138,7 +146,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-channel",
         default="stable",
-        help="Model registry channel used for Cornelius and Milo (default: stable)",
+        help="Model registry channel used for the detector and Milo (default: stable)",
+    )
+    parser.add_argument(
+        "--corner-detector-family",
+        default="cornelius",
+        help="Corner detector family selected from the model registry (default: cornelius)",
+    )
+    parser.add_argument(
+        "--corner-detector-version",
+        default=None,
+        help="Optional exact corner detector version",
     )
     return parser.parse_args()
 
@@ -164,12 +182,14 @@ def main() -> None:
 
     catalog = Catalog.load(hfd)
     corner_model, corner_source, embedder_model, embedder_source = _resolve_web_models(
-        args.model_channel
+        args.model_channel,
+        args.corner_detector_family,
+        args.corner_detector_version,
     )
 
-    cornelius_path = models_dir / "cornelius.onnx"
+    detector_path = models_dir / "detector.onnx"
     milo_path = models_dir / "milo.onnx"
-    shutil.copy2(corner_source, cornelius_path)
+    shutil.copy2(corner_source, detector_path)
     shutil.copy2(embedder_source, milo_path)
     _write_vendor_files(ORT_TARBALL, ORT_FILES, ort_vendor_dir)
 
@@ -187,26 +207,37 @@ def main() -> None:
     sample_path = samples_dir / "mtg-sample.jpg"
     shutil.copy2(SAMPLE_IMAGE, sample_path)
 
-    cornelius_hash = _sha256(cornelius_path)
+    detector_hash = _sha256(detector_path)
     milo_hash = _sha256(milo_path)
 
     manifest = {
         "version": bundle_version,
         "models": {
-            "cornelius": "models/cornelius.onnx",
+            "detector": "models/detector.onnx",
             "milo": "models/milo.onnx",
         },
         "model_hashes": {
-            "cornelius": cornelius_hash,
+            "detector": detector_hash,
             "milo": milo_hash,
         },
         "model_ids": {
-            "cornelius": corner_model.id,
+            "detector": corner_model.id,
             "milo": embedder_model.id,
         },
         "model_versions": {
-            "cornelius": corner_model.version,
+            "detector": corner_model.version,
             "milo": embedder_model.version,
+        },
+        "detector": {
+            "family": corner_model.family,
+            "architecture": corner_model.architecture,
+            "input_size": corner_model.input_size,
+            "preprocess": "imagenet-rgb",
+            "outputs": {
+                "corners": "corners",
+                "presence": "presence",
+                "sharpness": "sharpness",
+            },
         },
         "catalog": {
             "embeddings": f"catalog/{args.catalog_key}-embeddings.f16.bin",
@@ -232,15 +263,15 @@ def main() -> None:
         "catalog_rows": int(catalog.embeddings.shape[0]),
         "catalog_dims": int(catalog.embeddings.shape[1]),
         "models": {
-            "cornelius": cornelius_hash,
+            "detector": detector_hash,
             "milo": milo_hash,
         },
         "model_ids": {
-            "cornelius": corner_model.id,
+            "detector": corner_model.id,
             "milo": embedder_model.id,
         },
         "model_versions": {
-            "cornelius": corner_model.version,
+            "detector": corner_model.version,
             "milo": embedder_model.version,
         },
         "vendor": {

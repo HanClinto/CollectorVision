@@ -23,7 +23,6 @@ import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs";
 // Constants
 // ---------------------------------------------------------------------------
 
-const DETECTOR_SIZE = 384;
 const EMBEDDER_SIZE = 448;
 const DEWARP_W = EMBEDDER_SIZE;
 const DEWARP_H = EMBEDDER_SIZE;
@@ -33,6 +32,23 @@ const IMAGENET_STD = [0.229, 0.224, 0.225];
 
 const ASSET_DB_NAME = "collectorvision-web-scanner";
 const ASSET_STORE_NAME = "assets";
+
+function resolveDetectorConfig(manifest) {
+  const legacy = !manifest.models?.detector;
+  const config = manifest.detector ?? {};
+  const inputSize = Number(config.input_size ?? 384);
+  if (!Number.isInteger(inputSize) || inputSize <= 0) {
+    throw new Error(`Invalid detector input size: ${config.input_size}`);
+  }
+  if (config.preprocess && config.preprocess !== "imagenet-rgb") {
+    throw new Error(`Unsupported detector preprocessing: ${config.preprocess}`);
+  }
+  return {
+    modelKey: legacy ? "cornelius" : "detector",
+    inputSize,
+    outputs: config.outputs ?? {},
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Math helpers (identical to the originals in app.js)
@@ -525,6 +541,7 @@ class WorkerRuntime {
     minCornerConfidence = DEFAULT_MIN_CORNER_CONFIDENCE,
   ) {
     this.manifest = manifest;
+    this.detectorConfig = resolveDetectorConfig(manifest);
     this.useWebGpu = useWebGpu;
     this.rotationInvariant = rotationInvariant;
     this.minCornerConfidence = clamp01(minCornerConfidence);
@@ -543,11 +560,14 @@ class WorkerRuntime {
     this.dewarpCanvas = new OffscreenCanvas(DEWARP_W, DEWARP_H);
     this.dewarpCtx = this.dewarpCanvas.getContext("2d", { willReadFrequently: true });
     this.dewarpImageData = this.dewarpCtx.createImageData(DEWARP_W, DEWARP_H);
-    // Reusable 384×384 scratch canvas — what was fed to the detector.
+    // Reusable detector-size scratch canvas — what was fed to the detector.
     // Transferred to the main thread as a debug bitmap on each result.
-    this.detectorScratchCanvas = new OffscreenCanvas(DETECTOR_SIZE, DETECTOR_SIZE);
+    this.detectorScratchCanvas = new OffscreenCanvas(
+      this.detectorConfig.inputSize,
+      this.detectorConfig.inputSize,
+    );
     this.detectorScratchCtx = this.detectorScratchCanvas.getContext("2d", { willReadFrequently: true });
-    this.detectorInputTensor = createInputTensor(DETECTOR_SIZE);
+    this.detectorInputTensor = createInputTensor(this.detectorConfig.inputSize);
     this.embedderScratchCanvas = new OffscreenCanvas(EMBEDDER_SIZE, EMBEDDER_SIZE);
     this.embedderScratchCtx = this.embedderScratchCanvas.getContext("2d", { willReadFrequently: true });
     this.embedderInputTensor = createInputTensor(EMBEDDER_SIZE);
@@ -567,10 +587,10 @@ class WorkerRuntime {
     // model weight file (same filename, different content) always busts the
     // IndexedDB entry, even if the bundle version string hasn't changed.
     const hashes = this.manifest.model_hashes ?? {};
-    const detectorVersion = hashes.cornelius ?? version;
+    const detectorVersion = hashes[this.detectorConfig.modelKey] ?? version;
     const embedderVersion = hashes.milo       ?? version;
     const detectorBuffer = await fetchBufferCached(
-      `./assets/${this.manifest.models.cornelius}`,
+      `./assets/${this.manifest.models[this.detectorConfig.modelKey]}`,
       detectorVersion,
       (ratio, loaded, total, cached) => onStage?.("detector", ratio, loaded, total, cached),
     );
@@ -656,24 +676,29 @@ class WorkerRuntime {
     const vh = frameCanvas.height;
 
     // Save a copy of what we fed the model for the debug preview bitmap.
-    this.detectorScratchCtx.drawImage(frameCanvas, 0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
-    this._lastDetectorInput = `${vw}×${vh} → squash ${DETECTOR_SIZE}×${DETECTOR_SIZE}`;
+    const detectorSize = this.detectorConfig.inputSize;
+    this.detectorScratchCtx.drawImage(frameCanvas, 0, 0, detectorSize, detectorSize);
+    this._lastDetectorInput = `${vw}×${vh} → squash ${detectorSize}×${detectorSize}`;
     const t1 = performance.now();
 
     const input = fillInputTensorFromContext(
       this.detectorScratchCtx,
-      DETECTOR_SIZE,
+      detectorSize,
       this.detectorInputTensor,
     );
     const t2 = performance.now();
     const outputs = await this.detector.run({
-      [this.inputNames.detector]: new ort.Tensor("float32", input, [1, 3, DETECTOR_SIZE, DETECTOR_SIZE]),
+      [this.inputNames.detector]: new ort.Tensor("float32", input, [1, 3, detectorSize, detectorSize]),
     });
     const t3 = performance.now();
-    const cornersRaw = Array.from(outputs[this.detector.outputNames[0]].data).slice(0, 8);
-    const presenceLogit = outputs[this.detector.outputNames[1]].data[0];
-    const sharpness = this.detector.outputNames[2]
-      ? outputs[this.detector.outputNames[2]].data[0]
+    const outputNames = this.detectorConfig.outputs;
+    const cornersName = outputNames.corners ?? this.detector.outputNames[0];
+    const presenceName = outputNames.presence ?? this.detector.outputNames[1];
+    const sharpnessName = outputNames.sharpness ?? this.detector.outputNames[2];
+    const cornersRaw = Array.from(outputs[cornersName].data).slice(0, 8);
+    const presenceLogit = outputs[presenceName].data[0];
+    const sharpness = sharpnessName && outputs[sharpnessName]
+      ? outputs[sharpnessName].data[0]
       : null;
 
     const points = [];

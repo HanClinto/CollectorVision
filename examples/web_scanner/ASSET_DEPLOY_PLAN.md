@@ -9,7 +9,7 @@ That means the browser needs local copies of:
 
 - `assets/catalog/scryfall-mtg-embeddings.f16.bin`
 - `assets/catalog/scryfall-mtg-card-ids.json`
-- `assets/models/cornelius.onnx`
+- `assets/models/detector.onnx`
 - `assets/models/milo.onnx`
 - vendored browser runtime files
 
@@ -43,6 +43,14 @@ Use a GitHub release asset as the durable artifact store.
 Recommended release name:
 
 - `web-scanner-assets`
+
+Testing release name:
+
+- `web-scanner-assets-testing`
+
+The stable release is the production Pages input. The testing release is built
+with a testing-channel detector such as `fastweb-single` and is never selected
+by the production Pages deploy workflow.
 
 Recommended uploaded files:
 

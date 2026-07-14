@@ -410,6 +410,10 @@ function modelVersionLabel(modelKey, manifest) {
   return manifest.version ?? "unknown";
 }
 
+function detectorModelKey(manifest) {
+  return manifest.models?.detector ? "detector" : "cornelius";
+}
+
 function compactModelHash(hash) {
   const text = String(hash ?? "").trim();
   if (!text) return "";
@@ -2060,8 +2064,10 @@ async function boot() {
   if (catalogLimit) {
     debugLog.warn("debug catalog limit active", `${catalogLimit} rows`);
   }
-  setText("settings-cornelius-hash", modelVersionLabel("cornelius", manifest));
-  setText("settings-milo-hash",      modelVersionLabel("milo", manifest));
+  const detectorFamily = manifest.detector?.family ?? "cornelius";
+  setText("settings-detector-name", `Detector (${detectorFamily})`);
+  setText("settings-detector-hash", modelVersionLabel(detectorModelKey(manifest), manifest));
+  setText("settings-milo-hash", modelVersionLabel("milo", manifest));
 
   // Create two workers.  The scanner worker does all GPU/CPU inference;
   // the enricher worker handles Scryfall price lookups independently.

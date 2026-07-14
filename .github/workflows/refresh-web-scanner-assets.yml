@@ -12,9 +12,11 @@ on:
     branches:
       - main
     paths:
-      - "collector_vision/weights/**"
+      - "collector_vision/data/model_registry.json"
+      - "collector_vision/model_*.py"
       - "scripts/export_web_scanner_assets.py"
       - "examples/web_scanner/assets.bundle.json"
+      - "examples/web_scanner/assets.testing.bundle.json"
   schedule:
     - cron: "17 8 1 * *"
 
@@ -25,6 +27,16 @@ permissions:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - bundle_channel: stable
+            pointer_path: examples/web_scanner/assets.bundle.json
+            deploy_pages: true
+          - bundle_channel: testing
+            pointer_path: examples/web_scanner/assets.testing.bundle.json
+            deploy_pages: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,7 +59,7 @@ jobs:
           import json
           from pathlib import Path
 
-          pointer = json.loads(Path("examples/web_scanner/assets.bundle.json").read_text(encoding="utf-8"))
+          pointer = json.loads(Path("${{ matrix.pointer_path }}").read_text(encoding="utf-8"))
           catalog_key = pointer["catalog_key"]
           if not catalog_key.startswith("hf://"):
               raise SystemExit(f"Unsupported catalog key: {catalog_key}")
@@ -57,6 +69,9 @@ jobs:
           print(f"catalog_uri={catalog_key}")
           print(f"repo={owner}/{repo}")
           print(f"catalog_key_name={key}")
+          print(f"model_channel={pointer.get('model_channel', 'stable')}")
+          print(f"corner_detector_family={pointer.get('corner_detector_family', 'cornelius')}")
+          print(f"corner_detector_version={pointer.get('corner_detector_version', '')}")
           PY
 
       - name: Resolve upstream fingerprint
@@ -66,14 +81,23 @@ jobs:
           import json
           import urllib.request
 
+          from collector_vision.model_registry import load_model_registry
+
           repo = "${{ steps.bundle.outputs.repo }}"
           catalog_key = "${{ steps.bundle.outputs.catalog_key_name }}"
           url = f"https://huggingface.co/{repo}/resolve/main/catalogs/manifest.json"
           with urllib.request.urlopen(url, timeout=30) as response:
               manifest = json.loads(response.read().decode("utf-8"))
           latest = manifest[catalog_key]["latest"]
+            detector = load_model_registry().get_model(
+              family="${{ steps.bundle.outputs.corner_detector_family }}",
+              version="${{ steps.bundle.outputs.corner_detector_version }}" or None,
+              channel="${{ steps.bundle.outputs.model_channel }}",
+            )
           print(f"catalog_filename={latest}")
           print(f"bundle_version={latest.rsplit('.', 1)[0]}")
+            print(f"detector_id={detector.id}")
+            print(f"detector_sha256=sha256:{detector.sha256}")
           PY
 
       - name: Download current release metadata
@@ -95,13 +119,20 @@ jobs:
 
           force = "${{ inputs.force }}" == "true" or "${{ github.event_name }}" == "push"
           metadata_path = Path(".release/web-scanner-assets-metadata.json")
-          current = None
+            current_catalog = None
+            current_detector_id = None
+            current_detector_hash = None
           if metadata_path.exists():
-              current = json.loads(metadata_path.read_text(encoding="utf-8")).get("catalog_fingerprint")
+              metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+              current_catalog = metadata.get("catalog_fingerprint")
+              current_detector_id = metadata.get("model_ids", {}).get("detector")
+              current_detector_hash = metadata.get("models", {}).get("detector")
           upstream = "${{ steps.upstream.outputs.catalog_filename }}"
-          refresh = force or current != upstream
+            detector_id = "${{ steps.upstream.outputs.detector_id }}"
+            detector_hash = "${{ steps.upstream.outputs.detector_sha256 }}"
+            refresh = force or current_catalog != upstream or current_detector_id != detector_id or current_detector_hash != detector_hash
           print(f"refresh={'true' if refresh else 'false'}")
-          print(f"current={current or ''}")
+            print(f"current={current_catalog or ''}")
           PY
 
       - name: Skip unchanged bundle
@@ -119,10 +150,12 @@ jobs:
             --repo "${{ steps.bundle.outputs.repo }}" \
             --catalog-key "${{ steps.bundle.outputs.catalog_key_name }}" \
             --bundle-version "${{ steps.upstream.outputs.bundle_version }}" \
+            --model-channel "${{ steps.bundle.outputs.model_channel }}" \
+            --corner-detector-family "${{ steps.bundle.outputs.corner_detector_family }}" \
             --out-dir .web-scanner-build
 
       - name: Package bundle
-        if: steps.decision.outputs.refresh == 'true'
+        if: steps.decision.outputs.refresh == 'true' && matrix.deploy_pages
         run: |
           tar --zstd -cf web-scanner-assets.tar.zst -C .web-scanner-build assets vendor bundle-metadata.json
           cp .web-scanner-build/bundle-metadata.json web-scanner-assets-metadata.json

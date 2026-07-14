@@ -58,7 +58,7 @@ from a CDN.
 ## Asset Contract
 
 Expected static assets:
-- `assets/models/cornelius.onnx`
+- `assets/models/detector.onnx`
 - `assets/models/milo.onnx`
 - `assets/catalog/scryfall-mtg-embeddings.f16.bin`
 - `assets/catalog/scryfall-mtg-card-ids.json`
@@ -96,6 +96,12 @@ Current automation behavior:
    rebuilds when the upstream fingerprint changes.
 - Successful refresh runs automatically trigger `Deploy Pages`, which publishes
    both the full scanner UI and the applet playground with the refreshed bundle.
+
+The stable bundle is published to the `web-scanner-assets` GitHub release and
+is the only bundle deployed to production Pages. The Fastweb preview bundle is
+published separately to `web-scanner-assets-testing`; it selects
+`fastweb-single` from the testing model channel and is intended for local or
+preview-host testing without changing the production Pages detector.
 
 See:
 
