@@ -471,7 +471,6 @@ function updateThresholdMeter(name, threshold, current, maximum) {
 
 function candidateFromResult(data) {
   if (!isAcceptedDetection(data)) return null;
-  const score = Number(data.score);
   return {
     cardId: data.cardId,
     secondaryId: data.secondaryId,
@@ -590,7 +589,6 @@ function bucketKey(candidate) {
 
 function startRoiDrag(event) {
   const handle = event.target.closest("[data-handle]")?.dataset.handle ?? "move";
-  if (event.target !== els.roiBox && !event.target.closest(".roi-box")) return;
   event.preventDefault();
   els.roiBox.setPointerCapture?.(event.pointerId);
   dragState = {
@@ -598,11 +596,15 @@ function startRoiDrag(event) {
     startX: event.clientX,
     startY: event.clientY,
     startRoi: { ...roi },
+    moved: false,
   };
 }
 
 function moveRoiDrag(event) {
   if (!dragState) return;
+  if (Math.abs(event.clientX - dragState.startX) > 3 || Math.abs(event.clientY - dragState.startY) > 3) {
+    dragState.moved = true;
+  }
   const draw = previewDrawCssRect();
   const dx = (event.clientX - dragState.startX) / draw.width;
   const dy = (event.clientY - dragState.startY) / draw.height;
@@ -640,8 +642,15 @@ function moveRoiDrag(event) {
   updateSourceMeta();
 }
 
-function endRoiDrag() {
+function endRoiDrag(event) {
   if (!dragState) return;
+  if (!dragState.moved && dragState.handle === "move") {
+    const draw = previewDrawCssRect();
+    roi.x = clamp((event.clientX - draw.x) / draw.width - roi.width / 2, 0, 1 - roi.width);
+    roi.y = clamp((event.clientY - draw.y) / draw.height - roi.height / 2, 0, 1 - roi.height);
+    applyRoiToBox();
+    updateSourceMeta();
+  }
   dragState = null;
   saveRoi();
 }
