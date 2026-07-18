@@ -646,9 +646,12 @@ function moveRoiDrag(event) {
 function endRoiDrag(event) {
   if (!dragState) return;
   if (!dragState.moved && dragState.handle === "move") {
+    const stage = els.stage.getBoundingClientRect();
     const draw = previewDrawCssRect();
-    roi.x = clamp((event.clientX - draw.x) / draw.width - roi.width / 2, 0, 1 - roi.width);
-    roi.y = clamp((event.clientY - draw.y) / draw.height - roi.height / 2, 0, 1 - roi.height);
+    const clickX = event.clientX - stage.left;
+    const clickY = event.clientY - stage.top;
+    roi.x = clamp((clickX - draw.x) / draw.width - roi.width / 2, 0, 1 - roi.width);
+    roi.y = clamp((clickY - draw.y) / draw.height - roi.height / 2, 0, 1 - roi.height);
     applyRoiToBox();
     updateSourceMeta();
   }
