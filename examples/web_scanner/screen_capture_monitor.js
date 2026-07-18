@@ -471,6 +471,7 @@ function updateThresholdMeter(name, threshold, current, maximum) {
 
 function candidateFromResult(data) {
   if (!isAcceptedDetection(data)) return null;
+  const score = Number(data.score);
   return {
     cardId: data.cardId,
     secondaryId: data.secondaryId,
