@@ -67,6 +67,30 @@ jobs:
               -C examples/web_scanner/testing assets bundle-metadata.json
           fi
 
+      - name: Mirror Catalog v2 client assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CATALOG_V2_RELEASE="$(python - <<'PY'
+          import json
+          with open("examples/web_scanner/catalog-v2.release.json", "r", encoding="utf-8") as f:
+             print(json.load(f)["release"])
+          PY
+          )"
+          CATALOG_V2_DIR="examples/web_scanner/catalog-v2/$CATALOG_V2_RELEASE"
+          rm -rf examples/web_scanner/catalog-v2
+          mkdir -p "$CATALOG_V2_DIR"
+          gh release download "$CATALOG_V2_RELEASE" \
+           --repo HanClinto/CollectorVisionCatalog \
+           --pattern "catalog-index-v2.json" \
+           --pattern "*.manifest.json" \
+           --pattern "*.recognition.f16.gz" \
+           --pattern "*.recognition.jsonl.gz" \
+           --pattern "*.metadata.jsonl.gz" \
+           --pattern "*.delta.f16.gz" \
+           --pattern "*.delta.jsonl.gz" \
+           --dir "$CATALOG_V2_DIR"
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 

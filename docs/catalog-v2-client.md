@@ -80,3 +80,49 @@ The default v2 location is:
 `COLLECTORVISION_CACHE` or the `cache_dir` argument changes the common
 CollectorVision cache root while preserving the separate `catalog-v2/`
 namespace.
+
+## Browser client
+
+The browser client is also separate from the existing v1 scanner catalog:
+
+```javascript
+import {
+  CatalogV2BrowserClient,
+} from "./lib/collectorvision-catalog-v2.mjs";
+
+const client = new CatalogV2BrowserClient({
+  releaseBaseUrl: "https://hanclinto.github.io/CollectorVision/catalog-v2/",
+});
+const catalog = await client.load(
+  "catalog-v2-beta.1-2026-07-24",
+  "milo1/scryfall/mtg",
+);
+
+const [[score, cardId]] = catalog.search(queryEmbedding, 1);
+```
+
+The browser keeps embeddings packed as little-endian FP16 and converts values
+during dot products. This avoids expanding the catalog to float32 in memory.
+It uses the browser's native `fetch`, Web Crypto SHA-256, and
+`DecompressionStream` implementations without adding a package dependency.
+`releaseBaseUrl` must point to a same-origin or CORS-enabled mirror organized
+as `<base>/<tag>/<release asset>`. GitHub Release download responses do not
+currently permit cross-origin browser reads, so the module deliberately does
+not present the GitHub release URL as a working browser default. The official
+Pages deployment mirrors only client assets—never builder state—under the URL
+shown above. This mirror is independent from the scanner's bundled v1 catalog.
+
+Pass the currently loaded catalog to use the next release's exact-base delta:
+
+```javascript
+const updated = await client.load(
+  "catalog-v2-beta.2-2026-07-25",
+  "milo1/scryfall/mtg",
+  { previous: catalog },
+);
+```
+
+An absent or incompatible base automatically selects the complete target
+snapshot. Applications can rely on normal HTTP caching or persist release
+assets separately; the beta module does not alter the v1 scanner's bundled
+catalog storage.
