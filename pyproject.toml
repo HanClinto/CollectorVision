@@ -59,6 +59,8 @@ line-length = 100
 exclude = [
   "docs/animation",
   "experiments",
+  "README.md",
+  "TODO.md",
 ]
 
 [tool.ruff.lint]
