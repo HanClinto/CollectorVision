@@ -174,9 +174,7 @@ class CatalogV2:
         if not delta.get("requires_exact_base"):
             raise CatalogV2Error("versioned delta must require its exact base")
         if previous.version != base_version:
-            raise CatalogV2Error(
-                f"delta requires base {base_version!r}, not {previous.version!r}"
-            )
+            raise CatalogV2Error(f"delta requires base {base_version!r}, not {previous.version!r}")
         if (
             previous.catalog_key != catalog_key
             or previous.embedding_model != embedding_model
@@ -195,9 +193,7 @@ class CatalogV2:
         _verify_asset(operations_path, assets["delta_operations"])
         _verify_asset(matrix_path, assets["delta_matrix"])
         operations = _read_jsonl_gzip(operations_path)
-        expected_operations = _required_non_negative_int(
-            delta, "operations", "manifest delta"
-        )
+        expected_operations = _required_non_negative_int(delta, "operations", "manifest delta")
         if len(operations) != expected_operations:
             raise CatalogV2Error(
                 f"delta operation count mismatch: expected {expected_operations}, "
@@ -213,9 +209,7 @@ class CatalogV2:
                 f"delta matrix size mismatch: expected {expected_matrix_bytes}, "
                 f"found {len(matrix_bytes)}"
             )
-        delta_embeddings = np.frombuffer(matrix_bytes, dtype="<f2").reshape(
-            upsert_count, dim
-        )
+        delta_embeddings = np.frombuffer(matrix_bytes, dtype="<f2").reshape(upsert_count, dim)
         embedding_indexes = {
             operation.get("embedding_index")
             for operation in operations
@@ -251,9 +245,7 @@ class CatalogV2:
                     metadata_by_key={},
                 )[0]
                 if parsed.key in seen_operations:
-                    raise CatalogV2Error(
-                        f"duplicate delta operation for key {parsed.key!r}"
-                    )
+                    raise CatalogV2Error(f"duplicate delta operation for key {parsed.key!r}")
                 seen_operations.add(parsed.key)
                 embedding_index = _required_non_negative_int(
                     operation, "embedding_index", "delta upsert"
@@ -320,9 +312,7 @@ class CatalogV2:
                 f"delta reconstructed {len(sorted_keys)} rows but manifest expects {rows}"
             )
         embeddings = (
-            np.vstack([current_embeddings[key] for key in sorted_keys]).astype(
-                "<f2", copy=False
-            )
+            np.vstack([current_embeddings[key] for key in sorted_keys]).astype("<f2", copy=False)
             if sorted_keys
             else np.empty((0, dim), dtype="<f2")
         )
@@ -367,9 +357,7 @@ class CatalogV2:
         identifier = self.descriptor.result_identifier
         return [(score, self.records[index].identifiers[identifier]) for score, index in raw]
 
-    def search_records(
-        self, embedding: np.ndarray, top_k: int = 5
-    ) -> list[dict[str, Any]]:
+    def search_records(self, embedding: np.ndarray, top_k: int = 5) -> list[dict[str, Any]]:
         """Return scored records with peer identifiers and optional metadata."""
         from collector_vision import retrieval
 
@@ -413,9 +401,7 @@ def _parse_descriptor(value: object) -> CatalogV2Descriptor:
         source=_required_string(value, "source", "catalog descriptor"),
         profile=_required_string(value, "profile", "catalog descriptor"),
         description=_required_string(value, "description", "catalog descriptor"),
-        result_identifier=_required_string(
-            value, "result_identifier", "catalog descriptor"
-        ),
+        result_identifier=_required_string(value, "result_identifier", "catalog descriptor"),
         recommended=recommended,
     )
 
@@ -439,15 +425,10 @@ def _parse_records(
         parsed_identifiers = {
             name: identifier
             for name, identifier in identifiers.items()
-            if isinstance(name, str)
-            and name
-            and isinstance(identifier, str)
-            and identifier
+            if isinstance(name, str) and name and isinstance(identifier, str) and identifier
         }
         if len(parsed_identifiers) != len(identifiers):
-            raise CatalogV2Error(
-                f"recognition record {key!r} contains an invalid identifier"
-            )
+            raise CatalogV2Error(f"recognition record {key!r} contains an invalid identifier")
         if result_identifier not in parsed_identifiers:
             raise CatalogV2Error(
                 f"recognition record {key!r} lacks result identifier {result_identifier!r}"

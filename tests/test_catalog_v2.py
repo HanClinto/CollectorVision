@@ -126,9 +126,7 @@ def test_loads_v2_without_touching_v1_catalog(tmp_path: Path) -> None:
     assert catalog.version == "catalog-v2-beta.1-2026-07-24"
     assert catalog.embeddings.dtype == np.dtype("<f2")
     assert catalog.records[0].metadata is None
-    assert catalog.search(np.asarray([0.0, 1.0], dtype=np.float32), top_k=1) == [
-        (1.0, "b")
-    ]
+    assert catalog.search(np.asarray([0.0, 1.0], dtype=np.float32), top_k=1) == [(1.0, "b")]
 
 
 def test_loads_optional_metadata_and_peer_identifiers(tmp_path: Path) -> None:
@@ -281,13 +279,7 @@ def test_release_installer_uses_separate_v2_cache(tmp_path: Path) -> None:
     assert len(catalog) == 2
     assert catalog.metadata_loaded
     assert (
-        cache
-        / "catalog-v2"
-        / "releases"
-        / tag
-        / "metadata"
-        / "demo"
-        / "demo.manifest.json"
+        cache / "catalog-v2" / "releases" / tag / "metadata" / "demo" / "demo.manifest.json"
     ).is_file()
     assert not (cache / "catalogs").exists()
 
@@ -317,12 +309,8 @@ def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
         "operations": 0,
         "metadata_operations": 0,
     }
-    manifest["assets"]["delta_operations"] = _write_gzip(
-        target_source / "demo.delta.jsonl.gz", b""
-    )
-    manifest["assets"]["delta_matrix"] = _write_gzip(
-        target_source / "demo.delta.f16.gz", b""
-    )
+    manifest["assets"]["delta_operations"] = _write_gzip(target_source / "demo.delta.jsonl.gz", b"")
+    manifest["assets"]["delta_matrix"] = _write_gzip(target_source / "demo.delta.f16.gz", b"")
     target_manifest = target_source / "demo.manifest.json"
     target_manifest.write_text(json.dumps(manifest), encoding="utf-8")
     _write_index(target_source, target_manifest, target_tag)
@@ -405,13 +393,7 @@ def test_release_rejects_tampered_cached_manifest(tmp_path: Path) -> None:
         base_url=source.as_uri(),
     )
     cached_manifest = (
-        cache
-        / "catalog-v2"
-        / "releases"
-        / tag
-        / "recognition"
-        / "demo"
-        / "demo.manifest.json"
+        cache / "catalog-v2" / "releases" / tag / "recognition" / "demo" / "demo.manifest.json"
     )
     cached_manifest.write_text("{}")
 

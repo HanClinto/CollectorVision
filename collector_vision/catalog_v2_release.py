@@ -471,10 +471,7 @@ def _cache_root(cache_dir: str | Path | None) -> Path:
 def _validate_tag(tag: str) -> None:
     match = _BETA_TAG.fullmatch(tag)
     if match is None:
-        raise ValueError(
-            "Catalog v2 beta tag must match "
-            "'catalog-v2-beta.<number>-YYYY-MM-DD'"
-        )
+        raise ValueError("Catalog v2 beta tag must match 'catalog-v2-beta.<number>-YYYY-MM-DD'")
     try:
         date.fromisoformat(match.group("date"))
     except ValueError as error:
