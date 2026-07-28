@@ -7,7 +7,7 @@ a ready-to-search catalog, and use the catalog's matching embedder.
 from PIL import Image
 import collector_vision as cv
 
-catalog = cv.CatalogV2.for_game("mtg")
+catalog = cv.CatalogV2("mtg")
 
 with Image.open("card.jpg") as image:
     embedding = catalog.embedder.embed(image.convert("RGB"))
@@ -15,20 +15,20 @@ with Image.open("card.jpg") as image:
 score, card_id = catalog.search(embedding, top_k=1)[0]
 ```
 
-`Game.MTG` is accepted too. The default is the recommended source and profile,
-equivalent to v1's `Catalog.for_game(Game.MTG)`.
+`Game.MTG` is accepted too. Construction downloads the catalog when needed and
+reuses its cache afterward. The default is the recommended source and profile.
 
 Choose the compact one-card-per-Oracle catalog when exact printings do not
 matter:
 
 ```python
-catalog = cv.CatalogV2.for_game("mtg", profile="cards")
+catalog = cv.CatalogV2("mtg", profile="cards")
 ```
 
 Load names, sets, languages, finishes, and peer IDs only when needed:
 
 ```python
-catalog = cv.CatalogV2.for_game("mtg", include_metadata=True)
+catalog = cv.CatalogV2("mtg", include_metadata=True)
 match = catalog.search_records(embedding, top_k=1)[0]
 print(match["identifiers"])
 print(match["metadata"])

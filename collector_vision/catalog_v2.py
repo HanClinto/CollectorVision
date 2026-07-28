@@ -62,12 +62,41 @@ class CatalogV2Record:
 class CatalogV2:
     """Loaded Catalog v2 recognition snapshot.
 
-    Use :meth:`load` with a downloaded v2 manifest. This explicit class keeps
-    beta v2 behavior separate from the stable :class:`collector_vision.Catalog`
-    API and its v1 cache.
+    Construct with a game to download or open a ready-to-search catalog.
+    :meth:`load` remains available for advanced callers with local v2 artifacts.
     """
 
     def __init__(
+        self,
+        game: str | Game,
+        *,
+        source: str | None = None,
+        profile: str | None = None,
+        include_metadata: bool = False,
+        cache_dir: str | Path | None = None,
+        offline: bool = False,
+        version: str | None = None,
+    ) -> None:
+        loaded = self._for_game(
+            game,
+            source=source,
+            profile=profile,
+            include_metadata=include_metadata,
+            cache_dir=cache_dir,
+            offline=offline,
+            version=version,
+        )
+        self._initialize(
+            embeddings=loaded.embeddings,
+            records=loaded.records,
+            catalog_key=loaded.catalog_key,
+            version=loaded.version,
+            embedding_model=loaded.embedding_model,
+            descriptor=loaded.descriptor,
+            metadata_loaded=loaded.metadata_loaded,
+        )
+
+    def _initialize(
         self,
         *,
         embeddings: np.ndarray,
@@ -76,7 +105,7 @@ class CatalogV2:
         version: str,
         embedding_model: str,
         descriptor: CatalogV2Descriptor,
-        metadata_loaded: bool = False,
+        metadata_loaded: bool,
     ) -> None:
         self.embeddings = embeddings
         self.records = records
@@ -86,6 +115,30 @@ class CatalogV2:
         self.descriptor = descriptor
         self.metadata_loaded = metadata_loaded
         self._embedder = None
+
+    @classmethod
+    def _from_data(
+        cls,
+        *,
+        embeddings: np.ndarray,
+        records: tuple[CatalogV2Record, ...],
+        catalog_key: str,
+        version: str,
+        embedding_model: str,
+        descriptor: CatalogV2Descriptor,
+        metadata_loaded: bool = False,
+    ) -> CatalogV2:
+        catalog = cls.__new__(cls)
+        catalog._initialize(
+            embeddings=embeddings,
+            records=records,
+            catalog_key=catalog_key,
+            version=version,
+            embedding_model=embedding_model,
+            descriptor=descriptor,
+            metadata_loaded=metadata_loaded,
+        )
+        return catalog
 
     @classmethod
     def load(
@@ -150,7 +203,7 @@ class CatalogV2:
             )
         embeddings = np.frombuffer(matrix_bytes, dtype="<f2").reshape(rows, dim).copy()
 
-        return cls(
+        return cls._from_data(
             embeddings=embeddings,
             records=records,
             catalog_key=catalog_key,
@@ -161,7 +214,7 @@ class CatalogV2:
         )
 
     @classmethod
-    def for_game(
+    def _for_game(
         cls,
         game: str | Game,
         *,
@@ -382,7 +435,7 @@ class CatalogV2:
             if sorted_keys
             else np.empty((0, dim), dtype="<f2")
         )
-        return cls(
+        return cls._from_data(
             embeddings=embeddings,
             records=tuple(current_records[key] for key in sorted_keys),
             catalog_key=catalog_key,

@@ -155,7 +155,7 @@ def test_loads_optional_metadata_and_peer_identifiers(tmp_path: Path) -> None:
     assert catalog.algo_key == "milo1"
 
 
-def test_for_game_hides_release_and_catalog_key_selection(
+def test_constructor_hides_release_and_catalog_key_selection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -173,9 +173,11 @@ def test_for_game_hides_release_and_catalog_key_selection(
 
     monkeypatch.setattr(CatalogV2Downloader, "install_for_game", install_for_game)
 
-    catalog = CatalogV2.for_game("mtg", profile="cards", cache_dir=tmp_path)
+    catalog = CatalogV2("mtg", profile="cards", cache_dir=tmp_path)
 
-    assert catalog is expected
+    assert catalog.catalog_key == expected.catalog_key
+    assert catalog.records == expected.records
+    assert np.array_equal(catalog.embeddings, expected.embeddings)
     assert calls == [
         (
             "catalog-v2-beta.3-2026-07-28",
