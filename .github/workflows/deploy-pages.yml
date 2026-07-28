@@ -7,6 +7,8 @@ on:
     paths:
       - ".github/workflows/deploy-pages.yml"
       - "examples/web_scanner/**"
+  schedule:
+    - cron: "47 11 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -71,10 +73,52 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          CATALOG_V2_RELEASE="$(python - <<'PY'
+          RELEASES="$(gh release list \
+            --repo HanClinto/CollectorVisionCatalog \
+            --limit 1000 \
+            --json tagName,isDraft,isPrerelease)"
+          CATALOG_V2_RELEASE="$(RELEASES="$RELEASES" python - <<'PY'
           import json
+          import os
+          import re
+          from datetime import date
+
+          pattern = re.compile(
+              r"^catalog-v2-beta\.([1-9][0-9]*)-(\d{4}-\d{2}-\d{2})$"
+          )
           with open("examples/web_scanner/catalog-v2.release.json", "r", encoding="utf-8") as f:
-             print(json.load(f)["release"])
+             minimum = json.load(f)["minimum_release"]
+          minimum_match = pattern.fullmatch(minimum)
+          if minimum_match is None:
+             raise SystemExit(f"Invalid minimum Catalog v2 release: {minimum}")
+          try:
+             minimum_identity = (
+                 int(minimum_match.group(1)),
+                 date.fromisoformat(minimum_match.group(2)),
+             )
+          except ValueError as error:
+             raise SystemExit(f"Invalid minimum Catalog v2 release: {minimum}") from error
+          releases = json.loads(os.environ["RELEASES"])
+          candidates = []
+          for release in releases:
+             match = pattern.fullmatch(release["tagName"])
+             if release["isDraft"] or not release["isPrerelease"] or match is None:
+                 continue
+             try:
+                 source_date = date.fromisoformat(match.group(2))
+             except ValueError:
+                 continue
+             candidates.append(
+                 (int(match.group(1)), source_date, release["tagName"])
+             )
+          if not candidates:
+             raise SystemExit("No published Catalog v2 beta release found")
+          number, source_date, latest = max(candidates)
+          if (number, source_date) < minimum_identity:
+             raise SystemExit(
+                 f"Latest Catalog v2 release {latest} precedes required {minimum}"
+             )
+          print(latest)
           PY
           )"
           CATALOG_V2_DIR="examples/web_scanner/catalog-v2/$CATALOG_V2_RELEASE"

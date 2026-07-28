@@ -216,7 +216,7 @@ export class CatalogV2BrowserClient {
     }
 
     const sortedRecords = [...records.values()].sort((left, right) =>
-      left.key.localeCompare(right.key),
+      compareStableKeys(left.key, right.key),
     );
     if (sortedRecords.length !== manifest.rows) {
       throw new CatalogV2Error("delta reconstructed an unexpected row count");
@@ -443,6 +443,12 @@ function isObject(value) {
 
 function ensureTrailingSlash(value) {
   return value.endsWith("/") ? value : `${value}/`;
+}
+
+function compareStableKeys(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function float16ToNumber(value) {

@@ -135,7 +135,7 @@ const operations = await asset(
     { op: "delete", key: "card:a:face:0" },
     {
       op: "upsert",
-      record: { key: "card:c:face:0", identifiers: { source_card: "c" } },
+      record: { key: "card:B:face:0", identifiers: { source_card: "c" } },
       embedding_index: 0,
     },
   ]),
@@ -145,7 +145,7 @@ const metadataDelta = await asset(
   "demo.metadata.delta.jsonl.gz",
   jsonLines([
     { op: "delete", key: "card:a:face:0" },
-    { op: "upsert", key: "card:c:face:0", metadata: { name: "Gamma" } },
+    { op: "upsert", key: "card:B:face:0", metadata: { name: "Gamma" } },
   ]),
 );
 const nextManifest = {
@@ -186,11 +186,11 @@ const updated = await client.load(nextTag, key, {
   previous: catalog,
 });
 assert.deepEqual(updated.records.map((record) => record.key), [
+  "card:B:face:0",
   "card:b:face:1",
-  "card:c:face:0",
 ]);
 assert.deepEqual(updated.search(new Float32Array([1, 0]), 1), [[1, "c"]]);
-assert.equal(updated.recordForIndex(1).metadata.name, "Gamma");
+assert.equal(updated.recordForIndex(0).metadata.name, "Gamma");
 
 const updatedWithoutMetadata = await client.load(nextTag, key, {
   previous: catalog,

@@ -20,7 +20,7 @@ During beta, select a reviewed release tag rather than a moving latest release:
 import collector_vision as cvg
 
 release = cvg.CatalogV2Release.install(
-    "catalog-v2-beta.1-2026-07-24",
+    "catalog-v2-beta.2-2026-07-27",
     catalog_keys=["milo1/scryfall/mtg"],
 )
 catalog = release.load("milo1/scryfall/mtg")
@@ -43,7 +43,7 @@ Metadata remains an independent download and cache layer:
 
 ```python
 release = cvg.CatalogV2Release.install(
-    "catalog-v2-beta.1-2026-07-24",
+    "catalog-v2-beta.2-2026-07-27",
     catalog_keys=["milo1/scryfall/mtg"],
     include_metadata=True,
 )
@@ -59,7 +59,7 @@ release:
 
 ```python
 updated = cvg.CatalogV2Release.install(
-    "catalog-v2-beta.2-2026-07-25",
+    "catalog-v2-beta.2-2026-07-27",
     catalog_keys=["milo1/scryfall/mtg"],
     previous_tag="catalog-v2-beta.1-2026-07-24",
 )
@@ -94,7 +94,7 @@ const client = new CatalogV2BrowserClient({
   releaseBaseUrl: "https://hanclinto.github.io/CollectorVision/catalog-v2/",
 });
 const catalog = await client.load(
-  "catalog-v2-beta.1-2026-07-24",
+  "catalog-v2-beta.2-2026-07-27",
   "milo1/scryfall/mtg",
 );
 
@@ -108,15 +108,16 @@ It uses the browser's native `fetch`, Web Crypto SHA-256, and
 `releaseBaseUrl` must point to a same-origin or CORS-enabled mirror organized
 as `<base>/<tag>/<release asset>`. GitHub Release download responses do not
 currently permit cross-origin browser reads, so the module deliberately does
-not present the GitHub release URL as a working browser default. The official
-Pages deployment mirrors only client assets—never builder state—under the URL
-shown above. This mirror is independent from the scanner's bundled v1 catalog.
+not present the GitHub release URL as a working browser default. The official Pages deployment mirrors only client assets—never builder
+state—under the URL shown above. It promotes the highest valid published beta
+on a weekly schedule after the catalog release workflow. This mirror is
+independent from the scanner's bundled v1 catalog.
 
 Pass the currently loaded catalog to use the next release's exact-base delta:
 
 ```javascript
 const updated = await client.load(
-  "catalog-v2-beta.2-2026-07-25",
+  "catalog-v2-beta.2-2026-07-27",
   "milo1/scryfall/mtg",
   { previous: catalog },
 );
