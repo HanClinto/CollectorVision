@@ -5,6 +5,7 @@ export class CatalogV2Error extends Error {}
 
 export class BrowserCatalogV2 {
   constructor({ manifest, records, embeddings, metadataLoaded = false }) {
+    this.manifest = Object.freeze(structuredClone(manifest));
     this.catalogKey = manifest.catalog_key;
     this.version = manifest.version;
     this.embeddingModel = manifest.embedding_model;
@@ -58,14 +59,92 @@ export class BrowserCatalogV2 {
   }
 }
 
+export class CatalogV2IndexedDbCache {
+  constructor({
+    indexedDb = globalThis.indexedDB,
+    databaseName = "collectorvision-catalog-v2",
+  } = {}) {
+    if (!indexedDb) throw new TypeError("IndexedDB is not available");
+    this.indexedDb = indexedDb;
+    this.databaseName = databaseName;
+    this.databasePromise = null;
+  }
+
+  async get(tag, catalogKey, includeMetadata) {
+    const database = await this.#database();
+    const snapshot = await requestResult(
+      database
+        .transaction("catalogs", "readonly")
+        .objectStore("catalogs")
+        .get(snapshotKey(tag, catalogKey, includeMetadata)),
+    );
+    if (!snapshot) return null;
+    if (
+      !isObject(snapshot.manifest) ||
+      !Array.isArray(snapshot.records) ||
+      !(snapshot.embeddings instanceof ArrayBuffer)
+    ) {
+      throw new CatalogV2Error("invalid Catalog v2 snapshot in IndexedDB");
+    }
+    return new BrowserCatalogV2({
+      manifest: snapshot.manifest,
+      records: snapshot.records,
+      embeddings: new Uint16Array(snapshot.embeddings),
+      metadataLoaded: includeMetadata,
+    });
+  }
+
+  async put(catalog) {
+    if (!(catalog instanceof BrowserCatalogV2)) {
+      throw new TypeError("Catalog v2 cache accepts BrowserCatalogV2 snapshots");
+    }
+    const database = await this.#database();
+    const snapshot = {
+      id: snapshotKey(catalog.version, catalog.catalogKey, catalog.metadataLoaded),
+      manifest: structuredClone(catalog.manifest),
+      records: structuredClone(catalog.records),
+      embeddings: catalog.embeddings.slice().buffer,
+    };
+    const transaction = database.transaction("catalogs", "readwrite");
+    transaction.objectStore("catalogs").put(snapshot);
+    await transactionComplete(transaction);
+  }
+
+  async #database() {
+    if (!this.databasePromise) {
+      this.databasePromise = new Promise((resolve, reject) => {
+        const request = this.indexedDb.open(this.databaseName, 1);
+        request.onupgradeneeded = () => {
+          const database = request.result;
+          if (!database.objectStoreNames.contains("catalogs")) {
+            database.createObjectStore("catalogs", { keyPath: "id" });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => reject(new CatalogV2Error("Catalog v2 IndexedDB is blocked"));
+      });
+    }
+    return this.databasePromise;
+  }
+}
+
 export class CatalogV2BrowserClient {
   constructor({
     fetchImpl = globalThis.fetch,
     releaseBaseUrl = null,
+    cache = null,
   } = {}) {
     if (typeof fetchImpl !== "function") throw new TypeError("fetch implementation is required");
     this.fetchImpl = fetchImpl;
     this.releaseBaseUrl = releaseBaseUrl;
+    this.cache = cache;
+    if (
+      this.cache !== null &&
+      (typeof this.cache.get !== "function" || typeof this.cache.put !== "function")
+    ) {
+      throw new TypeError("cache must provide async get() and put() methods");
+    }
   }
 
   async load(tag, catalogKey, { includeMetadata = false, previous = null } = {}) {
@@ -95,10 +174,47 @@ export class CatalogV2BrowserClient {
     const manifest = parseJsonObject(manifestBytes, "catalog manifest");
     validateManifest(manifest, tag, catalogKey);
 
-    if (isExactCompatibleBase(previous, manifest, includeMetadata)) {
-      return this.#loadDelta(baseUrl, manifest, previous, includeMetadata);
+    const cached = await this.#cachedSnapshot(tag, catalogKey, includeMetadata);
+    if (cached !== null && cached !== undefined) {
+      if (isCompatibleSnapshot(cached, manifest, includeMetadata)) {
+        return cached;
+      }
+      console.warn("Ignoring incompatible Catalog v2 snapshot in persistent cache");
     }
-    return this.#loadFull(baseUrl, manifest, includeMetadata);
+    if (previous === null && manifest.delta?.requires_exact_base === true) {
+      previous = await this.#cachedSnapshot(
+        manifest.delta.base_version,
+        catalogKey,
+        includeMetadata,
+      );
+    }
+    let catalog;
+    if (isExactCompatibleBase(previous, manifest, includeMetadata)) {
+      catalog = await this.#loadDelta(baseUrl, manifest, previous, includeMetadata);
+    } else {
+      catalog = await this.#loadFull(baseUrl, manifest, includeMetadata);
+    }
+    await this.#persistSnapshot(catalog);
+    return catalog;
+  }
+
+  async #cachedSnapshot(tag, catalogKey, includeMetadata) {
+    if (this.cache === null) return null;
+    try {
+      return await this.cache.get(tag, catalogKey, includeMetadata);
+    } catch (error) {
+      console.warn("Catalog v2 persistent cache read failed; using network assets", error);
+      return null;
+    }
+  }
+
+  async #persistSnapshot(catalog) {
+    if (this.cache === null) return;
+    try {
+      await this.cache.put(catalog);
+    } catch (error) {
+      console.warn("Catalog v2 persistent cache write failed; catalog remains loaded", error);
+    }
   }
 
   async #loadFull(baseUrl, manifest, includeMetadata) {
@@ -385,6 +501,20 @@ function isExactCompatibleBase(previous, manifest, includeMetadata) {
   );
 }
 
+function isCompatibleSnapshot(snapshot, manifest, includeMetadata) {
+  return (
+    snapshot instanceof BrowserCatalogV2 &&
+    snapshot.version === manifest.version &&
+    snapshot.catalogKey === manifest.catalog_key &&
+    snapshot.embeddingModel === manifest.embedding_model &&
+    snapshot.dimension === manifest.dim &&
+    snapshot.records.length === manifest.rows &&
+    snapshot.embeddings.length === manifest.rows * manifest.dim &&
+    JSON.stringify(snapshot.descriptor) === JSON.stringify(manifest.descriptor) &&
+    snapshot.metadataLoaded === includeMetadata
+  );
+}
+
 async function verifyBytes(filename, bytes, expectedSha256, expectedSize = undefined) {
   if (expectedSize !== undefined && bytes.byteLength !== expectedSize) {
     throw new CatalogV2Error(`asset size mismatch: ${filename}`);
@@ -443,6 +573,26 @@ function isObject(value) {
 
 function ensureTrailingSlash(value) {
   return value.endsWith("/") ? value : `${value}/`;
+}
+
+function snapshotKey(tag, catalogKey, includeMetadata) {
+  return `${tag}\u0000${catalogKey}\u0000${includeMetadata ? "metadata" : "recognition"}`;
+}
+
+function requestResult(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function transactionComplete(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () =>
+      reject(transaction.error ?? new CatalogV2Error("Catalog v2 cache transaction aborted"));
+  });
 }
 
 function compareStableKeys(left, right) {

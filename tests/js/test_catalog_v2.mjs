@@ -115,10 +115,29 @@ function mockFetch(files) {
   };
 }
 
+class MemorySnapshotCache {
+  constructor() {
+    this.snapshots = new Map();
+  }
+
+  async get(tag, catalogKey, includeMetadata) {
+    return this.snapshots.get(`${tag}\0${catalogKey}\0${includeMetadata}`) ?? null;
+  }
+
+  async put(catalog) {
+    this.snapshots.set(
+      `${catalog.version}\0${catalog.catalogKey}\0${catalog.metadataLoaded}`,
+      catalog,
+    );
+  }
+}
+
 const files = await fixture();
+const snapshotCache = new MemorySnapshotCache();
 const client = new CatalogV2BrowserClient({
   releaseBaseUrl: "https://catalog.test/",
   fetchImpl: mockFetch(files),
+  cache: snapshotCache,
 });
 const catalog = await client.load(tag, key, { includeMetadata: true });
 
@@ -181,9 +200,13 @@ files.set(`${nextTag}/${operations.descriptor.filename}`, operations.compressed)
 files.set(`${nextTag}/${deltaMatrix.descriptor.filename}`, deltaMatrix.compressed);
 files.set(`${nextTag}/${metadataDelta.descriptor.filename}`, metadataDelta.compressed);
 
-const updated = await client.load(nextTag, key, {
+const reloadedClient = new CatalogV2BrowserClient({
+  releaseBaseUrl: "https://catalog.test/",
+  fetchImpl: mockFetch(files),
+  cache: snapshotCache,
+});
+const updated = await reloadedClient.load(nextTag, key, {
   includeMetadata: true,
-  previous: catalog,
 });
 assert.deepEqual(updated.records.map((record) => record.key), [
   "card:B:face:0",
@@ -217,5 +240,36 @@ await assert.rejects(
   () => tamperedClient.load(tag, key),
   CatalogV2Error,
 );
+
+const warnings = [];
+const originalWarn = console.warn;
+console.warn = (...values) => warnings.push(values);
+try {
+  const failingCacheClient = new CatalogV2BrowserClient({
+    releaseBaseUrl: "https://catalog.test/",
+    fetchImpl: mockFetch(files),
+    cache: {
+      async get() {
+        throw new Error("read unavailable");
+      },
+      async put() {
+        throw new Error("quota exceeded");
+      },
+    },
+  });
+  assert.equal((await failingCacheClient.load(tag, key)).records.length, 2);
+
+  const incompatibleCache = new MemorySnapshotCache();
+  incompatibleCache.snapshots.set(`${tag}\0${key}\0false`, updated);
+  const repairingClient = new CatalogV2BrowserClient({
+    releaseBaseUrl: "https://catalog.test/",
+    fetchImpl: mockFetch(files),
+    cache: incompatibleCache,
+  });
+  assert.equal((await repairingClient.load(tag, key)).version, tag);
+} finally {
+  console.warn = originalWarn;
+}
+assert.equal(warnings.length, 3);
 
 console.log("Catalog v2 browser tests passed");

@@ -88,6 +88,7 @@ The browser client is also separate from the existing v1 scanner catalog:
 ```javascript
 import {
   CatalogV2BrowserClient,
+  CatalogV2IndexedDbCache,
 } from "./lib/collectorvision-catalog-v2.mjs";
 
 const client = new CatalogV2BrowserClient({
@@ -127,3 +128,24 @@ An absent or incompatible base automatically selects the complete target
 snapshot. Applications can rely on normal HTTP caching or persist release
 assets separately; the beta module does not alter the v1 scanner's bundled
 catalog storage.
+
+The optional `CatalogV2IndexedDbCache` persists successfully verified snapshots
+in a separate `collectorvision-catalog-v2` database. A new client instance can
+therefore retrieve the exact prior release and apply the next one-step delta
+after a page reload:
+
+```javascript
+const cache = new CatalogV2IndexedDbCache();
+const client = new CatalogV2BrowserClient({
+  releaseBaseUrl: "https://hanclinto.github.io/CollectorVision/catalog-v2/",
+  cache,
+});
+const updated = await client.load(
+  "catalog-v2-beta.3-YYYY-MM-DD",
+  "milo1/scryfall/mtg",
+);
+```
+
+Persistence is opt-in so storage quota or private-mode restrictions cannot
+prevent an otherwise valid catalog load. Applications may provide another
+cache implementation with asynchronous `get()` and `put()` methods.
