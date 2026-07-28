@@ -38,11 +38,17 @@ def _write_catalog(tmp_path: Path) -> Path:
     recognition = [
         {
             "key": "card:a:face:0",
-            "identifiers": {"source_card": "a", "shared_card": "oracle-a"},
+            "identifiers": {
+                "source_card": "a",
+                "scryfall_oracle": "oracle-a",
+            },
         },
         {
             "key": "card:b:face:1",
-            "identifiers": {"source_card": "b", "shared_card": "oracle-b"},
+            "identifiers": {
+                "source_card": "b",
+                "scryfall_oracle": "oracle-b",
+            },
             "face_index": 1,
         },
     ]
@@ -134,12 +140,54 @@ def test_loads_optional_metadata_and_peer_identifiers(tmp_path: Path) -> None:
 
     assert catalog.record_for_index(1) == {
         "key": "card:b:face:1",
-        "identifiers": {"source_card": "b", "shared_card": "oracle-b"},
+        "identifiers": {
+            "source_card": "b",
+            "scryfall_oracle": "oracle-b",
+        },
         "face_index": 1,
         "result_identifier": "source_card",
         "card_id": "b",
         "metadata": {"name": "Beta"},
     }
+    assert catalog.card_ids == ["a", "b"]
+    assert catalog.oracle_ids == ["oracle-a", "oracle-b"]
+    assert catalog.source == "test"
+    assert catalog.algo_key == "milo1"
+
+
+def test_for_game_hides_release_and_catalog_key_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = CatalogV2.load(_write_catalog(tmp_path))
+    calls = []
+
+    class Download:
+        def load(self, catalog_key: str) -> CatalogV2:
+            assert catalog_key == "selected-key"
+            return expected
+
+    def install_for_game(tag: str, **kwargs):
+        calls.append((tag, kwargs))
+        return Download(), "selected-key"
+
+    monkeypatch.setattr(CatalogV2Downloader, "install_for_game", install_for_game)
+
+    catalog = CatalogV2.for_game("mtg", profile="cards", cache_dir=tmp_path)
+
+    assert catalog is expected
+    assert calls == [
+        (
+            "catalog-v2-beta.3-2026-07-28",
+            {
+                "game": "magic-the-gathering",
+                "source": "scryfall",
+                "profile": "cards",
+                "include_metadata": False,
+                "cache_dir": tmp_path,
+            },
+        )
+    ]
 
 
 def test_rejects_tampered_asset(tmp_path: Path) -> None:
@@ -319,7 +367,6 @@ def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
         target_tag,
         catalog_keys=["milo1/test/demo"],
         cache_dir=cache,
-        previous_tag=base_tag,
         base_url=target_source.as_uri(),
     )
 

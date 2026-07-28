@@ -1,151 +1,65 @@
-# Catalog v2 Python client
+# Catalog v2 client
 
-Catalog v2 is a beta, explicit-tag API. It operates independently from the
-existing `Catalog` class:
-
-- `Catalog` continues to load Catalog v1 NPZ files from local paths or
-  Hugging Face.
-- `CatalogV2` loads the v2 FP16/JSONL artifact contract.
-- `CatalogV2Downloader` installs immutable GitHub Release assets beneath a
-  separate `catalog-v2/` cache directory.
-
-Both versions can be loaded in the same process without changing or migrating
-the v1 cache.
-
-## Install an explicit beta
-
-During beta, select a reviewed release tag rather than a moving latest release:
+Catalog v2 keeps the parts that work well in Catalog v1: choose a game, receive
+a ready-to-search catalog, and use the catalog's matching embedder.
 
 ```python
-import collector_vision as cvg
+from PIL import Image
+import collector_vision as cv
 
-download = cvg.CatalogV2Downloader.install(
-    "catalog-v2-beta.2-2026-07-27",
-    catalog_keys=["milo1/scryfall/mtg"],
-)
-catalog = download.load("milo1/scryfall/mtg")
-```
+catalog = cv.CatalogV2.for_game("mtg")
 
-The compatibility `search()` method returns the identifier selected by the
-catalog descriptor:
+with Image.open("card.jpg") as image:
+    embedding = catalog.embedder.embed(image.convert("RGB"))
 
-```python
-embedding = catalog.embedder.embed(card_image)
 score, card_id = catalog.search(embedding, top_k=1)[0]
 ```
 
-Use `search_records()` to receive the stable row key, all peer identifiers,
-face index, result identifier, and score.
+`Game.MTG` is accepted too. The default is the recommended source and profile,
+equivalent to v1's `Catalog.for_game(Game.MTG)`.
 
-## Optional metadata
-
-Metadata remains an independent download and cache layer:
-
-```python
-download = cvg.CatalogV2Downloader.install(
-    "catalog-v2-beta.2-2026-07-27",
-    catalog_keys=["milo1/scryfall/mtg"],
-    include_metadata=True,
-)
-catalog = download.load("milo1/scryfall/mtg")
-```
-
-Recognition-only and metadata installations do not overwrite one another.
-
-## One-step updates
-
-Pass the currently installed release when moving to the immediately following
-release:
+Choose the compact one-card-per-Oracle catalog when exact printings do not
+matter:
 
 ```python
-updated = cvg.CatalogV2Downloader.install(
-    "catalog-v2-beta.2-2026-07-27",
-    catalog_keys=["milo1/scryfall/mtg"],
-    previous_tag="catalog-v2-beta.1-2026-07-24",
-)
+catalog = cv.CatalogV2.for_game("mtg", profile="cards")
 ```
 
-The installer uses the delta only when the target manifest requires that exact
-base and the prior catalog is installed in the same cache layer. It verifies
-the delta assets, materializes a complete local snapshot, and can therefore
-apply the next release as another single step. If the exact base is unavailable
-or incompatible, it downloads the target release's full snapshot instead.
+Load names, sets, languages, finishes, and peer IDs only when needed:
 
-The default v2 location is:
-
-```text
-~/.cache/collectorvision/catalog-v2/releases/
+```python
+catalog = cv.CatalogV2.for_game("mtg", include_metadata=True)
+match = catalog.search_records(embedding, top_k=1)[0]
+print(match["identifiers"])
+print(match["metadata"])
 ```
 
-`COLLECTORVISION_CACHE` or the `cache_dir` argument changes the common
-CollectorVision cache root while preserving the separate `catalog-v2/`
-namespace.
+The familiar v1 attributes `card_ids`, `oracle_ids`, `source`, `algo_key`,
+`embeddings`, and `embedder` remain available. `offline=True` opens the pinned
+beta from the separate v2 cache without network access.
 
-## Browser client
+Release tags, catalog keys, checksums, cache layout, and exact-base deltas are
+managed internally. `CatalogV2Downloader` remains available for applications
+that need explicit control. Catalog v1 remains unchanged and can run beside v2.
 
-The browser client is also separate from the existing v1 scanner catalog:
+## Browser
+
+The browser API follows the same game-first shape:
 
 ```javascript
 import {
-  CatalogV2BrowserClient,
-  CatalogV2IndexedDbCache,
-} from "./lib/collectorvision-catalog-v2.mjs";
+  BrowserCatalogV2,
+} from "https://hanclinto.github.io/CollectorVision/lib/collectorvision-catalog-v2.mjs";
 
-const client = new CatalogV2BrowserClient({
-  releaseBaseUrl: "https://hanclinto.github.io/CollectorVision/catalog-v2/",
+const catalog = await BrowserCatalogV2.forGame("mtg", {
+  profile: "cards",
+  includeMetadata: true,
 });
-const catalog = await client.load(
-  "catalog-v2-beta.2-2026-07-27",
-  "milo1/scryfall/mtg",
-);
 
 const [[score, cardId]] = catalog.search(queryEmbedding, 1);
 ```
 
-The browser keeps embeddings packed as little-endian FP16 and converts values
-during dot products. This avoids expanding the catalog to float32 in memory.
-It uses the browser's native `fetch`, Web Crypto SHA-256, and
-`DecompressionStream` implementations without adding a package dependency.
-`releaseBaseUrl` must point to a same-origin or CORS-enabled mirror organized
-as `<base>/<tag>/<release asset>`. GitHub Release download responses do not
-currently permit cross-origin browser reads, so the module deliberately does
-not present the GitHub release URL as a working browser default. The official Pages deployment mirrors only client assets—never builder
-state—under the URL shown above. It promotes the highest valid published beta
-on a weekly schedule after the catalog release workflow. This mirror is
-independent from the scanner's bundled v1 catalog.
-
-Pass the currently loaded catalog to use the next release's exact-base delta:
-
-```javascript
-const updated = await client.load(
-  "catalog-v2-beta.2-2026-07-27",
-  "milo1/scryfall/mtg",
-  { previous: catalog },
-);
-```
-
-An absent or incompatible base automatically selects the complete target
-snapshot. Applications can rely on normal HTTP caching or persist release
-assets separately; the beta module does not alter the v1 scanner's bundled
-catalog storage.
-
-The optional `CatalogV2IndexedDbCache` persists successfully verified snapshots
-in a separate `collectorvision-catalog-v2` database. A new client instance can
-therefore retrieve the exact prior release and apply the next one-step delta
-after a page reload:
-
-```javascript
-const cache = new CatalogV2IndexedDbCache();
-const client = new CatalogV2BrowserClient({
-  releaseBaseUrl: "https://hanclinto.github.io/CollectorVision/catalog-v2/",
-  cache,
-});
-const updated = await client.load(
-  "catalog-v2-beta.3-YYYY-MM-DD",
-  "milo1/scryfall/mtg",
-);
-```
-
-Persistence is opt-in so storage quota or private-mode restrictions cannot
-prevent an otherwise valid catalog load. Applications may provide another
-cache implementation with asynchronous `get()` and `put()` methods.
+`queryEmbedding` is the normalized `Float32Array` from the existing Milo
+inference pipeline. The catalog keeps its matrix packed as FP16. Advanced
+applications can use `CatalogV2BrowserClient` and `CatalogV2IndexedDbCache`
+directly for explicit versions, mirrors, and persistent snapshots.

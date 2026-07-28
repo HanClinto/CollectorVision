@@ -1,9 +1,43 @@
 const BETA_TAG = /^catalog-v2-beta\.[1-9][0-9]*-[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 const INDEX_FILENAME = "catalog-index-v2.json";
+const DEFAULT_TAG = "catalog-v2-beta.3-2026-07-28";
+const DEFAULT_RELEASE_BASE_URL =
+  "https://hanclinto.github.io/CollectorVision/catalog-v2/";
+const GAME_NAMES = Object.freeze({
+  mtg: "magic-the-gathering",
+  pokemon: "pokemon",
+  yugioh: "yugioh",
+  fab: "flesh-and-blood",
+  lorcana: "lorcana",
+  digimon: "digimon-card-game",
+  onepiece: "one-piece",
+  swu: "star-wars-unlimited",
+});
+const PRIMARY_SOURCES = Object.freeze({
+  mtg: "scryfall",
+  pokemon: "tcgplayer",
+  yugioh: "tcgplayer",
+  fab: "tcgplayer",
+  lorcana: "tcgplayer",
+  digimon: "tcgplayer",
+  onepiece: "tcgplayer",
+  swu: "tcgplayer",
+});
 
 export class CatalogV2Error extends Error {}
 
 export class BrowserCatalogV2 {
+  static async forGame(game, options = {}) {
+    const {
+      fetchImpl = globalThis.fetch,
+      releaseBaseUrl = DEFAULT_RELEASE_BASE_URL,
+      cache = null,
+      ...selection
+    } = options;
+    const client = new CatalogV2BrowserClient({ fetchImpl, releaseBaseUrl, cache });
+    return client.loadGame(game, selection);
+  }
+
   constructor({ manifest, records, embeddings, metadataLoaded = false }) {
     this.manifest = Object.freeze(structuredClone(manifest));
     this.catalogKey = manifest.catalog_key;
@@ -132,7 +166,7 @@ export class CatalogV2IndexedDbCache {
 export class CatalogV2BrowserClient {
   constructor({
     fetchImpl = globalThis.fetch,
-    releaseBaseUrl = null,
+    releaseBaseUrl = DEFAULT_RELEASE_BASE_URL,
     cache = null,
   } = {}) {
     if (typeof fetchImpl !== "function") throw new TypeError("fetch implementation is required");
@@ -145,6 +179,33 @@ export class CatalogV2BrowserClient {
     ) {
       throw new TypeError("cache must provide async get() and put() methods");
     }
+  }
+
+  async loadGame(
+    game,
+    {
+      source = null,
+      profile = null,
+      includeMetadata = false,
+      tag = DEFAULT_TAG,
+      previous = null,
+    } = {},
+  ) {
+    validateTag(tag);
+    const normalizedGame = normalizeGame(game);
+    const selectedSource = source ?? PRIMARY_SOURCES[normalizedGame];
+    const baseUrl = new URL(
+      `${encodeURIComponent(tag)}/`,
+      ensureTrailingSlash(this.releaseBaseUrl),
+    );
+    const index = await this.#fetchJson(new URL(INDEX_FILENAME, baseUrl));
+    validateIndex(index, tag);
+    const catalogKey = selectCatalogKey(index, {
+      game: GAME_NAMES[normalizedGame],
+      source: selectedSource,
+      profile,
+    });
+    return this.load(tag, catalogKey, { includeMetadata, previous });
   }
 
   async load(tag, catalogKey, { includeMetadata = false, previous = null } = {}) {
@@ -385,6 +446,40 @@ function validateIndex(index, tag) {
   if (index.schema_version !== 2 || index.release_version !== tag || !isObject(index.catalogs)) {
     throw new CatalogV2Error("invalid Catalog v2 index");
   }
+}
+
+function normalizeGame(game) {
+  const value = String(game).trim().toLowerCase();
+  if (!(value in GAME_NAMES)) {
+    throw new RangeError(
+      `unknown game ${JSON.stringify(game)}; expected one of ${Object.keys(GAME_NAMES).join(", ")}`,
+    );
+  }
+  return value;
+}
+
+function selectCatalogKey(index, { game, source, profile }) {
+  let matches = Object.entries(index.catalogs).filter(([, entry]) => {
+    const descriptor = entry?.descriptor;
+    return (
+      isObject(descriptor) &&
+      descriptor.game === game &&
+      descriptor.source === source &&
+      (profile === null || descriptor.profile === profile)
+    );
+  });
+  if (profile === null) {
+    const recommended = matches.filter(([, entry]) => entry.descriptor.recommended === true);
+    if (recommended.length > 0) matches = recommended;
+  }
+  if (matches.length === 1) return matches[0][0];
+  if (matches.length === 0) {
+    throw new CatalogV2Error(
+      `no Catalog v2 catalog for game ${JSON.stringify(game)}, source ${JSON.stringify(source)}` +
+        (profile === null ? "" : `, profile ${JSON.stringify(profile)}`),
+    );
+  }
+  throw new CatalogV2Error("multiple Catalog v2 catalogs match; choose a profile");
 }
 
 function validateManifest(manifest, tag, catalogKey) {

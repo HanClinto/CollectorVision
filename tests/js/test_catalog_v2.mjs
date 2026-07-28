@@ -11,7 +11,7 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 const encoder = new TextEncoder();
 const tag = "catalog-v2-beta.1-2026-07-24";
-const key = "milo1/test/demo";
+const key = "milo1/scryfall/mtg";
 
 async function gzip(bytes) {
   const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"));
@@ -71,8 +71,8 @@ async function fixture() {
     dim: 2,
     dtype: "float16",
     descriptor: {
-      game: "demo",
-      source: "test",
+      game: "magic-the-gathering",
+      source: "scryfall",
       profile: "printings",
       description: "Demo",
       result_identifier: "source_card",
@@ -92,6 +92,7 @@ async function fixture() {
       [key]: {
         manifest_filename: "demo.manifest.json",
         sha256: await sha256(manifestBytes),
+        descriptor: manifest.descriptor,
       },
     },
   };
@@ -147,6 +148,13 @@ assert.equal(catalog.recordForIndex(1).metadata.name, "Beta");
 assert.deepEqual(catalog.search(new Float32Array([0, 1]), 1), [[1, "b"]]);
 assert.equal(catalog.recordForIndex(1).face_index, 1);
 
+const simpleCatalog = await BrowserCatalogV2.forGame("mtg", {
+  tag,
+  releaseBaseUrl: "https://catalog.test/",
+  fetchImpl: mockFetch(files),
+});
+assert.equal(simpleCatalog.catalogKey, key);
+
 const nextTag = "catalog-v2-beta.2-2026-07-25";
 const operations = await asset(
   "demo.delta.jsonl.gz",
@@ -191,6 +199,7 @@ const nextIndex = {
     [key]: {
       manifest_filename: "demo.manifest.json",
       sha256: await sha256(nextManifestBytes),
+      descriptor: nextManifest.descriptor,
     },
   },
 };
@@ -225,11 +234,6 @@ await assert.rejects(
   () => client.load("latest", key),
   /explicit immutable beta tag/,
 );
-await assert.rejects(
-  () => new CatalogV2BrowserClient().load(tag, key),
-  /CORS-enabled Catalog v2 mirror/,
-);
-
 const tampered = new Map(files);
 tampered.set(`${tag}/demo.recognition.f16.gz`, new Uint8Array([1, 2, 3]));
 const tamperedClient = new CatalogV2BrowserClient({

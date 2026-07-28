@@ -14,9 +14,23 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from collector_vision.games import Game
+
+_GAME_NAMES = {
+    "mtg": "magic-the-gathering",
+    "pokemon": "pokemon",
+    "yugioh": "yugioh",
+    "fab": "flesh-and-blood",
+    "lorcana": "lorcana",
+    "digimon": "digimon-card-game",
+    "onepiece": "one-piece",
+    "swu": "star-wars-unlimited",
+}
 
 _MODEL_IDENTITY = re.compile(
     r"^collectorvision@[0-9a-f]{40}:(?P<model>[a-z0-9.-]+)@sha256:(?P<sha256>[0-9a-f]{64})$"
@@ -145,6 +159,58 @@ class CatalogV2:
             descriptor=descriptor,
             metadata_loaded=include_metadata,
         )
+
+    @classmethod
+    def for_game(
+        cls,
+        game: str | Game,
+        *,
+        source: str | None = None,
+        profile: str | None = None,
+        include_metadata: bool = False,
+        cache_dir: str | Path | None = None,
+        offline: bool = False,
+        version: str | None = None,
+    ) -> CatalogV2:
+        """Download or open a ready-to-search catalog for one game.
+
+        Defaults mirror :meth:`collector_vision.Catalog.for_game`: choose the
+        game's primary source and its recommended catalog. ``profile="cards"``
+        selects the compact Scryfall MTG catalog.
+        """
+        from collector_vision.catalog_v2_downloader import (
+            DEFAULT_CATALOG_V2_TAG,
+            CatalogV2Downloader,
+        )
+        from collector_vision.games import GAME_PRIMARY_SOURCE, Game, parse_game
+
+        parsed_game = game if isinstance(game, Game) else parse_game(str(game))
+        descriptor_game = _GAME_NAMES.get(parsed_game.value)
+        if descriptor_game is None:
+            raise ValueError(f"Catalog v2 does not publish a catalog for {parsed_game.value!r}")
+        selected_source = source or GAME_PRIMARY_SOURCE[parsed_game]
+        selected_version = version or DEFAULT_CATALOG_V2_TAG
+        if offline:
+            downloader = CatalogV2Downloader.open(
+                selected_version,
+                include_metadata=include_metadata,
+                cache_dir=cache_dir,
+            )
+            catalog_key = downloader.catalog_for_game(
+                game=descriptor_game,
+                source=selected_source,
+                profile=profile,
+            )
+        else:
+            downloader, catalog_key = CatalogV2Downloader.install_for_game(
+                selected_version,
+                game=descriptor_game,
+                source=selected_source,
+                profile=profile,
+                include_metadata=include_metadata,
+                cache_dir=cache_dir,
+            )
+        return downloader.load(catalog_key)
 
     @classmethod
     def apply_delta(
@@ -347,6 +413,28 @@ class CatalogV2:
                 )
             self._embedder = NeuralEmbedder(checkpoint=resolve_model_artifact(model))
         return self._embedder
+
+    @property
+    def card_ids(self) -> list[str]:
+        """Primary card IDs, matching the Catalog v1 compatibility attribute."""
+        identifier = self.descriptor.result_identifier
+        return [record.identifiers[identifier] for record in self.records]
+
+    @property
+    def oracle_ids(self) -> list[str] | None:
+        """Scryfall Oracle IDs when present, matching the Catalog v1 attribute."""
+        values = [record.identifiers.get("scryfall_oracle", "") for record in self.records]
+        return values if any(values) else None
+
+    @property
+    def source(self) -> str:
+        """The catalog's upstream source."""
+        return self.descriptor.source
+
+    @property
+    def algo_key(self) -> str:
+        """Stable embedding algorithm identifier, such as ``"milo1"``."""
+        return self.catalog_key.split("/", 1)[0]
 
     def search(self, embedding: np.ndarray, top_k: int = 5) -> list[tuple[float, str]]:
         """Return compatibility search results using the descriptor's result ID."""

@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 from collector_vision.catalog_v2 import CatalogV2, CatalogV2Error
 
 DEFAULT_REPOSITORY = "HanClinto/CollectorVisionCatalog"
+DEFAULT_CATALOG_V2_TAG = "catalog-v2-beta.3-2026-07-28"
 INDEX_FILENAME = "catalog-index-v2.json"
 _USER_AGENT = "CollectorVision-CatalogV2/0.1"
 _BETA_TAG = re.compile(r"^catalog-v2-beta\.[1-9][0-9]*-(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})$")
@@ -86,6 +87,42 @@ class CatalogV2Downloader:
         return downloader
 
     @classmethod
+    def install_for_game(
+        cls,
+        tag: str,
+        *,
+        game: str,
+        source: str,
+        profile: str | None = None,
+        include_metadata: bool = False,
+        cache_dir: str | Path | None = None,
+        repository: str = DEFAULT_REPOSITORY,
+        base_url: str | None = None,
+    ) -> tuple[CatalogV2Downloader, str]:
+        """Install the catalog selected by its public descriptor."""
+        _validate_tag(tag)
+        release_url = base_url or (
+            f"https://github.com/{repository}/releases/download/{quote(tag, safe='')}"
+        )
+        index_bytes = _fetch(f"{release_url}/{INDEX_FILENAME}")
+        index = _parse_index(index_bytes, tag)
+        catalog_key = _select_catalog_key(index, game=game, source=source, profile=profile)
+        root = _cache_root(cache_dir)
+        _write_immutable(root / tag / INDEX_FILENAME, index_bytes)
+        downloader = cls(
+            tag=tag,
+            cache_root=root,
+            index=index,
+            include_metadata=include_metadata,
+        )
+        downloader._install_catalog(
+            catalog_key,
+            release_url=release_url,
+            previous_tag=None,
+        )
+        return downloader, catalog_key
+
+    @classmethod
     def open(
         cls,
         tag: str,
@@ -123,6 +160,16 @@ class CatalogV2Downloader:
             expected_sha256=entry["sha256"],
         )
         return CatalogV2.load(manifest_path, include_metadata=self.include_metadata)
+
+    def catalog_for_game(
+        self,
+        *,
+        game: str,
+        source: str,
+        profile: str | None = None,
+    ) -> str:
+        """Resolve a catalog key from descriptors in this release."""
+        return _select_catalog_key(self.index, game=game, source=source, profile=profile)
 
     def _install_catalog(
         self,
@@ -200,13 +247,14 @@ class CatalogV2Downloader:
         previous_tag: str | None,
     ) -> CatalogV2 | None:
         delta = manifest.get("delta")
-        if (
-            previous_tag is None
-            or not isinstance(delta, dict)
-            or delta.get("base_version") != previous_tag
-            or delta.get("requires_exact_base") is not True
-        ):
+        if not isinstance(delta, dict) or delta.get("requires_exact_base") is not True:
             return None
+        base_version = delta.get("base_version")
+        if not isinstance(base_version, str):
+            return None
+        if previous_tag is not None and previous_tag != base_version:
+            return None
+        previous_tag = base_version
         index_path = self.cache_root / previous_tag / INDEX_FILENAME
         if not index_path.is_file():
             return None
@@ -401,6 +449,51 @@ def _parse_index(payload: bytes, tag: str) -> dict:
         if not isinstance(sha256, str) or len(sha256) != 64:
             raise CatalogV2Error(f"catalog index entry {key!r} has an invalid checksum")
     return value
+
+
+def _select_catalog_key(
+    index: dict,
+    *,
+    game: str,
+    source: str,
+    profile: str | None,
+) -> str:
+    matches: list[tuple[str, dict]] = []
+    for key, entry in index["catalogs"].items():
+        descriptor = entry.get("descriptor")
+        if not isinstance(descriptor, dict):
+            continue
+        if descriptor.get("game") != game or descriptor.get("source") != source:
+            continue
+        if profile is not None and descriptor.get("profile") != profile:
+            continue
+        matches.append((key, descriptor))
+    if profile is None:
+        recommended = [match for match in matches if match[1].get("recommended") is True]
+        if recommended:
+            matches = recommended
+    if len(matches) == 1:
+        return matches[0][0]
+    available = sorted(
+        profile_name
+        for entry in index["catalogs"].values()
+        if isinstance(entry, dict)
+        and isinstance(entry.get("descriptor"), dict)
+        and entry["descriptor"].get("game") == game
+        and entry["descriptor"].get("source") == source
+        and isinstance(profile_name := entry["descriptor"].get("profile"), str)
+    )
+    if not matches:
+        detail = f"; available profiles: {', '.join(available)}" if available else ""
+        raise ValueError(
+            f"no Catalog v2 catalog for game {game!r}, source {source!r}"
+            + (f", profile {profile!r}" if profile is not None else "")
+            + detail
+        )
+    raise ValueError(
+        f"multiple Catalog v2 catalogs match game {game!r} and source {source!r}; "
+        "choose a profile"
+    )
 
 
 def _parse_manifest(payload: bytes, catalog_key: str, tag: str) -> dict:
