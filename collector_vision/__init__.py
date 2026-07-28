@@ -6,7 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from collector_vision.catalog import Catalog
 from collector_vision.catalog_v2 import CatalogV2
-from collector_vision.catalog_v2_release import CatalogV2Release
+from collector_vision.catalog_v2_downloader import CatalogV2Downloader
 from collector_vision.detectors import NeuralCornerDetector
 from collector_vision.embedders import NeuralEmbedder
 from collector_vision.games import Embedding, Game
@@ -30,7 +30,7 @@ except PackageNotFoundError:
 __all__ = [
     "Catalog",
     "CatalogV2",
-    "CatalogV2Release",
+    "CatalogV2Downloader",
     "DetectionResult",
     "Embedding",
     "Game",

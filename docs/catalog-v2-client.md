@@ -6,7 +6,7 @@ existing `Catalog` class:
 - `Catalog` continues to load Catalog v1 NPZ files from local paths or
   Hugging Face.
 - `CatalogV2` loads the v2 FP16/JSONL artifact contract.
-- `CatalogV2Release` installs immutable GitHub Release assets beneath a
+- `CatalogV2Downloader` installs immutable GitHub Release assets beneath a
   separate `catalog-v2/` cache directory.
 
 Both versions can be loaded in the same process without changing or migrating
@@ -19,11 +19,11 @@ During beta, select a reviewed release tag rather than a moving latest release:
 ```python
 import collector_vision as cvg
 
-release = cvg.CatalogV2Release.install(
+download = cvg.CatalogV2Downloader.install(
     "catalog-v2-beta.2-2026-07-27",
     catalog_keys=["milo1/scryfall/mtg"],
 )
-catalog = release.load("milo1/scryfall/mtg")
+catalog = download.load("milo1/scryfall/mtg")
 ```
 
 The compatibility `search()` method returns the identifier selected by the
@@ -42,12 +42,12 @@ face index, result identifier, and score.
 Metadata remains an independent download and cache layer:
 
 ```python
-release = cvg.CatalogV2Release.install(
+download = cvg.CatalogV2Downloader.install(
     "catalog-v2-beta.2-2026-07-27",
     catalog_keys=["milo1/scryfall/mtg"],
     include_metadata=True,
 )
-catalog = release.load("milo1/scryfall/mtg")
+catalog = download.load("milo1/scryfall/mtg")
 ```
 
 Recognition-only and metadata installations do not overwrite one another.
@@ -58,7 +58,7 @@ Pass the currently installed release when moving to the immediately following
 release:
 
 ```python
-updated = cvg.CatalogV2Release.install(
+updated = cvg.CatalogV2Downloader.install(
     "catalog-v2-beta.2-2026-07-27",
     catalog_keys=["milo1/scryfall/mtg"],
     previous_tag="catalog-v2-beta.1-2026-07-24",

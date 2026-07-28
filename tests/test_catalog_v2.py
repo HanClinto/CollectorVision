@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from collector_vision.catalog_v2 import CatalogV2, CatalogV2Error
-from collector_vision.catalog_v2_release import CatalogV2Release
+from collector_vision.catalog_v2_downloader import CatalogV2Downloader
 
 MODEL_IDENTITY = (
     "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:"
@@ -267,7 +267,7 @@ def test_release_installer_uses_separate_v2_cache(tmp_path: Path) -> None:
     _write_index(source, manifest_path, tag)
     cache = tmp_path / "cache"
 
-    release = CatalogV2Release.install(
+    downloader = CatalogV2Downloader.install(
         tag,
         catalog_keys=["milo1/test/demo"],
         include_metadata=True,
@@ -275,7 +275,7 @@ def test_release_installer_uses_separate_v2_cache(tmp_path: Path) -> None:
         base_url=source.as_uri(),
     )
 
-    catalog = release.load("milo1/test/demo")
+    catalog = downloader.load("milo1/test/demo")
     assert len(catalog) == 2
     assert catalog.metadata_loaded
     assert (
@@ -291,7 +291,7 @@ def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
     base_tag = "catalog-v2-beta.1-2026-07-24"
     _write_index(base_source, base_manifest, base_tag)
     cache = tmp_path / "cache"
-    CatalogV2Release.install(
+    CatalogV2Downloader.install(
         base_tag,
         catalog_keys=["milo1/test/demo"],
         cache_dir=cache,
@@ -315,7 +315,7 @@ def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
     target_manifest.write_text(json.dumps(manifest), encoding="utf-8")
     _write_index(target_source, target_manifest, target_tag)
 
-    release = CatalogV2Release.install(
+    downloader = CatalogV2Downloader.install(
         target_tag,
         catalog_keys=["milo1/test/demo"],
         cache_dir=cache,
@@ -323,7 +323,7 @@ def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
         base_url=target_source.as_uri(),
     )
 
-    current = release.load("milo1/test/demo")
+    current = downloader.load("milo1/test/demo")
     assert current.version == target_tag
     assert np.array_equal(
         current.embeddings,
@@ -340,7 +340,7 @@ def test_release_installer_falls_back_for_incompatible_exact_base(
     base_tag = "catalog-v2-beta.1-2026-07-24"
     _write_index(base_source, base_manifest, base_tag)
     cache = tmp_path / "cache"
-    CatalogV2Release.install(
+    CatalogV2Downloader.install(
         base_tag,
         catalog_keys=["milo1/test/demo"],
         cache_dir=cache,
@@ -368,7 +368,7 @@ def test_release_installer_falls_back_for_incompatible_exact_base(
     target_manifest.write_text(json.dumps(manifest), encoding="utf-8")
     _write_index(target_source, target_manifest, target_tag)
 
-    release = CatalogV2Release.install(
+    downloader = CatalogV2Downloader.install(
         target_tag,
         catalog_keys=["milo1/test/demo"],
         cache_dir=cache,
@@ -376,7 +376,7 @@ def test_release_installer_falls_back_for_incompatible_exact_base(
         base_url=target_source.as_uri(),
     )
 
-    assert release.load("milo1/test/demo").embedding_model == manifest["embedding_model"]
+    assert downloader.load("milo1/test/demo").embedding_model == manifest["embedding_model"]
 
 
 def test_release_rejects_tampered_cached_manifest(tmp_path: Path) -> None:
@@ -386,7 +386,7 @@ def test_release_rejects_tampered_cached_manifest(tmp_path: Path) -> None:
     tag = "catalog-v2-beta.1-2026-07-24"
     _write_index(source, manifest_path, tag)
     cache = tmp_path / "cache"
-    release = CatalogV2Release.install(
+    downloader = CatalogV2Downloader.install(
         tag,
         catalog_keys=["milo1/test/demo"],
         cache_dir=cache,
@@ -398,10 +398,10 @@ def test_release_rejects_tampered_cached_manifest(tmp_path: Path) -> None:
     cached_manifest.write_text("{}")
 
     with pytest.raises(CatalogV2Error, match="checksum mismatch"):
-        release.load("milo1/test/demo")
+        downloader.load("milo1/test/demo")
 
 
 @pytest.mark.parametrize("tag", ["latest", "catalog-v2-beta.0-2026-07-24", "../beta"])
 def test_release_requires_explicit_immutable_beta_tag(tmp_path: Path, tag: str) -> None:
     with pytest.raises(ValueError, match="beta tag"):
-        CatalogV2Release.open(tag, cache_dir=tmp_path)
+        CatalogV2Downloader.open(tag, cache_dir=tmp_path)

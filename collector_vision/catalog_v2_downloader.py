@@ -1,4 +1,4 @@
-"""Explicit-tag installer for CollectorVision Catalog v2 releases."""
+"""Download and open client assets from explicit Catalog v2 release tags."""
 
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ _USER_AGENT = "CollectorVision-CatalogV2/0.1"
 _BETA_TAG = re.compile(r"^catalog-v2-beta\.[1-9][0-9]*-(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})$")
 
 
-class CatalogV2Release:
-    """An installed subset of one immutable Catalog v2 release."""
+class CatalogV2Downloader:
+    """Downloads, verifies, updates, and opens Catalog v2 client assets."""
 
     def __init__(
         self,
@@ -49,7 +49,7 @@ class CatalogV2Release:
         previous_tag: str | None = None,
         repository: str = DEFAULT_REPOSITORY,
         base_url: str | None = None,
-    ) -> CatalogV2Release:
+    ) -> CatalogV2Downloader:
         """Install selected catalogs from an explicit immutable release tag.
 
         If ``previous_tag`` is installed in the same cache and is the manifest's
@@ -71,19 +71,19 @@ class CatalogV2Release:
         index = _parse_index(index_bytes, tag)
         _write_immutable(index_path, index_bytes)
 
-        release = cls(
+        downloader = cls(
             tag=tag,
             cache_root=root,
             index=index,
             include_metadata=include_metadata,
         )
         for catalog_key in catalog_keys:
-            release._install_catalog(
+            downloader._install_catalog(
                 catalog_key,
                 release_url=release_url,
                 previous_tag=previous_tag,
             )
-        return release
+        return downloader
 
     @classmethod
     def open(
@@ -92,7 +92,7 @@ class CatalogV2Release:
         *,
         include_metadata: bool = False,
         cache_dir: str | Path | None = None,
-    ) -> CatalogV2Release:
+    ) -> CatalogV2Downloader:
         """Open an already installed explicit release without network access."""
         _validate_tag(tag)
         root = _cache_root(cache_dir)
@@ -210,7 +210,7 @@ class CatalogV2Release:
         index_path = self.cache_root / previous_tag / INDEX_FILENAME
         if not index_path.is_file():
             return None
-        previous_release = CatalogV2Release(
+        previous_release = CatalogV2Downloader(
             tag=previous_tag,
             cache_root=self.cache_root,
             index=_parse_index(index_path.read_bytes(), previous_tag),
