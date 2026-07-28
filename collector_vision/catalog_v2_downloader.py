@@ -491,8 +491,7 @@ def _select_catalog_key(
             + detail
         )
     raise ValueError(
-        f"multiple Catalog v2 catalogs match game {game!r} and source {source!r}; "
-        "choose a profile"
+        f"multiple Catalog v2 catalogs match game {game!r} and source {source!r}; choose a profile"
     )
 
 
