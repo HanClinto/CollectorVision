@@ -109,14 +109,6 @@ def _write_index(directory: Path, manifest_path: Path, tag: str) -> None:
             "milo1/test/demo": {
                 "manifest_filename": manifest_path.name,
                 "sha256": hashlib.sha256(manifest_bytes).hexdigest(),
-                "descriptor": json.loads(manifest_bytes)["descriptor"],
-                "source_revision": {
-                    "type": "test",
-                    "name": "test",
-                    "updated_at": "2026-07-24T00:00:00Z",
-                    "uri": "https://example.test",
-                    "identity": "test",
-                },
             }
         },
     }
@@ -164,32 +156,32 @@ def test_constructor_hides_release_and_catalog_key_selection(
 
     class Download:
         def load(self, catalog_key: str) -> CatalogV2:
-            assert catalog_key == "selected-key"
+            assert catalog_key == "milo1/scryfall/mtg"
             return expected
 
-    def install_for_game(tag: str, **kwargs):
-        calls.append((tag, kwargs))
-        return Download(), "selected-key"
+    def install_from_feed(**kwargs):
+        calls.append(kwargs)
+        return Download()
 
-    monkeypatch.setattr(CatalogV2Downloader, "install_for_game", install_for_game)
+    monkeypatch.setattr(CatalogV2Downloader, "install_from_feed", install_from_feed)
 
-    catalog = CatalogV2("mtg", profile="cards", cache_dir=tmp_path)
+    catalog = CatalogV2("mtg", cache_dir=tmp_path)
 
     assert catalog.catalog_key == expected.catalog_key
     assert catalog.records == expected.records
     assert np.array_equal(catalog.embeddings, expected.embeddings)
     assert calls == [
-        (
-            "catalog-v2-beta.3-2026-07-28",
-            {
-                "game": "magic-the-gathering",
-                "source": "scryfall",
-                "profile": "cards",
-                "include_metadata": False,
-                "cache_dir": tmp_path,
-            },
-        )
+        {
+            "catalog_key": "milo1/scryfall/mtg",
+            "include_metadata": False,
+            "cache_dir": tmp_path,
+        }
     ]
+
+
+def test_constructor_rejects_scryfall_for_non_mtg_game() -> None:
+    with pytest.raises(ValueError, match="only available for MTG"):
+        CatalogV2("pokemon", source="scryfall")
 
 
 def test_rejects_tampered_asset(tmp_path: Path) -> None:
@@ -335,10 +327,11 @@ def test_release_installer_uses_separate_v2_cache(tmp_path: Path) -> None:
 
 
 def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
-    base_source = tmp_path / "base-source"
-    base_source.mkdir()
-    base_manifest = _write_catalog(base_source)
+    release_root = tmp_path / "releases"
     base_tag = "catalog-v2-beta.1-2026-07-24"
+    base_source = release_root / base_tag
+    base_source.mkdir(parents=True)
+    base_manifest = _write_catalog(base_source)
     _write_index(base_source, base_manifest, base_tag)
     cache = tmp_path / "cache"
     CatalogV2Downloader.install(
@@ -348,9 +341,9 @@ def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
         base_url=base_source.as_uri(),
     )
 
-    target_source = tmp_path / "target-source"
-    target_source.mkdir()
     target_tag = "catalog-v2-beta.2-2026-07-25"
+    target_source = release_root / target_tag
+    target_source.mkdir()
     manifest = json.loads(base_manifest.read_text())
     manifest["version"] = target_tag
     manifest["delta"] = {
@@ -359,8 +352,6 @@ def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
         "operations": 0,
         "metadata_operations": 0,
     }
-    manifest["assets"]["delta_operations"] = _write_gzip(target_source / "demo.delta.jsonl.gz", b"")
-    manifest["assets"]["delta_matrix"] = _write_gzip(target_source / "demo.delta.f16.gz", b"")
     target_manifest = target_source / "demo.manifest.json"
     target_manifest.write_text(json.dumps(manifest), encoding="utf-8")
     _write_index(target_source, target_manifest, target_tag)
@@ -378,6 +369,43 @@ def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
         current.embeddings,
         np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype="<f2"),
     )
+
+    feed = {
+        "schema_version": 2,
+        "release_version": target_tag,
+        "catalogs": {
+            "milo1/test/demo": {
+                "base": {
+                    "version": base_tag,
+                    "manifest_filename": base_manifest.name,
+                    "sha256": hashlib.sha256(base_manifest.read_bytes()).hexdigest(),
+                },
+                "deltas": [
+                    {
+                        "from": base_tag,
+                        "to": target_tag,
+                        "manifest_filename": target_manifest.name,
+                        "sha256": hashlib.sha256(target_manifest.read_bytes()).hexdigest(),
+                    }
+                ],
+            }
+        },
+    }
+    feed_path = release_root / "catalog-feed-v2.json"
+    feed_path.write_text(json.dumps(feed), encoding="utf-8")
+    feed_cache = tmp_path / "feed-cache"
+
+    installed = CatalogV2Downloader.install_from_feed(
+        catalog_key="milo1/test/demo",
+        cache_dir=feed_cache,
+        feed_url=feed_path.as_uri(),
+    )
+
+    assert installed.tag == target_tag
+    assert CatalogV2Downloader.open_from_feed(
+        catalog_key="milo1/test/demo",
+        cache_dir=feed_cache,
+    ).tag == target_tag
 
 
 def test_release_installer_falls_back_for_incompatible_exact_base(

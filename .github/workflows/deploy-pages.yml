@@ -8,7 +8,7 @@ on:
       - ".github/workflows/deploy-pages.yml"
       - "examples/web_scanner/**"
   schedule:
-    - cron: "47 11 * * 1"
+    - cron: "47 11 * * *"
   workflow_dispatch:
 
 permissions:
@@ -121,19 +121,93 @@ jobs:
           print(latest)
           PY
           )"
-          CATALOG_V2_DIR="examples/web_scanner/catalog-v2/$CATALOG_V2_RELEASE"
           rm -rf examples/web_scanner/catalog-v2
-          mkdir -p "$CATALOG_V2_DIR"
-          gh release download "$CATALOG_V2_RELEASE" \
-           --repo HanClinto/CollectorVisionCatalog \
-           --pattern "catalog-index-v2.json" \
-           --pattern "*.manifest.json" \
-           --pattern "*.recognition.f16.gz" \
-           --pattern "*.recognition.jsonl.gz" \
-           --pattern "*.metadata.jsonl.gz" \
-           --pattern "*.delta.f16.gz" \
-           --pattern "*.delta.jsonl.gz" \
-           --dir "$CATALOG_V2_DIR"
+          mkdir -p examples/web_scanner/catalog-v2
+          if ! gh release download "$CATALOG_V2_RELEASE" \
+            --repo HanClinto/CollectorVisionCatalog \
+            --pattern "catalog-feed-v2.json" \
+            --dir examples/web_scanner/catalog-v2; then
+            CATALOG_V2_DIR="examples/web_scanner/catalog-v2/$CATALOG_V2_RELEASE"
+            mkdir -p "$CATALOG_V2_DIR"
+            gh release download "$CATALOG_V2_RELEASE" \
+              --repo HanClinto/CollectorVisionCatalog \
+              --pattern "catalog-index-v2.json" \
+              --dir "$CATALOG_V2_DIR"
+            CATALOG_V2_RELEASE="$CATALOG_V2_RELEASE" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ["CATALOG_V2_RELEASE"]
+          root = Path("examples/web_scanner/catalog-v2")
+          index = json.loads((root / version / "catalog-index-v2.json").read_text())
+          feed = {
+              "schema_version": 2,
+              "release_version": version,
+              "catalogs": {
+                  key: {
+                      "base": {
+                          "version": version,
+                          "manifest_filename": entry["manifest_filename"],
+                          "sha256": entry["sha256"],
+                      },
+                      "deltas": [],
+                  }
+                  for key, entry in index["catalogs"].items()
+              },
+          }
+          (root / "catalog-feed-v2.json").write_text(
+              json.dumps(feed, sort_keys=True, separators=(",", ":")) + "\n"
+          )
+          PY
+          fi
+
+          declare -A CATALOG_V2_ROLES
+          while IFS=$'\t' read -r version role; do
+            existing="${CATALOG_V2_ROLES[$version]:-}"
+            if [ -n "$existing" ] && [ "$existing" != "$role" ]; then
+              CATALOG_V2_ROLES[$version]="both"
+            else
+              CATALOG_V2_ROLES[$version]="$role"
+            fi
+          done < <(python - <<'PY'
+          import json
+
+          with open("examples/web_scanner/catalog-v2/catalog-feed-v2.json") as stream:
+              feed = json.load(stream)
+          for entry in feed["catalogs"].values():
+              print(entry["base"]["version"], "full", sep="\t")
+              for delta in entry["deltas"]:
+                  print(delta["to"], "delta", sep="\t")
+          PY
+          )
+
+          for version in "${!CATALOG_V2_ROLES[@]}"; do
+            role="${CATALOG_V2_ROLES[$version]}"
+            destination="examples/web_scanner/catalog-v2/$version"
+            mkdir -p "$destination"
+            gh release download "$version" \
+              --repo HanClinto/CollectorVisionCatalog \
+              --clobber \
+              --pattern "catalog-index-v2.json" \
+              --pattern "*.manifest.json" \
+              --dir "$destination"
+            if [ "$role" = "full" ] || [ "$role" = "both" ]; then
+              gh release download "$version" \
+                --repo HanClinto/CollectorVisionCatalog \
+                --clobber \
+                --pattern "*.recognition.*.gz" \
+                --pattern "*.metadata.jsonl.gz" \
+                --dir "$destination"
+            fi
+            if [ "$role" = "delta" ] || [ "$role" = "both" ]; then
+              gh release download "$version" \
+                --repo HanClinto/CollectorVisionCatalog \
+                --clobber \
+                --pattern "*.delta.*.gz" \
+                --dir "$destination"
+            fi
+          done
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

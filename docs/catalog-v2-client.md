@@ -16,14 +16,9 @@ score, card_id = catalog.search(embedding, top_k=1)[0]
 ```
 
 `Game.MTG` is accepted too. Construction downloads the catalog when needed and
-reuses its cache afterward. The default is the recommended source and profile.
-
-Choose the compact one-card-per-Oracle catalog when exact printings do not
-matter:
-
-```python
-catalog = cv.CatalogV2("mtg", profile="cards")
-```
+reuses its cache afterward. The default source is Scryfall for MTG and
+TCGplayer for the other supported games. A small discovery feed selects a
+bounded base-plus-delta chain; release manifests still verify every asset.
 
 Load names, sets, languages, finishes, and peer IDs only when needed:
 
@@ -35,8 +30,9 @@ print(match["metadata"])
 ```
 
 The familiar v1 attributes `card_ids`, `oracle_ids`, `source`, `algo_key`,
-`embeddings`, and `embedder` remain available. `offline=True` opens the pinned
-beta from the separate v2 cache without network access.
+`embeddings`, and `embedder` remain available. `offline=True` opens the latest
+locally installed feed version from the separate v2 cache without network
+access.
 
 Release tags, catalog keys, checksums, cache layout, and exact-base deltas are
 managed internally. `CatalogV2Downloader` remains available for applications
@@ -52,7 +48,6 @@ import {
 } from "https://hanclinto.github.io/CollectorVision/lib/collectorvision-catalog-v2.mjs";
 
 const catalog = await BrowserCatalogV2.forGame("mtg", {
-  profile: "cards",
   includeMetadata: true,
 });
 

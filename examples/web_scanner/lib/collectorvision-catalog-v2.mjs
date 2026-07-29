@@ -1,6 +1,6 @@
 const BETA_TAG = /^catalog-v2-beta\.[1-9][0-9]*-[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 const INDEX_FILENAME = "catalog-index-v2.json";
-const DEFAULT_TAG = "catalog-v2-beta.3-2026-07-28";
+const FEED_FILENAME = "catalog-feed-v2.json";
 const DEFAULT_RELEASE_BASE_URL =
   "https://hanclinto.github.io/CollectorVision/catalog-v2/";
 const GAME_NAMES = Object.freeze({
@@ -185,30 +185,51 @@ export class CatalogV2BrowserClient {
     game,
     {
       source = null,
-      profile = null,
       includeMetadata = false,
-      tag = DEFAULT_TAG,
+      tag = null,
       previous = null,
     } = {},
   ) {
-    validateTag(tag);
     const normalizedGame = normalizeGame(game);
     const selectedSource = source ?? PRIMARY_SOURCES[normalizedGame];
-    const baseUrl = new URL(
-      `${encodeURIComponent(tag)}/`,
-      ensureTrailingSlash(this.releaseBaseUrl),
-    );
-    const index = await this.#fetchJson(new URL(INDEX_FILENAME, baseUrl));
-    validateIndex(index, tag);
-    const catalogKey = selectCatalogKey(index, {
-      game: GAME_NAMES[normalizedGame],
-      source: selectedSource,
-      profile,
-    });
-    return this.load(tag, catalogKey, { includeMetadata, previous });
+    if (selectedSource === "scryfall" && normalizedGame !== "mtg") {
+      throw new CatalogV2Error("Scryfall Catalog v2 is only available for MTG");
+    }
+    const catalogName = selectedSource === "scryfall" ? "mtg" : GAME_NAMES[normalizedGame];
+    const catalogKey = `milo1/${selectedSource}/${catalogName}`;
+    return tag === null
+      ? this.loadFromFeed(catalogKey, { includeMetadata, previous })
+      : this.load(tag, catalogKey, { includeMetadata, previous });
   }
 
-  async load(tag, catalogKey, { includeMetadata = false, previous = null } = {}) {
+  async loadFromFeed(catalogKey, { includeMetadata = false, previous = null } = {}) {
+    const feed = await this.#fetchJson(
+      new URL(FEED_FILENAME, ensureTrailingSlash(this.releaseBaseUrl)),
+    );
+    const entry = validateFeedEntry(feed, catalogKey);
+    let catalog = await this.load(entry.base.version, catalogKey, {
+      includeMetadata,
+      previous,
+      expectedReference: entry.base,
+    });
+    for (const delta of entry.deltas) {
+      if (catalog.version !== delta.from) {
+        throw new CatalogV2Error("catalog feed delta chain does not match loaded base");
+      }
+      catalog = await this.load(delta.to, catalogKey, {
+        includeMetadata,
+        previous: catalog,
+        expectedReference: delta,
+      });
+    }
+    return catalog;
+  }
+
+  async load(
+    tag,
+    catalogKey,
+    { includeMetadata = false, previous = null, expectedReference = null } = {},
+  ) {
     validateTag(tag);
     if (!this.releaseBaseUrl) {
       throw new TypeError(
@@ -229,11 +250,21 @@ export class CatalogV2BrowserClient {
     ) {
       throw new CatalogV2Error(`catalog ${JSON.stringify(catalogKey)} is not valid in ${tag}`);
     }
+    if (
+      expectedReference !== null &&
+      (entry.manifest_filename !== expectedReference.manifest_filename ||
+        entry.sha256 !== expectedReference.sha256)
+    ) {
+      throw new CatalogV2Error("catalog feed reference does not match its release index");
+    }
 
     const manifestBytes = await this.#fetchBytes(new URL(entry.manifest_filename, baseUrl));
     await verifyBytes(entry.manifest_filename, manifestBytes, entry.sha256);
     const manifest = parseJsonObject(manifestBytes, "catalog manifest");
     validateManifest(manifest, tag, catalogKey);
+    if (isCompatibleSnapshot(previous, manifest, includeMetadata)) {
+      return previous;
+    }
 
     const cached = await this.#cachedSnapshot(tag, catalogKey, includeMetadata);
     if (cached !== null && cached !== undefined) {
@@ -303,19 +334,25 @@ export class CatalogV2BrowserClient {
   }
 
   async #loadDelta(baseUrl, manifest, previous, includeMetadata) {
-    const operations = parseJsonLines(
-      await this.#fetchGzipAsset(baseUrl, manifest.assets.delta_operations),
-      "delta operations",
-    );
+    const operations =
+      manifest.delta.operations === 0
+        ? []
+        : parseJsonLines(
+            await this.#fetchGzipAsset(baseUrl, manifest.assets.delta_operations),
+            "delta operations",
+          );
     if (operations.length !== manifest.delta.operations) {
       throw new CatalogV2Error("delta operation count does not match manifest");
     }
     const upserts = operations.filter((operation) => operation.op === "upsert");
-    const deltaEmbeddings = parseFloat16Matrix(
-      await this.#fetchGzipAsset(baseUrl, manifest.assets.delta_matrix),
-      upserts.length,
-      manifest.dim,
-    );
+    const deltaEmbeddings =
+      upserts.length === 0
+        ? new Float32Array()
+        : parseFloat16Matrix(
+            await this.#fetchGzipAsset(baseUrl, manifest.assets.delta_matrix),
+            upserts.length,
+            manifest.dim,
+          );
     const records = new Map(previous.records.map((record) => [record.key, structuredClone(record)]));
     if (!includeMetadata) {
       for (const record of records.values()) delete record.metadata;
@@ -372,10 +409,13 @@ export class CatalogV2BrowserClient {
     }
 
     if (includeMetadata) {
-      const metadataOperations = parseJsonLines(
-        await this.#fetchGzipAsset(baseUrl, manifest.assets.metadata_delta),
-        "metadata delta operations",
-      );
+      const metadataOperations =
+        manifest.delta.metadata_operations === 0
+          ? []
+          : parseJsonLines(
+              await this.#fetchGzipAsset(baseUrl, manifest.assets.metadata_delta),
+              "metadata delta operations",
+            );
       if (metadataOperations.length !== manifest.delta.metadata_operations) {
         throw new CatalogV2Error("metadata delta operation count does not match manifest");
       }
@@ -448,6 +488,38 @@ function validateIndex(index, tag) {
   }
 }
 
+function validateFeedEntry(feed, catalogKey) {
+  if (
+    !isObject(feed) ||
+    feed.schema_version !== 2 ||
+    typeof feed.release_version !== "string" ||
+    !isObject(feed.catalogs)
+  ) {
+    throw new CatalogV2Error("invalid Catalog v2 feed");
+  }
+  const entry = feed.catalogs[catalogKey];
+  if (!isObject(entry) || !isObject(entry.base) || !Array.isArray(entry.deltas)) {
+    throw new CatalogV2Error(`catalog ${JSON.stringify(catalogKey)} is not valid in the feed`);
+  }
+  validateFeedReference(entry.base, entry.base.version);
+  let expected = entry.base.version;
+  for (const delta of entry.deltas) {
+    if (!isObject(delta) || delta.from !== expected) {
+      throw new CatalogV2Error("catalog feed delta chain is not contiguous");
+    }
+    validateFeedReference(delta, delta.to);
+    expected = delta.to;
+  }
+  return entry;
+}
+
+function validateFeedReference(reference, version) {
+  validateTag(version);
+  if (!isSafeFilename(reference.manifest_filename) || !isSha256(reference.sha256)) {
+    throw new CatalogV2Error("catalog feed contains an invalid manifest reference");
+  }
+}
+
 function normalizeGame(game) {
   const value = String(game).trim().toLowerCase();
   if (!(value in GAME_NAMES)) {
@@ -456,30 +528,6 @@ function normalizeGame(game) {
     );
   }
   return value;
-}
-
-function selectCatalogKey(index, { game, source, profile }) {
-  let matches = Object.entries(index.catalogs).filter(([, entry]) => {
-    const descriptor = entry?.descriptor;
-    return (
-      isObject(descriptor) &&
-      descriptor.game === game &&
-      descriptor.source === source &&
-      (profile === null || descriptor.profile === profile)
-    );
-  });
-  if (profile === null) {
-    const recommended = matches.filter(([, entry]) => entry.descriptor.recommended === true);
-    if (recommended.length > 0) matches = recommended;
-  }
-  if (matches.length === 1) return matches[0][0];
-  if (matches.length === 0) {
-    throw new CatalogV2Error(
-      `no Catalog v2 catalog for game ${JSON.stringify(game)}, source ${JSON.stringify(source)}` +
-        (profile === null ? "" : `, profile ${JSON.stringify(profile)}`),
-    );
-  }
-  throw new CatalogV2Error("multiple Catalog v2 catalogs match; choose a profile");
 }
 
 function validateManifest(manifest, tag, catalogKey) {

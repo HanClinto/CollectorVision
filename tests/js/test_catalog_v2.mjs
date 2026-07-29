@@ -92,11 +92,29 @@ async function fixture() {
       [key]: {
         manifest_filename: "demo.manifest.json",
         sha256: await sha256(manifestBytes),
-        descriptor: manifest.descriptor,
       },
     },
   };
   const files = new Map([
+    [
+      "catalog-feed-v2.json",
+      encoder.encode(
+        JSON.stringify({
+          schema_version: 2,
+          release_version: tag,
+          catalogs: {
+            [key]: {
+              base: {
+                version: tag,
+                manifest_filename: "demo.manifest.json",
+                sha256: await sha256(manifestBytes),
+              },
+              deltas: [],
+            },
+          },
+        }),
+      ),
+    ],
     [`${tag}/catalog-index-v2.json`, encoder.encode(JSON.stringify(index))],
     [`${tag}/demo.manifest.json`, manifestBytes],
     [`${tag}/${rows.descriptor.filename}`, rows.compressed],
@@ -149,11 +167,18 @@ assert.deepEqual(catalog.search(new Float32Array([0, 1]), 1), [[1, "b"]]);
 assert.equal(catalog.recordForIndex(1).face_index, 1);
 
 const simpleCatalog = await BrowserCatalogV2.forGame("mtg", {
-  tag,
   releaseBaseUrl: "https://catalog.test/",
   fetchImpl: mockFetch(files),
 });
 assert.equal(simpleCatalog.catalogKey, key);
+await assert.rejects(
+  () =>
+    BrowserCatalogV2.forGame("pokemon", {
+      source: "scryfall",
+      fetchImpl: mockFetch(files),
+    }),
+  /only available for MTG/,
+);
 
 const nextTag = "catalog-v2-beta.2-2026-07-25";
 const operations = await asset(
@@ -199,7 +224,6 @@ const nextIndex = {
     [key]: {
       manifest_filename: "demo.manifest.json",
       sha256: await sha256(nextManifestBytes),
-      descriptor: nextManifest.descriptor,
     },
   },
 };
@@ -208,13 +232,40 @@ files.set(`${nextTag}/demo.manifest.json`, nextManifestBytes);
 files.set(`${nextTag}/${operations.descriptor.filename}`, operations.compressed);
 files.set(`${nextTag}/${deltaMatrix.descriptor.filename}`, deltaMatrix.compressed);
 files.set(`${nextTag}/${metadataDelta.descriptor.filename}`, metadataDelta.compressed);
+files.set(
+  "catalog-feed-v2.json",
+  encoder.encode(
+    JSON.stringify({
+      schema_version: 2,
+      release_version: nextTag,
+      catalogs: {
+        [key]: {
+          base: {
+            version: tag,
+            manifest_filename: "demo.manifest.json",
+            sha256: JSON.parse(new TextDecoder().decode(files.get(`${tag}/catalog-index-v2.json`)))
+              .catalogs[key].sha256,
+          },
+          deltas: [
+            {
+              from: tag,
+              to: nextTag,
+              manifest_filename: "demo.manifest.json",
+              sha256: await sha256(nextManifestBytes),
+            },
+          ],
+        },
+      },
+    }),
+  ),
+);
 
 const reloadedClient = new CatalogV2BrowserClient({
   releaseBaseUrl: "https://catalog.test/",
   fetchImpl: mockFetch(files),
   cache: snapshotCache,
 });
-const updated = await reloadedClient.load(nextTag, key, {
+const updated = await reloadedClient.loadFromFeed(key, {
   includeMetadata: true,
 });
 assert.deepEqual(updated.records.map((record) => record.key), [
@@ -229,6 +280,54 @@ const updatedWithoutMetadata = await client.load(nextTag, key, {
 });
 assert.equal("metadata" in updatedWithoutMetadata.recordForIndex(0), false);
 assert.equal("metadata" in updatedWithoutMetadata.recordForIndex(1), false);
+
+const deleteTag = "catalog-v2-beta.3-2026-07-26";
+const deleteOperations = await asset(
+  "demo.delete.delta.jsonl.gz",
+  jsonLines([{ op: "delete", key: "card:B:face:0" }]),
+);
+const deleteManifest = {
+  ...nextManifest,
+  version: deleteTag,
+  rows: 1,
+  delta: {
+    base_version: nextTag,
+    requires_exact_base: true,
+    operations: 1,
+    metadata_operations: 0,
+  },
+  assets: {
+    ...nextManifest.assets,
+    delta_operations: deleteOperations.descriptor,
+  },
+};
+delete deleteManifest.assets.delta_matrix;
+delete deleteManifest.assets.metadata_delta;
+const deleteManifestBytes = encoder.encode(JSON.stringify(deleteManifest));
+files.set(
+  `${deleteTag}/catalog-index-v2.json`,
+  encoder.encode(
+    JSON.stringify({
+      schema_version: 2,
+      release_version: deleteTag,
+      catalogs: {
+        [key]: {
+          manifest_filename: "demo.manifest.json",
+          sha256: await sha256(deleteManifestBytes),
+        },
+      },
+    }),
+  ),
+);
+files.set(`${deleteTag}/demo.manifest.json`, deleteManifestBytes);
+files.set(
+  `${deleteTag}/${deleteOperations.descriptor.filename}`,
+  deleteOperations.compressed,
+);
+const deleteOnly = await client.load(deleteTag, key, {
+  previous: updatedWithoutMetadata,
+});
+assert.deepEqual(deleteOnly.records.map((record) => record.key), ["card:b:face:1"]);
 
 await assert.rejects(
   () => client.load("latest", key),

@@ -17,7 +17,11 @@ from urllib.request import Request, urlopen
 from collector_vision.catalog_v2 import CatalogV2, CatalogV2Error
 
 DEFAULT_REPOSITORY = "HanClinto/CollectorVisionCatalog"
-DEFAULT_CATALOG_V2_TAG = "catalog-v2-beta.3-2026-07-28"
+DEFAULT_CATALOG_V2_TAG = "catalog-v2-beta.4-2026-07-28"
+FEED_FILENAME = "catalog-feed-v2.json"
+DEFAULT_FEED_URL = (
+    f"https://hanclinto.github.io/CollectorVision/catalog-v2/{FEED_FILENAME}"
+)
 INDEX_FILENAME = "catalog-index-v2.json"
 _USER_AGENT = "CollectorVision-CatalogV2/0.1"
 _BETA_TAG = re.compile(r"^catalog-v2-beta\.[1-9][0-9]*-(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})$")
@@ -87,40 +91,62 @@ class CatalogV2Downloader:
         return downloader
 
     @classmethod
-    def install_for_game(
+    def install_from_feed(
         cls,
-        tag: str,
         *,
-        game: str,
-        source: str,
-        profile: str | None = None,
+        catalog_key: str,
         include_metadata: bool = False,
         cache_dir: str | Path | None = None,
-        repository: str = DEFAULT_REPOSITORY,
-        base_url: str | None = None,
-    ) -> tuple[CatalogV2Downloader, str]:
-        """Install the catalog selected by its public descriptor."""
-        _validate_tag(tag)
-        release_url = base_url or (
-            f"https://github.com/{repository}/releases/download/{quote(tag, safe='')}"
-        )
-        index_bytes = _fetch(f"{release_url}/{INDEX_FILENAME}")
-        index = _parse_index(index_bytes, tag)
-        catalog_key = _select_catalog_key(index, game=game, source=source, profile=profile)
+        feed_url: str = DEFAULT_FEED_URL,
+    ) -> CatalogV2Downloader:
+        """Install a catalog from the feed's bounded base-plus-delta chain."""
+        feed_bytes = _fetch(feed_url)
+        feed = _parse_feed(feed_bytes)
+        entry = _feed_entry(feed, catalog_key)
+        release_root = feed_url.rsplit("/", 1)[0]
+        references = [entry["base"], *entry["deltas"]]
+        previous_tag = None
+        downloader = None
+        for reference in references:
+            tag = reference.get("version", reference.get("to"))
+            if not isinstance(tag, str):
+                raise CatalogV2Error("catalog feed contains an invalid version")
+            downloader = cls.install(
+                tag,
+                catalog_keys=[catalog_key],
+                include_metadata=include_metadata,
+                cache_dir=cache_dir,
+                previous_tag=previous_tag,
+                base_url=f"{release_root}/{quote(tag, safe='')}",
+            )
+            _verify_feed_reference(downloader.index, catalog_key, reference)
+            previous_tag = tag
+        if downloader is None:
+            raise CatalogV2Error("catalog feed contains no installable release")
         root = _cache_root(cache_dir)
-        _write_immutable(root / tag / INDEX_FILENAME, index_bytes)
-        downloader = cls(
-            tag=tag,
-            cache_root=root,
-            index=index,
+        _write_mutable(_feed_cache_path(root, catalog_key), feed_bytes)
+        return downloader
+
+    @classmethod
+    def open_from_feed(
+        cls,
+        *,
+        catalog_key: str,
+        include_metadata: bool = False,
+        cache_dir: str | Path | None = None,
+    ) -> CatalogV2Downloader:
+        """Open the latest catalog recorded by the locally cached feed."""
+        root = _cache_root(cache_dir)
+        feed_path = _feed_cache_path(root, catalog_key)
+        if not feed_path.is_file():
+            raise FileNotFoundError("Catalog v2 feed is not installed")
+        entry = _feed_entry(_parse_feed(feed_path.read_bytes()), catalog_key)
+        latest = entry["base"]["version"] if not entry["deltas"] else entry["deltas"][-1]["to"]
+        return cls.open(
+            latest,
             include_metadata=include_metadata,
+            cache_dir=cache_dir,
         )
-        downloader._install_catalog(
-            catalog_key,
-            release_url=release_url,
-            previous_tag=None,
-        )
-        return downloader, catalog_key
 
     @classmethod
     def open(
@@ -160,16 +186,6 @@ class CatalogV2Downloader:
             expected_sha256=entry["sha256"],
         )
         return CatalogV2.load(manifest_path, include_metadata=self.include_metadata)
-
-    def catalog_for_game(
-        self,
-        *,
-        game: str,
-        source: str,
-        profile: str | None = None,
-    ) -> str:
-        """Resolve a catalog key from descriptors in this release."""
-        return _select_catalog_key(self.index, game=game, source=source, profile=profile)
 
     def _install_catalog(
         self,
@@ -214,8 +230,13 @@ class CatalogV2Downloader:
                     include_metadata=self.include_metadata,
                 )
             else:
-                asset_names = ["delta_operations", "delta_matrix"]
-                if self.include_metadata:
+                delta = manifest["delta"]
+                asset_names = []
+                if delta["operations"]:
+                    asset_names.append("delta_operations")
+                    if "delta_matrix" in manifest["assets"]:
+                        asset_names.append("delta_matrix")
+                if self.include_metadata and delta["metadata_operations"]:
                     asset_names.append("metadata_delta")
                 _download_assets(
                     release_url,
@@ -451,48 +472,60 @@ def _parse_index(payload: bytes, tag: str) -> dict:
     return value
 
 
-def _select_catalog_key(
-    index: dict,
-    *,
-    game: str,
-    source: str,
-    profile: str | None,
-) -> str:
-    matches: list[tuple[str, dict]] = []
-    for key, entry in index["catalogs"].items():
-        descriptor = entry.get("descriptor")
-        if not isinstance(descriptor, dict):
-            continue
-        if descriptor.get("game") != game or descriptor.get("source") != source:
-            continue
-        if profile is not None and descriptor.get("profile") != profile:
-            continue
-        matches.append((key, descriptor))
-    if profile is None:
-        recommended = [match for match in matches if match[1].get("recommended") is True]
-        if recommended:
-            matches = recommended
-    if len(matches) == 1:
-        return matches[0][0]
-    available = sorted(
-        profile_name
-        for entry in index["catalogs"].values()
-        if isinstance(entry, dict)
-        and isinstance(entry.get("descriptor"), dict)
-        and entry["descriptor"].get("game") == game
-        and entry["descriptor"].get("source") == source
-        and isinstance(profile_name := entry["descriptor"].get("profile"), str)
-    )
-    if not matches:
-        detail = f"; available profiles: {', '.join(available)}" if available else ""
-        raise ValueError(
-            f"no Catalog v2 catalog for game {game!r}, source {source!r}"
-            + (f", profile {profile!r}" if profile is not None else "")
-            + detail
-        )
-    raise ValueError(
-        f"multiple Catalog v2 catalogs match game {game!r} and source {source!r}; choose a profile"
-    )
+def _parse_feed(payload: bytes) -> dict:
+    value = _parse_json(payload, "catalog feed")
+    if value.get("schema_version") != 2:
+        raise CatalogV2Error("unsupported Catalog v2 feed schema")
+    if not isinstance(value.get("release_version"), str):
+        raise CatalogV2Error("catalog feed release_version must be a string")
+    catalogs = value.get("catalogs")
+    if not isinstance(catalogs, dict) or not catalogs:
+        raise CatalogV2Error("catalog feed catalogs must be a non-empty object")
+    return value
+
+
+def _feed_entry(feed: dict, catalog_key: str) -> dict:
+    entry = feed["catalogs"].get(catalog_key)
+    if not isinstance(entry, dict):
+        raise CatalogV2Error(f"catalog {catalog_key!r} is not present in the Catalog v2 feed")
+    base = entry.get("base")
+    deltas = entry.get("deltas")
+    if not isinstance(base, dict) or not isinstance(deltas, list):
+        raise CatalogV2Error("catalog feed entry must contain a base and delta list")
+    expected = base.get("version")
+    _validate_feed_reference(base, expected)
+    for delta in deltas:
+        if not isinstance(delta, dict) or delta.get("from") != expected:
+            raise CatalogV2Error("catalog feed delta chain is not contiguous")
+        expected = delta.get("to")
+        _validate_feed_reference(delta, expected)
+    return entry
+
+
+def _validate_feed_reference(reference: dict, version: object) -> None:
+    if not isinstance(version, str):
+        raise CatalogV2Error("catalog feed reference has an invalid version")
+    _validate_tag(version)
+    filename = reference.get("manifest_filename")
+    if not isinstance(filename, str) or Path(filename).name != filename:
+        raise CatalogV2Error("catalog feed reference has an invalid manifest filename")
+    checksum = reference.get("sha256")
+    if not isinstance(checksum, str) or len(checksum) != 64:
+        raise CatalogV2Error("catalog feed reference has an invalid checksum")
+
+
+def _verify_feed_reference(index: dict, catalog_key: str, reference: dict) -> None:
+    entry = index["catalogs"].get(catalog_key)
+    if not isinstance(entry, dict) or (
+        entry.get("manifest_filename") != reference["manifest_filename"]
+        or entry.get("sha256") != reference["sha256"]
+    ):
+        raise CatalogV2Error("catalog feed reference does not match its release index")
+
+
+def _feed_cache_path(root: Path, catalog_key: str) -> Path:
+    digest = hashlib.sha256(catalog_key.encode()).hexdigest()
+    return root / "feeds" / f"{digest}.json"
 
 
 def _parse_manifest(payload: bytes, catalog_key: str, tag: str) -> dict:
@@ -545,6 +578,16 @@ def _write_immutable(path: Path, payload: bytes) -> None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp-{uuid.uuid4().hex}")
+    try:
+        temporary.write_bytes(payload)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _write_mutable(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temporary.write_bytes(payload)
         os.replace(temporary, path)

@@ -71,7 +71,6 @@ class CatalogV2:
         game: str | Game,
         *,
         source: str | None = None,
-        profile: str | None = None,
         include_metadata: bool = False,
         cache_dir: str | Path | None = None,
         offline: bool = False,
@@ -80,7 +79,6 @@ class CatalogV2:
         loaded = self._for_game(
             game,
             source=source,
-            profile=profile,
             include_metadata=include_metadata,
             cache_dir=cache_dir,
             offline=offline,
@@ -219,7 +217,6 @@ class CatalogV2:
         game: str | Game,
         *,
         source: str | None = None,
-        profile: str | None = None,
         include_metadata: bool = False,
         cache_dir: str | Path | None = None,
         offline: bool = False,
@@ -227,9 +224,8 @@ class CatalogV2:
     ) -> CatalogV2:
         """Download or open a ready-to-search catalog for one game.
 
-        Defaults mirror :meth:`collector_vision.Catalog.for_game`: choose the
-        game's primary source and its recommended catalog. ``profile="cards"``
-        selects the compact Scryfall MTG catalog.
+        Defaults mirror :meth:`collector_vision.Catalog.for_game` by choosing
+        the game's primary source.
         """
         from collector_vision.catalog_v2_downloader import (
             DEFAULT_CATALOG_V2_TAG,
@@ -242,26 +238,39 @@ class CatalogV2:
         if descriptor_game is None:
             raise ValueError(f"Catalog v2 does not publish a catalog for {parsed_game.value!r}")
         selected_source = source or GAME_PRIMARY_SOURCE[parsed_game]
+        if selected_source == "scryfall" and parsed_game.value != "mtg":
+            raise ValueError("Scryfall Catalog v2 is only available for MTG")
         selected_version = version or DEFAULT_CATALOG_V2_TAG
+        catalog_name = "mtg" if selected_source == "scryfall" else descriptor_game
+        catalog_key = f"milo1/{selected_source}/{catalog_name}"
         if offline:
-            downloader = CatalogV2Downloader.open(
-                selected_version,
-                include_metadata=include_metadata,
-                cache_dir=cache_dir,
-            )
-            catalog_key = downloader.catalog_for_game(
-                game=descriptor_game,
-                source=selected_source,
-                profile=profile,
+            downloader = (
+                CatalogV2Downloader.open(
+                    selected_version,
+                    include_metadata=include_metadata,
+                    cache_dir=cache_dir,
+                )
+                if version is not None
+                else CatalogV2Downloader.open_from_feed(
+                    catalog_key=catalog_key,
+                    include_metadata=include_metadata,
+                    cache_dir=cache_dir,
+                )
             )
         else:
-            downloader, catalog_key = CatalogV2Downloader.install_for_game(
-                selected_version,
-                game=descriptor_game,
-                source=selected_source,
-                profile=profile,
-                include_metadata=include_metadata,
-                cache_dir=cache_dir,
+            downloader = (
+                CatalogV2Downloader.install(
+                    selected_version,
+                    catalog_keys=[catalog_key],
+                    include_metadata=include_metadata,
+                    cache_dir=cache_dir,
+                )
+                if version is not None
+                else CatalogV2Downloader.install_from_feed(
+                    catalog_key=catalog_key,
+                    include_metadata=include_metadata,
+                    cache_dir=cache_dir,
+                )
             )
         return downloader.load(catalog_key)
 
@@ -307,21 +316,28 @@ class CatalogV2:
         assets = manifest.get("assets")
         if not isinstance(assets, dict):
             raise CatalogV2Error("manifest assets must be an object")
-        operations_path = _asset_path(path.parent, assets, "delta_operations")
-        matrix_path = _asset_path(path.parent, assets, "delta_matrix")
-        _verify_asset(operations_path, assets["delta_operations"])
-        _verify_asset(matrix_path, assets["delta_matrix"])
-        operations = _read_jsonl_gzip(operations_path)
         expected_operations = _required_non_negative_int(delta, "operations", "manifest delta")
+        operations: list[dict]
+        if expected_operations:
+            operations_path = _asset_path(path.parent, assets, "delta_operations")
+            _verify_asset(operations_path, assets["delta_operations"])
+            operations = _read_jsonl_gzip(operations_path)
+        else:
+            operations = []
         if len(operations) != expected_operations:
             raise CatalogV2Error(
                 f"delta operation count mismatch: expected {expected_operations}, "
                 f"found {len(operations)}"
             )
 
-        with gzip.open(matrix_path, "rb") as stream:
-            matrix_bytes = stream.read()
         upsert_count = sum(operation.get("op") == "upsert" for operation in operations)
+        if upsert_count:
+            matrix_path = _asset_path(path.parent, assets, "delta_matrix")
+            _verify_asset(matrix_path, assets["delta_matrix"])
+            with gzip.open(matrix_path, "rb") as stream:
+                matrix_bytes = stream.read()
+        else:
+            matrix_bytes = b""
         expected_matrix_bytes = upsert_count * dim * np.dtype("<f2").itemsize
         if len(matrix_bytes) != expected_matrix_bytes:
             raise CatalogV2Error(
@@ -385,12 +401,15 @@ class CatalogV2:
                 raise CatalogV2Error(f"unsupported recognition delta operation {op!r}")
 
         if include_metadata:
-            metadata_path = _asset_path(path.parent, assets, "metadata_delta")
-            _verify_asset(metadata_path, assets["metadata_delta"])
-            metadata_operations = _read_jsonl_gzip(metadata_path)
             expected_metadata_operations = _required_non_negative_int(
                 delta, "metadata_operations", "manifest delta"
             )
+            if expected_metadata_operations:
+                metadata_path = _asset_path(path.parent, assets, "metadata_delta")
+                _verify_asset(metadata_path, assets["metadata_delta"])
+                metadata_operations = _read_jsonl_gzip(metadata_path)
+            else:
+                metadata_operations = []
             if len(metadata_operations) != expected_metadata_operations:
                 raise CatalogV2Error(
                     "metadata delta operation count mismatch: "
