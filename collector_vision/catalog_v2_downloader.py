@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 from collector_vision.catalog_v2 import CatalogV2, CatalogV2Error
 
 DEFAULT_REPOSITORY = "HanClinto/CollectorVisionCatalog"
-DEFAULT_CATALOG_V2_TAG = "catalog-v2-beta.4-2026-07-28"
+DEFAULT_CATALOG_V2_TAG = "catalog-v2-beta.5-2026-07-28"
 FEED_FILENAME = "catalog-feed-v2.json"
 DEFAULT_FEED_URL = f"https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/{FEED_FILENAME}"
 INDEX_FILENAME = "catalog-index-v2.json"
@@ -248,9 +248,9 @@ class CatalogV2Downloader:
                 if "to" in feed_reference and previous is None:
                     raise CatalogV2Error("catalog feed delta is missing its exact base")
             if previous is None:
-                asset_names = ["recognition_rows", "recognition_matrix"]
+                asset_names = ["identifiers", "embeddings"]
                 if self.include_metadata:
-                    asset_names.append("metadata_rows")
+                    asset_names.append("metadata")
                 if feed_reference is None:
                     _download_assets(
                         release_url,
@@ -273,9 +273,9 @@ class CatalogV2Downloader:
                 delta = manifest["delta"]
                 asset_names = []
                 if delta["operations"]:
-                    asset_names.append("delta_operations")
-                    if "delta_matrix" in manifest["assets"]:
-                        asset_names.append("delta_matrix")
+                    asset_names.append("identifiers_delta")
+                    if "embeddings_delta" in manifest["assets"]:
+                        asset_names.append("embeddings_delta")
                 if self.include_metadata and delta["metadata_operations"]:
                     asset_names.append("metadata_delta")
                 if feed_reference is None:
@@ -361,7 +361,7 @@ def _materialize_snapshot(
     manifest: dict,
     manifest_path: Path,
 ) -> None:
-    recognition_payload = b"".join(
+    identifiers_payload = b"".join(
         json.dumps(
             {
                 "key": record.key,
@@ -376,24 +376,24 @@ def _materialize_snapshot(
         + b"\n"
         for record in catalog.records
     )
-    recognition_asset = manifest["assets"]["recognition_rows"]
-    matrix_asset = manifest["assets"]["recognition_matrix"]
-    recognition_path = manifest_path.parent / recognition_asset["filename"]
-    matrix_path = manifest_path.parent / matrix_asset["filename"]
-    generated_recognition = _write_gzip_asset(
-        recognition_path,
-        recognition_payload,
+    identifiers_asset = manifest["assets"]["identifiers"]
+    embeddings_asset = manifest["assets"]["embeddings"]
+    identifiers_path = manifest_path.parent / identifiers_asset["filename"]
+    embeddings_path = manifest_path.parent / embeddings_asset["filename"]
+    generated_identifiers = _write_gzip_asset(
+        identifiers_path,
+        identifiers_payload,
         content_type="application/x-ndjson",
     )
-    generated_matrix = _write_gzip_asset(
-        matrix_path,
+    generated_embeddings = _write_gzip_asset(
+        embeddings_path,
         catalog.embeddings.astype("<f2", copy=False).tobytes(order="C"),
         content_type="application/octet-stream",
     )
-    _verify_materialized_asset("recognition_rows", generated_recognition, recognition_asset)
-    _verify_materialized_asset("recognition_matrix", generated_matrix, matrix_asset)
+    _verify_materialized_asset("identifiers", generated_identifiers, identifiers_asset)
+    _verify_materialized_asset("embeddings", generated_embeddings, embeddings_asset)
     if catalog.metadata_loaded:
-        metadata_asset = manifest["assets"]["metadata_rows"]
+        metadata_asset = manifest["assets"]["metadata"]
         metadata_payload = b"".join(
             json.dumps(
                 {"key": record.key, "metadata": dict(record.metadata)},
@@ -411,7 +411,7 @@ def _materialize_snapshot(
             metadata_payload,
             content_type="application/x-ndjson",
         )
-        _verify_materialized_asset("metadata_rows", generated_metadata, metadata_asset)
+        _verify_materialized_asset("metadata", generated_metadata, metadata_asset)
 
 
 def _write_gzip_asset(path: Path, payload: bytes, *, content_type: str) -> dict:
@@ -585,8 +585,8 @@ def _validate_feed_stage(reference: dict, version: object, *, is_delta: bool) ->
         raise CatalogV2Error("catalog feed stage assets must be an object")
     if is_delta and not assets:
         raise CatalogV2Error("catalog feed delta must contain assets")
-    if not is_delta and not {"recognition_rows", "recognition_matrix"}.issubset(assets):
-        raise CatalogV2Error("catalog feed base lacks recognition assets")
+    if not is_delta and not {"identifiers", "embeddings"}.issubset(assets):
+        raise CatalogV2Error("catalog feed base lacks required assets")
     for asset in assets.values():
         _validate_file_reference(asset, version)
 
@@ -634,9 +634,9 @@ def _index_for_feed_reference(tag: str, catalog_key: str, reference: dict) -> di
 
 def _verify_feed_assets(reference: dict, manifest: dict) -> None:
     names = (
-        ("delta_operations", "delta_matrix", "metadata_delta")
+        ("identifiers_delta", "embeddings_delta", "metadata_delta")
         if "to" in reference
-        else ("recognition_rows", "recognition_matrix", "metadata_rows")
+        else ("identifiers", "embeddings", "metadata")
     )
     expected = {name for name in names if name in manifest["assets"]}
     assets = reference["assets"]

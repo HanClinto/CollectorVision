@@ -59,17 +59,17 @@ def _write_catalog(tmp_path: Path) -> Path:
     ]
     embeddings = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype="<f2")
     assets = {
-        "recognition_rows": _write_gzip(
-            tmp_path / "demo.recognition.jsonl.gz",
+        "identifiers": _write_gzip(
+            tmp_path / "demo.identifiers.jsonl.gz",
             b"".join(
                 json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
                 for row in recognition
             ),
         ),
-        "recognition_matrix": _write_gzip(
-            tmp_path / "demo.recognition.f16.gz", embeddings.tobytes()
+        "embeddings": _write_gzip(
+            tmp_path / "demo.embeddings.f16.gz", embeddings.tobytes()
         ),
-        "metadata_rows": _write_gzip(
+        "metadata": _write_gzip(
             tmp_path / "demo.metadata.jsonl.gz",
             b"".join(
                 json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
@@ -187,7 +187,7 @@ def test_constructor_rejects_scryfall_for_non_mtg_game() -> None:
 
 def test_rejects_tampered_asset(tmp_path: Path) -> None:
     manifest_path = _write_catalog(tmp_path)
-    matrix_path = tmp_path / "demo.recognition.f16.gz"
+    matrix_path = tmp_path / "demo.embeddings.f16.gz"
     matrix_path.write_bytes(matrix_path.read_bytes() + b"tampered")
 
     with pytest.raises(CatalogV2Error, match="size mismatch"):
@@ -197,7 +197,7 @@ def test_rejects_tampered_asset(tmp_path: Path) -> None:
 def test_rejects_asset_path_traversal(tmp_path: Path) -> None:
     manifest_path = _write_catalog(tmp_path)
     manifest = json.loads(manifest_path.read_text())
-    manifest["assets"]["recognition_rows"]["filename"] = "../outside.jsonl.gz"
+    manifest["assets"]["identifiers"]["filename"] = "../outside.jsonl.gz"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     with pytest.raises(CatalogV2Error, match="filename must be a basename"):
@@ -206,14 +206,14 @@ def test_rejects_asset_path_traversal(tmp_path: Path) -> None:
 
 def test_rejects_missing_result_identifier(tmp_path: Path) -> None:
     manifest_path = _write_catalog(tmp_path)
-    records_path = tmp_path / "demo.recognition.jsonl.gz"
+    records_path = tmp_path / "demo.identifiers.jsonl.gz"
     asset = _write_gzip(
         records_path,
         b'{"key":"card:a:face:0","identifiers":{"other":"a"}}\n'
         b'{"key":"card:b:face:1","identifiers":{"source_card":"b"}}\n',
     )
     manifest = json.loads(manifest_path.read_text())
-    manifest["assets"]["recognition_rows"] = asset
+    manifest["assets"]["identifiers"] = asset
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     with pytest.raises(CatalogV2Error, match="lacks result identifier"):
@@ -256,12 +256,12 @@ def test_applies_exact_base_delta_with_independent_metadata(tmp_path: Path) -> N
         {"op": "upsert", "key": "card:b:face:1", "metadata": {"name": "Beta 2"}},
         {"op": "upsert", "key": "card:c:face:0", "metadata": {"name": "Gamma"}},
     ]
-    manifest["assets"]["delta_operations"] = _write_gzip(
+    manifest["assets"]["identifiers_delta"] = _write_gzip(
         tmp_path / "demo.delta.jsonl.gz",
         b"".join(json.dumps(value).encode() + b"\n" for value in operations),
     )
-    manifest["assets"]["delta_matrix"] = _write_gzip(
-        tmp_path / "demo.delta.f16.gz",
+    manifest["assets"]["embeddings_delta"] = _write_gzip(
+        tmp_path / "demo.embeddings.delta.f16.gz",
         np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype="<f2").tobytes(),
     )
     manifest["assets"]["metadata_delta"] = _write_gzip(
@@ -403,7 +403,7 @@ def test_release_installer_materializes_one_step_delta(
                     "assets": {
                         name: reference(descriptor["filename"], descriptor)
                         for name, descriptor in target_payload["assets"].items()
-                        if name in {"recognition_rows", "recognition_matrix", "metadata_rows"}
+                        if name in {"identifiers", "embeddings", "metadata"}
                     },
                 },
                 "deltas": [],

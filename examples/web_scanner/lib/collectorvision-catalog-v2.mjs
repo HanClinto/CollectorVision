@@ -338,16 +338,16 @@ export class CatalogV2BrowserClient {
     const records = parseRecognitionRows(
       await this.#fetchGzipAsset(
         baseUrl,
-        manifest.assets.recognition_rows,
-        feedAssets?.recognition_rows,
+        manifest.assets.identifiers,
+        feedAssets?.identifiers,
       ),
       manifest,
     );
     const embeddings = parseFloat16Matrix(
       await this.#fetchGzipAsset(
         baseUrl,
-        manifest.assets.recognition_matrix,
-        feedAssets?.recognition_matrix,
+        manifest.assets.embeddings,
+        feedAssets?.embeddings,
       ),
       manifest.rows,
       manifest.dim,
@@ -359,10 +359,10 @@ export class CatalogV2BrowserClient {
         parseJsonLines(
           await this.#fetchGzipAsset(
             baseUrl,
-            manifest.assets.metadata_rows,
-            feedAssets?.metadata_rows,
+            manifest.assets.metadata,
+            feedAssets?.metadata,
           ),
-          "metadata rows",
+          "metadata",
         ),
       );
       metadataLoaded = true;
@@ -377,10 +377,10 @@ export class CatalogV2BrowserClient {
         : parseJsonLines(
             await this.#fetchGzipAsset(
               baseUrl,
-              manifest.assets.delta_operations,
-              feedAssets?.delta_operations,
+              manifest.assets.identifiers_delta,
+              feedAssets?.identifiers_delta,
             ),
-            "delta operations",
+            "identifier delta operations",
           );
     if (operations.length !== manifest.delta.operations) {
       throw new CatalogV2Error("delta operation count does not match manifest");
@@ -392,8 +392,8 @@ export class CatalogV2BrowserClient {
         : parseFloat16Matrix(
             await this.#fetchGzipAsset(
               baseUrl,
-              manifest.assets.delta_matrix,
-              feedAssets?.delta_matrix,
+              manifest.assets.embeddings_delta,
+              feedAssets?.embeddings_delta,
             ),
             upserts.length,
             manifest.dim,
@@ -588,10 +588,9 @@ function validateFeedStage(reference, version, isDelta) {
   }
   if (
     !isDelta &&
-    (!("recognition_rows" in reference.assets) ||
-      !("recognition_matrix" in reference.assets))
+    (!("identifiers" in reference.assets) || !("embeddings" in reference.assets))
   ) {
-    throw new CatalogV2Error("catalog feed base lacks recognition assets");
+    throw new CatalogV2Error("catalog feed base lacks required assets");
   }
   for (const asset of Object.values(reference.assets)) {
     validateFileReference(asset, version);
@@ -620,8 +619,8 @@ function validateFileReference(reference, version) {
 function validateFeedAssets(reference, manifest) {
   const names =
     reference.to === undefined
-      ? ["recognition_rows", "recognition_matrix", "metadata_rows"]
-      : ["delta_operations", "delta_matrix", "metadata_delta"];
+      ? ["identifiers", "embeddings", "metadata"]
+      : ["identifiers_delta", "embeddings_delta", "metadata_delta"];
   const expected = names.filter((name) => name in manifest.assets).sort();
   const actual = Object.keys(reference.assets).sort();
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -670,7 +669,7 @@ function validateManifest(manifest, tag, catalogKey) {
 }
 
 function parseRecognitionRows(bytes, manifest) {
-  const values = parseJsonLines(bytes, "recognition rows");
+  const values = parseJsonLines(bytes, "identifiers");
   if (values.length !== manifest.rows) throw new CatalogV2Error("recognition row count mismatch");
   const keys = new Set();
   return values.map((value) => {

@@ -56,13 +56,13 @@ function fp16(values) {
 
 async function fixture() {
   const rows = await asset(
-    "demo.recognition.jsonl.gz",
+    "demo.identifiers.jsonl.gz",
     jsonLines([
       { key: "card:a:face:0", identifiers: { source_card: "a" } },
       { key: "card:b:face:1", identifiers: { source_card: "b" }, face_index: 1 },
     ]),
   );
-  const matrix = await asset("demo.recognition.f16.gz", fp16([0x3c00, 0, 0, 0x3c00]));
+  const matrix = await asset("demo.embeddings.f16.gz", fp16([0x3c00, 0, 0, 0x3c00]));
   const metadata = await asset(
     "demo.metadata.jsonl.gz",
     jsonLines([
@@ -87,9 +87,9 @@ async function fixture() {
       recommended: true,
     },
     assets: {
-      recognition_rows: rows.descriptor,
-      recognition_matrix: matrix.descriptor,
-      metadata_rows: metadata.descriptor,
+      identifiers: rows.descriptor,
+      embeddings: matrix.descriptor,
+      metadata: metadata.descriptor,
     },
   };
   const manifestBytes = encoder.encode(JSON.stringify(manifest));
@@ -123,9 +123,9 @@ async function fixture() {
                   size: manifestBytes.byteLength,
                 },
                 assets: {
-                  recognition_rows: fileReference(tag, rows.descriptor),
-                  recognition_matrix: fileReference(tag, matrix.descriptor),
-                  metadata_rows: fileReference(tag, metadata.descriptor),
+                  identifiers: fileReference(tag, rows.descriptor),
+                  embeddings: fileReference(tag, matrix.descriptor),
+                  metadata: fileReference(tag, metadata.descriptor),
                 },
               },
               deltas: [],
@@ -211,7 +211,7 @@ const operations = await asset(
     },
   ]),
 );
-const deltaMatrix = await asset("demo.delta.f16.gz", fp16([0x3c00, 0]));
+const deltaMatrix = await asset("demo.embeddings.delta.f16.gz", fp16([0x3c00, 0]));
 const metadataDelta = await asset(
   "demo.metadata.delta.jsonl.gz",
   jsonLines([
@@ -231,8 +231,8 @@ const nextManifest = {
 };
 nextManifest.assets = {
   ...nextManifest.assets,
-  delta_operations: operations.descriptor,
-  delta_matrix: deltaMatrix.descriptor,
+  identifiers_delta: operations.descriptor,
+  embeddings_delta: deltaMatrix.descriptor,
   metadata_delta: metadataDelta.descriptor,
 };
 const nextManifestBytes = encoder.encode(JSON.stringify(nextManifest));
@@ -272,20 +272,20 @@ files.set(
               size: files.get(`${tag}/demo.manifest.json`).byteLength,
             },
             assets: {
-              recognition_rows: fileReference(
+              identifiers: fileReference(
                 tag,
                 JSON.parse(new TextDecoder().decode(files.get(`${tag}/demo.manifest.json`))).assets
-                  .recognition_rows,
+                  .identifiers,
               ),
-              recognition_matrix: fileReference(
+              embeddings: fileReference(
                 tag,
                 JSON.parse(new TextDecoder().decode(files.get(`${tag}/demo.manifest.json`))).assets
-                  .recognition_matrix,
+                  .embeddings,
               ),
-              metadata_rows: fileReference(
+              metadata: fileReference(
                 tag,
                 JSON.parse(new TextDecoder().decode(files.get(`${tag}/demo.manifest.json`))).assets
-                  .metadata_rows,
+                  .metadata,
               ),
             },
           },
@@ -299,8 +299,8 @@ files.set(
                 size: nextManifestBytes.byteLength,
               },
               assets: {
-                delta_operations: fileReference(nextTag, operations.descriptor),
-                delta_matrix: fileReference(nextTag, deltaMatrix.descriptor),
+                identifiers_delta: fileReference(nextTag, operations.descriptor),
+                embeddings_delta: fileReference(nextTag, deltaMatrix.descriptor),
                 metadata_delta: fileReference(nextTag, metadataDelta.descriptor),
               },
             },
@@ -349,10 +349,10 @@ const deleteManifest = {
   },
   assets: {
     ...nextManifest.assets,
-    delta_operations: deleteOperations.descriptor,
+    identifiers_delta: deleteOperations.descriptor,
   },
 };
-delete deleteManifest.assets.delta_matrix;
+delete deleteManifest.assets.embeddings_delta;
 delete deleteManifest.assets.metadata_delta;
 const deleteManifestBytes = encoder.encode(JSON.stringify(deleteManifest));
 files.set(
@@ -385,7 +385,7 @@ await assert.rejects(
   /explicit immutable beta tag/,
 );
 const tampered = new Map(files);
-tampered.set(`${tag}/demo.recognition.f16.gz`, new Uint8Array([1, 2, 3]));
+tampered.set(`${tag}/demo.embeddings.f16.gz`, new Uint8Array([1, 2, 3]));
 const tamperedClient = new CatalogV2BrowserClient({
   releaseBaseUrl: "https://catalog.test/",
   fetchImpl: mockFetch(tampered),

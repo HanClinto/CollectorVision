@@ -164,21 +164,21 @@ class CatalogV2:
         if not isinstance(assets, dict):
             raise CatalogV2Error("manifest assets must be an object")
 
-        recognition_rows = _asset_path(path.parent, assets, "recognition_rows")
-        recognition_matrix = _asset_path(path.parent, assets, "recognition_matrix")
-        _verify_asset(recognition_rows, assets["recognition_rows"])
-        _verify_asset(recognition_matrix, assets["recognition_matrix"])
+        identifiers_path = _asset_path(path.parent, assets, "identifiers")
+        embeddings_path = _asset_path(path.parent, assets, "embeddings")
+        _verify_asset(identifiers_path, assets["identifiers"])
+        _verify_asset(embeddings_path, assets["embeddings"])
 
-        raw_records = _read_jsonl_gzip(recognition_rows)
+        raw_records = _read_jsonl_gzip(identifiers_path)
         if len(raw_records) != rows:
             raise CatalogV2Error(
-                f"recognition row count mismatch: expected {rows}, found {len(raw_records)}"
+                f"identifier count mismatch: expected {rows}, found {len(raw_records)}"
             )
         metadata_by_key: dict[str, Mapping[str, Any]] = {}
         if include_metadata:
-            metadata_rows = _asset_path(path.parent, assets, "metadata_rows")
-            _verify_asset(metadata_rows, assets["metadata_rows"])
-            metadata_by_key = _parse_metadata(_read_jsonl_gzip(metadata_rows))
+            metadata_path = _asset_path(path.parent, assets, "metadata")
+            _verify_asset(metadata_path, assets["metadata"])
+            metadata_by_key = _parse_metadata(_read_jsonl_gzip(metadata_path))
 
         records = _parse_records(
             raw_records,
@@ -191,12 +191,12 @@ class CatalogV2:
                 f"metadata contains unknown recognition key {min(unknown_metadata)!r}"
             )
 
-        with gzip.open(recognition_matrix, "rb") as stream:
+        with gzip.open(embeddings_path, "rb") as stream:
             matrix_bytes = stream.read()
         expected_bytes = rows * dim * np.dtype("<f2").itemsize
         if len(matrix_bytes) != expected_bytes:
             raise CatalogV2Error(
-                f"recognition matrix size mismatch: expected {expected_bytes}, "
+                f"embedding matrix size mismatch: expected {expected_bytes}, "
                 f"found {len(matrix_bytes)}"
             )
         embeddings = np.frombuffer(matrix_bytes, dtype="<f2").reshape(rows, dim).copy()
@@ -319,8 +319,8 @@ class CatalogV2:
         expected_operations = _required_non_negative_int(delta, "operations", "manifest delta")
         operations: list[dict]
         if expected_operations:
-            operations_path = _asset_path(path.parent, assets, "delta_operations")
-            _verify_asset(operations_path, assets["delta_operations"])
+            operations_path = _asset_path(path.parent, assets, "identifiers_delta")
+            _verify_asset(operations_path, assets["identifiers_delta"])
             operations = _read_jsonl_gzip(operations_path)
         else:
             operations = []
@@ -332,8 +332,8 @@ class CatalogV2:
 
         upsert_count = sum(operation.get("op") == "upsert" for operation in operations)
         if upsert_count:
-            matrix_path = _asset_path(path.parent, assets, "delta_matrix")
-            _verify_asset(matrix_path, assets["delta_matrix"])
+            matrix_path = _asset_path(path.parent, assets, "embeddings_delta")
+            _verify_asset(matrix_path, assets["embeddings_delta"])
             with gzip.open(matrix_path, "rb") as stream:
                 matrix_bytes = stream.read()
         else:
