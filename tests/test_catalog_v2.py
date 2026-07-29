@@ -402,10 +402,13 @@ def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
     )
 
     assert installed.tag == target_tag
-    assert CatalogV2Downloader.open_from_feed(
-        catalog_key="milo1/test/demo",
-        cache_dir=feed_cache,
-    ).tag == target_tag
+    assert (
+        CatalogV2Downloader.open_from_feed(
+            catalog_key="milo1/test/demo",
+            cache_dir=feed_cache,
+        ).tag
+        == target_tag
+    )
 
 
 def test_release_installer_falls_back_for_incompatible_exact_base(

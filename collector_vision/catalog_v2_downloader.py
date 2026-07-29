@@ -19,9 +19,7 @@ from collector_vision.catalog_v2 import CatalogV2, CatalogV2Error
 DEFAULT_REPOSITORY = "HanClinto/CollectorVisionCatalog"
 DEFAULT_CATALOG_V2_TAG = "catalog-v2-beta.4-2026-07-28"
 FEED_FILENAME = "catalog-feed-v2.json"
-DEFAULT_FEED_URL = (
-    f"https://hanclinto.github.io/CollectorVision/catalog-v2/{FEED_FILENAME}"
-)
+DEFAULT_FEED_URL = f"https://hanclinto.github.io/CollectorVision/catalog-v2/{FEED_FILENAME}"
 INDEX_FILENAME = "catalog-index-v2.json"
 _USER_AGENT = "CollectorVision-CatalogV2/0.1"
 _BETA_TAG = re.compile(r"^catalog-v2-beta\.[1-9][0-9]*-(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})$")
