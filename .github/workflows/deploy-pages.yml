@@ -123,10 +123,15 @@ jobs:
           )"
           rm -rf examples/web_scanner/catalog-v2
           mkdir -p examples/web_scanner/catalog-v2
-          if ! gh release download "$CATALOG_V2_RELEASE" \
-            --repo HanClinto/CollectorVisionCatalog \
-            --pattern "catalog-feed-v2.json" \
-            --dir examples/web_scanner/catalog-v2; then
+          if ! curl --fail --location --silent --show-error \
+            https://raw.githubusercontent.com/HanClinto/CollectorVisionCatalog/main/catalog-feed-v2.json \
+            --output examples/web_scanner/catalog-v2/catalog-feed-v2.json; then
+            if gh release download "$CATALOG_V2_RELEASE" \
+              --repo HanClinto/CollectorVisionCatalog \
+              --pattern "catalog-feed-v2.json" \
+              --dir examples/web_scanner/catalog-v2; then
+              echo "Using immutable release feed fallback"
+            else
             CATALOG_V2_DIR="examples/web_scanner/catalog-v2/$CATALOG_V2_RELEASE"
             mkdir -p "$CATALOG_V2_DIR"
             gh release download "$CATALOG_V2_RELEASE" \
@@ -160,6 +165,7 @@ jobs:
               json.dumps(feed, sort_keys=True, separators=(",", ":")) + "\n"
           )
           PY
+            fi
           fi
 
           declare -A CATALOG_V2_ROLES
