@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import collector_vision.catalog_v2_downloader as downloader_module
 from collector_vision.catalog_v2 import CatalogV2, CatalogV2Error
 from collector_vision.catalog_v2_downloader import CatalogV2Downloader
 
@@ -326,7 +327,10 @@ def test_release_installer_uses_separate_v2_cache(tmp_path: Path) -> None:
     assert not (cache / "catalogs").exists()
 
 
-def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
+def test_release_installer_materializes_one_step_delta(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     release_root = tmp_path / "releases"
     base_tag = "catalog-v2-beta.1-2026-07-24"
     base_source = release_root / base_tag
@@ -370,30 +374,54 @@ def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
         np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype="<f2"),
     )
 
+    for asset in base_source.glob("*.gz"):
+        (target_source / asset.name).write_bytes(asset.read_bytes())
+    target_payload = json.loads(target_manifest.read_text())
+
+    def reference(filename: str, descriptor: dict) -> dict:
+        return {
+            "url": f"https://catalog.test/{target_tag}/{filename}",
+            "sha256": descriptor["sha256"],
+            "size": descriptor["size"],
+        }
+
     feed = {
         "schema_version": 2,
         "release_version": target_tag,
+        "checked_at": "2026-07-25T12:00:00Z",
+        "source_updated_at": "2026-07-25T00:00:00Z",
         "catalogs": {
             "milo1/test/demo": {
+                "source_updated_at": "2026-07-25T00:00:00Z",
                 "base": {
-                    "version": base_tag,
-                    "manifest_filename": base_manifest.name,
-                    "sha256": hashlib.sha256(base_manifest.read_bytes()).hexdigest(),
-                },
-                "deltas": [
-                    {
-                        "from": base_tag,
-                        "to": target_tag,
-                        "manifest_filename": target_manifest.name,
+                    "version": target_tag,
+                    "manifest": {
+                        "url": f"https://catalog.test/{target_tag}/{target_manifest.name}",
                         "sha256": hashlib.sha256(target_manifest.read_bytes()).hexdigest(),
-                    }
-                ],
+                        "size": target_manifest.stat().st_size,
+                    },
+                    "assets": {
+                        name: reference(descriptor["filename"], descriptor)
+                        for name, descriptor in target_payload["assets"].items()
+                        if name in {"recognition_rows", "recognition_matrix", "metadata_rows"}
+                    },
+                },
+                "deltas": [],
             }
         },
     }
     feed_path = release_root / "catalog-feed-v2.json"
     feed_path.write_text(json.dumps(feed), encoding="utf-8")
     feed_cache = tmp_path / "feed-cache"
+    original_fetch = downloader_module._fetch
+
+    def fetch(url: str) -> bytes:
+        if url.startswith("https://catalog.test/"):
+            relative = url.removeprefix("https://catalog.test/")
+            return (release_root / relative).read_bytes()
+        return original_fetch(url)
+
+    monkeypatch.setattr(downloader_module, "_fetch", fetch)
 
     installed = CatalogV2Downloader.install_from_feed(
         catalog_key="milo1/test/demo",
@@ -409,6 +437,8 @@ def test_release_installer_materializes_one_step_delta(tmp_path: Path) -> None:
         ).tag
         == target_tag
     )
+    reopened = CatalogV2Downloader.open(target_tag, cache_dir=feed_cache)
+    assert reopened.load("milo1/test/demo").version == target_tag
 
 
 def test_release_installer_falls_back_for_incompatible_exact_base(

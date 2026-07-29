@@ -18,7 +18,8 @@ score, card_id = catalog.search(embedding, top_k=1)[0]
 `Game.MTG` is accepted too. Construction downloads the catalog when needed and
 reuses its cache afterward. The default source is Scryfall for MTG and
 TCGplayer for the other supported games. A small discovery feed selects a
-bounded base-plus-delta chain; release manifests still verify every asset.
+bounded base-plus-delta chain. The feed includes absolute URLs, checksums, and
+sizes for every client file, plus upstream and last-checked timestamps.
 
 Load names, sets, languages, finishes, and peer IDs only when needed:
 

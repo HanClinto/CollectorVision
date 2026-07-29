@@ -11,7 +11,7 @@ import shutil
 import uuid
 from datetime import date
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlparse
 from urllib.request import Request, urlopen
 
 from collector_vision.catalog_v2 import CatalogV2, CatalogV2Error
@@ -19,7 +19,7 @@ from collector_vision.catalog_v2 import CatalogV2, CatalogV2Error
 DEFAULT_REPOSITORY = "HanClinto/CollectorVisionCatalog"
 DEFAULT_CATALOG_V2_TAG = "catalog-v2-beta.4-2026-07-28"
 FEED_FILENAME = "catalog-feed-v2.json"
-DEFAULT_FEED_URL = f"https://hanclinto.github.io/CollectorVision/catalog-v2/{FEED_FILENAME}"
+DEFAULT_FEED_URL = f"https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/{FEED_FILENAME}"
 INDEX_FILENAME = "catalog-index-v2.json"
 _USER_AGENT = "CollectorVision-CatalogV2/0.1"
 _BETA_TAG = re.compile(r"^catalog-v2-beta\.[1-9][0-9]*-(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})$")
@@ -101,27 +101,39 @@ class CatalogV2Downloader:
         feed_bytes = _fetch(feed_url)
         feed = _parse_feed(feed_bytes)
         entry = _feed_entry(feed, catalog_key)
-        release_root = feed_url.rsplit("/", 1)[0]
         references = [entry["base"], *entry["deltas"]]
-        previous_tag = None
+        root = _cache_root(cache_dir)
+        previous = None
         downloader = None
         for reference in references:
             tag = reference.get("version", reference.get("to"))
             if not isinstance(tag, str):
                 raise CatalogV2Error("catalog feed contains an invalid version")
-            downloader = cls.install(
-                tag,
-                catalog_keys=[catalog_key],
+            index = _index_for_feed_reference(tag, catalog_key, reference)
+            index_bytes = json.dumps(
+                index,
+                allow_nan=False,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            _write_immutable(root / tag / INDEX_FILENAME, index_bytes)
+            downloader = cls(
+                tag=tag,
+                cache_root=root,
+                index=index,
                 include_metadata=include_metadata,
-                cache_dir=cache_dir,
-                previous_tag=previous_tag,
-                base_url=f"{release_root}/{quote(tag, safe='')}",
             )
-            _verify_feed_reference(downloader.index, catalog_key, reference)
-            previous_tag = tag
+            downloader._install_catalog(
+                catalog_key,
+                release_url="",
+                previous_tag=None,
+                previous_catalog=previous,
+                feed_reference=reference,
+            )
+            previous = downloader.load(catalog_key)
         if downloader is None:
             raise CatalogV2Error("catalog feed contains no installable release")
-        root = _cache_root(cache_dir)
         _write_mutable(_feed_cache_path(root, catalog_key), feed_bytes)
         return downloader
 
@@ -139,11 +151,15 @@ class CatalogV2Downloader:
         if not feed_path.is_file():
             raise FileNotFoundError("Catalog v2 feed is not installed")
         entry = _feed_entry(_parse_feed(feed_path.read_bytes()), catalog_key)
-        latest = entry["base"]["version"] if not entry["deltas"] else entry["deltas"][-1]["to"]
-        return cls.open(
-            latest,
+        reference = entry["base"] if not entry["deltas"] else entry["deltas"][-1]
+        latest = reference.get("version", reference.get("to"))
+        if not isinstance(latest, str):
+            raise CatalogV2Error("catalog feed contains an invalid latest version")
+        return cls(
+            tag=latest,
+            cache_root=root,
+            index=_index_for_feed_reference(latest, catalog_key, reference),
             include_metadata=include_metadata,
-            cache_dir=cache_dir,
         )
 
     @classmethod
@@ -191,6 +207,8 @@ class CatalogV2Downloader:
         *,
         release_url: str,
         previous_tag: str | None,
+        previous_catalog: CatalogV2 | None = None,
+        feed_reference: dict | None = None,
     ) -> None:
         entry = self._entry(catalog_key)
         manifest_filename = entry["manifest_filename"]
@@ -202,27 +220,51 @@ class CatalogV2Downloader:
         temporary = destination.with_name(f".{destination.name}.tmp-{uuid.uuid4().hex}")
         temporary.mkdir(parents=True)
         try:
-            manifest_bytes = _fetch(f"{release_url}/{manifest_filename}")
+            manifest_url = (
+                f"{release_url}/{manifest_filename}"
+                if feed_reference is None
+                else feed_reference["manifest"]["url"]
+            )
+            manifest_bytes = _fetch(manifest_url)
             _verify_bytes(
                 manifest_filename,
                 manifest_bytes,
                 expected_sha256=entry["sha256"],
+                expected_size=(
+                    None if feed_reference is None else feed_reference["manifest"]["size"]
+                ),
             )
             manifest = _parse_manifest(manifest_bytes, catalog_key, self.tag)
             manifest_path = temporary / manifest_filename
             manifest_path.write_bytes(manifest_bytes)
 
-            previous = self._load_exact_base(catalog_key, manifest, previous_tag)
+            previous = (
+                previous_catalog
+                if previous_catalog is not None
+                else self._load_exact_base(catalog_key, manifest, previous_tag)
+            )
+            if feed_reference is not None:
+                _verify_feed_assets(feed_reference, manifest)
+                if "to" in feed_reference and previous is None:
+                    raise CatalogV2Error("catalog feed delta is missing its exact base")
             if previous is None:
                 asset_names = ["recognition_rows", "recognition_matrix"]
                 if self.include_metadata:
                     asset_names.append("metadata_rows")
-                _download_assets(
-                    release_url,
-                    temporary,
-                    manifest["assets"],
-                    asset_names,
-                )
+                if feed_reference is None:
+                    _download_assets(
+                        release_url,
+                        temporary,
+                        manifest["assets"],
+                        asset_names,
+                    )
+                else:
+                    _download_feed_assets(
+                        temporary,
+                        feed_reference["assets"],
+                        asset_names,
+                        self.tag,
+                    )
                 CatalogV2.load(
                     manifest_path,
                     include_metadata=self.include_metadata,
@@ -236,12 +278,20 @@ class CatalogV2Downloader:
                         asset_names.append("delta_matrix")
                 if self.include_metadata and delta["metadata_operations"]:
                     asset_names.append("metadata_delta")
-                _download_assets(
-                    release_url,
-                    temporary,
-                    manifest["assets"],
-                    asset_names,
-                )
+                if feed_reference is None:
+                    _download_assets(
+                        release_url,
+                        temporary,
+                        manifest["assets"],
+                        asset_names,
+                    )
+                else:
+                    _download_feed_assets(
+                        temporary,
+                        feed_reference["assets"],
+                        asset_names,
+                        self.tag,
+                    )
                 current = CatalogV2.apply_delta(
                     previous,
                     manifest_path,
@@ -443,6 +493,28 @@ def _download_assets(
         (destination / filename).write_bytes(payload)
 
 
+def _download_feed_assets(
+    destination: Path,
+    assets: dict,
+    asset_names: list[str],
+    version: str,
+) -> None:
+    for asset_name in asset_names:
+        try:
+            asset = assets[asset_name]
+        except KeyError:
+            raise CatalogV2Error(f"catalog feed is missing {asset_name!r} asset") from None
+        filename = _validate_file_reference(asset, version)
+        payload = _fetch(asset["url"])
+        _verify_bytes(
+            filename,
+            payload,
+            expected_sha256=asset["sha256"],
+            expected_size=asset["size"],
+        )
+        (destination / filename).write_bytes(payload)
+
+
 def _fetch(url: str) -> bytes:
     request = Request(url, headers={"User-Agent": _USER_AGENT})
     with urlopen(request, timeout=60) as response:
@@ -474,8 +546,9 @@ def _parse_feed(payload: bytes) -> dict:
     value = _parse_json(payload, "catalog feed")
     if value.get("schema_version") != 2:
         raise CatalogV2Error("unsupported Catalog v2 feed schema")
-    if not isinstance(value.get("release_version"), str):
-        raise CatalogV2Error("catalog feed release_version must be a string")
+    for name in ("release_version", "checked_at", "source_updated_at"):
+        if not isinstance(value.get(name), str):
+            raise CatalogV2Error(f"catalog feed {name} must be a string")
     catalogs = value.get("catalogs")
     if not isinstance(catalogs, dict) or not catalogs:
         raise CatalogV2Error("catalog feed catalogs must be a non-empty object")
@@ -486,39 +559,99 @@ def _feed_entry(feed: dict, catalog_key: str) -> dict:
     entry = feed["catalogs"].get(catalog_key)
     if not isinstance(entry, dict):
         raise CatalogV2Error(f"catalog {catalog_key!r} is not present in the Catalog v2 feed")
+    if not isinstance(entry.get("source_updated_at"), str):
+        raise CatalogV2Error("catalog feed entry source_updated_at must be a string")
     base = entry.get("base")
     deltas = entry.get("deltas")
     if not isinstance(base, dict) or not isinstance(deltas, list):
         raise CatalogV2Error("catalog feed entry must contain a base and delta list")
     expected = base.get("version")
-    _validate_feed_reference(base, expected)
+    _validate_feed_stage(base, expected, is_delta=False)
     for delta in deltas:
         if not isinstance(delta, dict) or delta.get("from") != expected:
             raise CatalogV2Error("catalog feed delta chain is not contiguous")
         expected = delta.get("to")
-        _validate_feed_reference(delta, expected)
+        _validate_feed_stage(delta, expected, is_delta=True)
     return entry
 
 
-def _validate_feed_reference(reference: dict, version: object) -> None:
+def _validate_feed_stage(reference: dict, version: object, *, is_delta: bool) -> None:
     if not isinstance(version, str):
         raise CatalogV2Error("catalog feed reference has an invalid version")
     _validate_tag(version)
-    filename = reference.get("manifest_filename")
-    if not isinstance(filename, str) or Path(filename).name != filename:
-        raise CatalogV2Error("catalog feed reference has an invalid manifest filename")
-    checksum = reference.get("sha256")
-    if not isinstance(checksum, str) or len(checksum) != 64:
-        raise CatalogV2Error("catalog feed reference has an invalid checksum")
+    _validate_file_reference(reference.get("manifest"), version)
+    assets = reference.get("assets")
+    if not isinstance(assets, dict):
+        raise CatalogV2Error("catalog feed stage assets must be an object")
+    if is_delta and not assets:
+        raise CatalogV2Error("catalog feed delta must contain assets")
+    if not is_delta and not {"recognition_rows", "recognition_matrix"}.issubset(assets):
+        raise CatalogV2Error("catalog feed base lacks recognition assets")
+    for asset in assets.values():
+        _validate_file_reference(asset, version)
 
 
-def _verify_feed_reference(index: dict, catalog_key: str, reference: dict) -> None:
-    entry = index["catalogs"].get(catalog_key)
-    if not isinstance(entry, dict) or (
-        entry.get("manifest_filename") != reference["manifest_filename"]
-        or entry.get("sha256") != reference["sha256"]
+def _validate_file_reference(reference: object, version: str) -> str:
+    if not isinstance(reference, dict):
+        raise CatalogV2Error("catalog feed file reference must be an object")
+    url = reference.get("url")
+    if not isinstance(url, str):
+        raise CatalogV2Error("catalog feed file reference has an invalid URL")
+    parsed = urlparse(url)
+    parts = [unquote(part) for part in parsed.path.split("/") if part]
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.query
+        or parsed.fragment
+        or len(parts) < 2
+        or parts[-2] != version
+        or Path(parts[-1]).name != parts[-1]
     ):
-        raise CatalogV2Error("catalog feed reference does not match its release index")
+        raise CatalogV2Error("catalog feed file reference has an invalid URL")
+    checksum = reference.get("sha256")
+    size = reference.get("size")
+    if not isinstance(checksum, str) or len(checksum) != 64:
+        raise CatalogV2Error("catalog feed file reference has an invalid checksum")
+    if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+        raise CatalogV2Error("catalog feed file reference has an invalid size")
+    return parts[-1]
+
+
+def _index_for_feed_reference(tag: str, catalog_key: str, reference: dict) -> dict:
+    manifest = reference["manifest"]
+    return {
+        "schema_version": 2,
+        "release_version": tag,
+        "catalogs": {
+            catalog_key: {
+                "manifest_filename": _validate_file_reference(manifest, tag),
+                "sha256": manifest["sha256"],
+            }
+        },
+    }
+
+
+def _verify_feed_assets(reference: dict, manifest: dict) -> None:
+    names = (
+        ("delta_operations", "delta_matrix", "metadata_delta")
+        if "to" in reference
+        else ("recognition_rows", "recognition_matrix", "metadata_rows")
+    )
+    expected = {name for name in names if name in manifest["assets"]}
+    assets = reference["assets"]
+    if set(assets) != expected:
+        raise CatalogV2Error("catalog feed assets do not match the manifest")
+    version = reference.get("version", reference.get("to"))
+    for name, feed_asset in assets.items():
+        filename = _validate_file_reference(feed_asset, version)
+        manifest_asset = manifest["assets"][name]
+        if (
+            filename != manifest_asset["filename"]
+            or feed_asset["sha256"] != manifest_asset["sha256"]
+            or feed_asset["size"] != manifest_asset["size"]
+        ):
+            raise CatalogV2Error(f"catalog feed asset {name!r} does not match the manifest")
 
 
 def _feed_cache_path(root: Path, catalog_key: str) -> Path:

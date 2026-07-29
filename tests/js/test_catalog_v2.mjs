@@ -30,6 +30,14 @@ async function asset(filename, payload) {
   };
 }
 
+function fileReference(tag, descriptor) {
+  return {
+    url: `https://catalog.test/${tag}/${descriptor.filename}`,
+    sha256: descriptor.sha256,
+    size: descriptor.size,
+  };
+}
+
 async function sha256(bytes) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
@@ -102,12 +110,23 @@ async function fixture() {
         JSON.stringify({
           schema_version: 2,
           release_version: tag,
+          checked_at: "2026-07-24T12:00:00Z",
+          source_updated_at: "2026-07-24T00:00:00Z",
           catalogs: {
             [key]: {
+              source_updated_at: "2026-07-24T00:00:00Z",
               base: {
                 version: tag,
-                manifest_filename: "demo.manifest.json",
-                sha256: await sha256(manifestBytes),
+                manifest: {
+                  url: `https://catalog.test/${tag}/demo.manifest.json`,
+                  sha256: await sha256(manifestBytes),
+                  size: manifestBytes.byteLength,
+                },
+                assets: {
+                  recognition_rows: fileReference(tag, rows.descriptor),
+                  recognition_matrix: fileReference(tag, matrix.descriptor),
+                  metadata_rows: fileReference(tag, metadata.descriptor),
+                },
               },
               deltas: [],
             },
@@ -238,20 +257,52 @@ files.set(
     JSON.stringify({
       schema_version: 2,
       release_version: nextTag,
+      checked_at: "2026-07-25T12:00:00Z",
+      source_updated_at: "2026-07-25T00:00:00Z",
       catalogs: {
         [key]: {
+          source_updated_at: "2026-07-25T00:00:00Z",
           base: {
             version: tag,
-            manifest_filename: "demo.manifest.json",
-            sha256: JSON.parse(new TextDecoder().decode(files.get(`${tag}/catalog-index-v2.json`)))
-              .catalogs[key].sha256,
+            manifest: {
+              url: `https://catalog.test/${tag}/demo.manifest.json`,
+              sha256: JSON.parse(
+                new TextDecoder().decode(files.get(`${tag}/catalog-index-v2.json`)),
+              ).catalogs[key].sha256,
+              size: files.get(`${tag}/demo.manifest.json`).byteLength,
+            },
+            assets: {
+              recognition_rows: fileReference(
+                tag,
+                JSON.parse(new TextDecoder().decode(files.get(`${tag}/demo.manifest.json`))).assets
+                  .recognition_rows,
+              ),
+              recognition_matrix: fileReference(
+                tag,
+                JSON.parse(new TextDecoder().decode(files.get(`${tag}/demo.manifest.json`))).assets
+                  .recognition_matrix,
+              ),
+              metadata_rows: fileReference(
+                tag,
+                JSON.parse(new TextDecoder().decode(files.get(`${tag}/demo.manifest.json`))).assets
+                  .metadata_rows,
+              ),
+            },
           },
           deltas: [
             {
               from: tag,
               to: nextTag,
-              manifest_filename: "demo.manifest.json",
-              sha256: await sha256(nextManifestBytes),
+              manifest: {
+                url: `https://catalog.test/${nextTag}/demo.manifest.json`,
+                sha256: await sha256(nextManifestBytes),
+                size: nextManifestBytes.byteLength,
+              },
+              assets: {
+                delta_operations: fileReference(nextTag, operations.descriptor),
+                delta_matrix: fileReference(nextTag, deltaMatrix.descriptor),
+                metadata_delta: fileReference(nextTag, metadataDelta.descriptor),
+              },
             },
           ],
         },

@@ -2,7 +2,7 @@ const BETA_TAG = /^catalog-v2-beta\.[1-9][0-9]*-[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 const INDEX_FILENAME = "catalog-index-v2.json";
 const FEED_FILENAME = "catalog-feed-v2.json";
 const DEFAULT_RELEASE_BASE_URL =
-  "https://hanclinto.github.io/CollectorVision/catalog-v2/";
+  "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/";
 const GAME_NAMES = Object.freeze({
   mtg: "magic-the-gathering",
   pokemon: "pokemon",
@@ -207,29 +207,17 @@ export class CatalogV2BrowserClient {
       new URL(FEED_FILENAME, ensureTrailingSlash(this.releaseBaseUrl)),
     );
     const entry = validateFeedEntry(feed, catalogKey);
-    let catalog = await this.load(entry.base.version, catalogKey, {
-      includeMetadata,
-      previous,
-      expectedReference: entry.base,
-    });
+    let catalog = await this.#loadFeedStage(entry.base, catalogKey, includeMetadata, previous);
     for (const delta of entry.deltas) {
       if (catalog.version !== delta.from) {
         throw new CatalogV2Error("catalog feed delta chain does not match loaded base");
       }
-      catalog = await this.load(delta.to, catalogKey, {
-        includeMetadata,
-        previous: catalog,
-        expectedReference: delta,
-      });
+      catalog = await this.#loadFeedStage(delta, catalogKey, includeMetadata, catalog);
     }
     return catalog;
   }
 
-  async load(
-    tag,
-    catalogKey,
-    { includeMetadata = false, previous = null, expectedReference = null } = {},
-  ) {
+  async load(tag, catalogKey, { includeMetadata = false, previous = null } = {}) {
     validateTag(tag);
     if (!this.releaseBaseUrl) {
       throw new TypeError(
@@ -250,14 +238,6 @@ export class CatalogV2BrowserClient {
     ) {
       throw new CatalogV2Error(`catalog ${JSON.stringify(catalogKey)} is not valid in ${tag}`);
     }
-    if (
-      expectedReference !== null &&
-      (entry.manifest_filename !== expectedReference.manifest_filename ||
-        entry.sha256 !== expectedReference.sha256)
-    ) {
-      throw new CatalogV2Error("catalog feed reference does not match its release index");
-    }
-
     const manifestBytes = await this.#fetchBytes(new URL(entry.manifest_filename, baseUrl));
     await verifyBytes(entry.manifest_filename, manifestBytes, entry.sha256);
     const manifest = parseJsonObject(manifestBytes, "catalog manifest");
@@ -282,9 +262,54 @@ export class CatalogV2BrowserClient {
     }
     let catalog;
     if (isExactCompatibleBase(previous, manifest, includeMetadata)) {
-      catalog = await this.#loadDelta(baseUrl, manifest, previous, includeMetadata);
+      catalog = await this.#loadDelta(
+        baseUrl,
+        manifest,
+        previous,
+        includeMetadata,
+      );
     } else {
       catalog = await this.#loadFull(baseUrl, manifest, includeMetadata);
+    }
+    await this.#persistSnapshot(catalog);
+    return catalog;
+  }
+
+  async #loadFeedStage(reference, catalogKey, includeMetadata, previous) {
+    const tag = reference.version ?? reference.to;
+    const manifestReference = reference.manifest;
+    const manifestBytes = await this.#fetchBytes(new URL(manifestReference.url));
+    await verifyBytes(
+      new URL(manifestReference.url).pathname.split("/").at(-1),
+      manifestBytes,
+      manifestReference.sha256,
+      manifestReference.size,
+    );
+    const manifest = parseJsonObject(manifestBytes, "catalog manifest");
+    validateManifest(manifest, tag, catalogKey);
+    validateFeedAssets(reference, manifest);
+    if (isCompatibleSnapshot(previous, manifest, includeMetadata)) {
+      return previous;
+    }
+    const cached = await this.#cachedSnapshot(tag, catalogKey, includeMetadata);
+    if (cached !== null && cached !== undefined && isCompatibleSnapshot(cached, manifest, includeMetadata)) {
+      return cached;
+    }
+    const baseUrl = new URL(".", manifestReference.url);
+    let catalog;
+    if (reference.to !== undefined) {
+      if (!isExactCompatibleBase(previous, manifest, includeMetadata)) {
+        throw new CatalogV2Error("catalog feed delta is missing its exact compatible base");
+      }
+      catalog = await this.#loadDelta(
+        baseUrl,
+        manifest,
+        previous,
+        includeMetadata,
+        reference.assets,
+      );
+    } else {
+      catalog = await this.#loadFull(baseUrl, manifest, includeMetadata, reference.assets);
     }
     await this.#persistSnapshot(catalog);
     return catalog;
@@ -309,13 +334,21 @@ export class CatalogV2BrowserClient {
     }
   }
 
-  async #loadFull(baseUrl, manifest, includeMetadata) {
+  async #loadFull(baseUrl, manifest, includeMetadata, feedAssets = null) {
     const records = parseRecognitionRows(
-      await this.#fetchGzipAsset(baseUrl, manifest.assets.recognition_rows),
+      await this.#fetchGzipAsset(
+        baseUrl,
+        manifest.assets.recognition_rows,
+        feedAssets?.recognition_rows,
+      ),
       manifest,
     );
     const embeddings = parseFloat16Matrix(
-      await this.#fetchGzipAsset(baseUrl, manifest.assets.recognition_matrix),
+      await this.#fetchGzipAsset(
+        baseUrl,
+        manifest.assets.recognition_matrix,
+        feedAssets?.recognition_matrix,
+      ),
       manifest.rows,
       manifest.dim,
     );
@@ -324,7 +357,11 @@ export class CatalogV2BrowserClient {
       attachMetadata(
         records,
         parseJsonLines(
-          await this.#fetchGzipAsset(baseUrl, manifest.assets.metadata_rows),
+          await this.#fetchGzipAsset(
+            baseUrl,
+            manifest.assets.metadata_rows,
+            feedAssets?.metadata_rows,
+          ),
           "metadata rows",
         ),
       );
@@ -333,12 +370,16 @@ export class CatalogV2BrowserClient {
     return new BrowserCatalogV2({ manifest, records, embeddings, metadataLoaded });
   }
 
-  async #loadDelta(baseUrl, manifest, previous, includeMetadata) {
+  async #loadDelta(baseUrl, manifest, previous, includeMetadata, feedAssets = null) {
     const operations =
       manifest.delta.operations === 0
         ? []
         : parseJsonLines(
-            await this.#fetchGzipAsset(baseUrl, manifest.assets.delta_operations),
+            await this.#fetchGzipAsset(
+              baseUrl,
+              manifest.assets.delta_operations,
+              feedAssets?.delta_operations,
+            ),
             "delta operations",
           );
     if (operations.length !== manifest.delta.operations) {
@@ -349,7 +390,11 @@ export class CatalogV2BrowserClient {
       upserts.length === 0
         ? new Float32Array()
         : parseFloat16Matrix(
-            await this.#fetchGzipAsset(baseUrl, manifest.assets.delta_matrix),
+            await this.#fetchGzipAsset(
+              baseUrl,
+              manifest.assets.delta_matrix,
+              feedAssets?.delta_matrix,
+            ),
             upserts.length,
             manifest.dim,
           );
@@ -413,7 +458,11 @@ export class CatalogV2BrowserClient {
         manifest.delta.metadata_operations === 0
           ? []
           : parseJsonLines(
-              await this.#fetchGzipAsset(baseUrl, manifest.assets.metadata_delta),
+              await this.#fetchGzipAsset(
+                baseUrl,
+                manifest.assets.metadata_delta,
+                feedAssets?.metadata_delta,
+              ),
               "metadata delta operations",
             );
       if (metadataOperations.length !== manifest.delta.metadata_operations) {
@@ -450,9 +499,17 @@ export class CatalogV2BrowserClient {
     });
   }
 
-  async #fetchGzipAsset(baseUrl, asset) {
+  async #fetchGzipAsset(baseUrl, asset, feedReference = null) {
     validateAsset(asset);
-    const compressed = await this.#fetchBytes(new URL(asset.filename, baseUrl));
+    if (
+      feedReference !== null &&
+      (feedReference.sha256 !== asset.sha256 || feedReference.size !== asset.size)
+    ) {
+      throw new Error(`Feed reference does not match manifest asset ${asset.filename}`);
+    }
+    const url =
+      feedReference === null ? new URL(asset.filename, baseUrl) : new URL(feedReference.url);
+    const compressed = await this.#fetchBytes(url);
     await verifyBytes(asset.filename, compressed, asset.sha256, asset.size);
     return gunzip(compressed);
   }
@@ -493,30 +550,94 @@ function validateFeedEntry(feed, catalogKey) {
     !isObject(feed) ||
     feed.schema_version !== 2 ||
     typeof feed.release_version !== "string" ||
+    typeof feed.checked_at !== "string" ||
+    typeof feed.source_updated_at !== "string" ||
     !isObject(feed.catalogs)
   ) {
     throw new CatalogV2Error("invalid Catalog v2 feed");
   }
   const entry = feed.catalogs[catalogKey];
-  if (!isObject(entry) || !isObject(entry.base) || !Array.isArray(entry.deltas)) {
+  if (
+    !isObject(entry) ||
+    typeof entry.source_updated_at !== "string" ||
+    !isObject(entry.base) ||
+    !Array.isArray(entry.deltas)
+  ) {
     throw new CatalogV2Error(`catalog ${JSON.stringify(catalogKey)} is not valid in the feed`);
   }
-  validateFeedReference(entry.base, entry.base.version);
+  validateFeedStage(entry.base, entry.base.version, false);
   let expected = entry.base.version;
   for (const delta of entry.deltas) {
     if (!isObject(delta) || delta.from !== expected) {
       throw new CatalogV2Error("catalog feed delta chain is not contiguous");
     }
-    validateFeedReference(delta, delta.to);
+    validateFeedStage(delta, delta.to, true);
     expected = delta.to;
   }
   return entry;
 }
 
-function validateFeedReference(reference, version) {
+function validateFeedStage(reference, version, isDelta) {
   validateTag(version);
-  if (!isSafeFilename(reference.manifest_filename) || !isSha256(reference.sha256)) {
-    throw new CatalogV2Error("catalog feed contains an invalid manifest reference");
+  validateFileReference(reference.manifest, version);
+  if (!isObject(reference.assets)) {
+    throw new CatalogV2Error("catalog feed stage assets must be an object");
+  }
+  if (isDelta && Object.keys(reference.assets).length === 0) {
+    throw new CatalogV2Error("catalog feed delta must contain assets");
+  }
+  if (
+    !isDelta &&
+    (!("recognition_rows" in reference.assets) ||
+      !("recognition_matrix" in reference.assets))
+  ) {
+    throw new CatalogV2Error("catalog feed base lacks recognition assets");
+  }
+  for (const asset of Object.values(reference.assets)) {
+    validateFileReference(asset, version);
+  }
+}
+
+function validateFileReference(reference, version) {
+  if (!isObject(reference) || typeof reference.url !== "string") {
+    throw new CatalogV2Error("catalog feed contains an invalid file reference");
+  }
+  const url = new URL(reference.url);
+  const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  if (
+    url.protocol !== "https:" ||
+    parts.length < 2 ||
+    parts.at(-2) !== version ||
+    !isSafeFilename(parts.at(-1)) ||
+    !isSha256(reference.sha256) ||
+    !Number.isInteger(reference.size) ||
+    reference.size < 0
+  ) {
+    throw new CatalogV2Error("catalog feed contains an invalid file reference");
+  }
+}
+
+function validateFeedAssets(reference, manifest) {
+  const names =
+    reference.to === undefined
+      ? ["recognition_rows", "recognition_matrix", "metadata_rows"]
+      : ["delta_operations", "delta_matrix", "metadata_delta"];
+  const expected = names.filter((name) => name in manifest.assets).sort();
+  const actual = Object.keys(reference.assets).sort();
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new CatalogV2Error("catalog feed assets do not match the manifest");
+  }
+  for (const name of expected) {
+    const feedAsset = reference.assets[name];
+    const manifestAsset = manifest.assets[name];
+    const filename = decodeURIComponent(new URL(feedAsset.url).pathname.split("/").at(-1));
+    if (
+      filename !== manifestAsset.filename ||
+      feedAsset.sha256 !== manifestAsset.sha256 ||
+      feedAsset.size !== manifestAsset.size
+    ) {
+      throw new CatalogV2Error(`catalog feed asset ${JSON.stringify(name)} is inconsistent`);
+    }
   }
 }
 
