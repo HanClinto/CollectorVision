@@ -66,9 +66,7 @@ def _write_catalog(tmp_path: Path) -> Path:
                 for row in recognition
             ),
         ),
-        "embeddings": _write_gzip(
-            tmp_path / "demo.embeddings.f16.gz", embeddings.tobytes()
-        ),
+        "embeddings": _write_gzip(tmp_path / "demo.embeddings.f16.gz", embeddings.tobytes()),
         "metadata": _write_gzip(
             tmp_path / "demo.metadata.jsonl.gz",
             b"".join(
