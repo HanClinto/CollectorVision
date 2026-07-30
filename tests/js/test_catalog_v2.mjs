@@ -492,9 +492,10 @@ await test("orders rows deterministically and reports public identifiers/finishe
   );
   const a = catalog.recordForIndex(0);
   assert.equal(a.key, "scryfall:card-a");
+  assert.equal(a.id, "card-a");
   assert.equal(a.card_id, "card-a");
   assert.equal(a.result_identifier, "scryfall_card");
-  assert.equal("scryfall_card" in a.identifiers, false, "must not duplicate the primary id under identifiers");
+  assert.equal(a.identifiers.scryfall_card, "card-a");
   assert.equal(a.identifiers.scryfall_oracle, "oracle-a");
   assert.equal(a.face_index, 0);
   assert.deepEqual(a.finishes, []);
@@ -1404,7 +1405,7 @@ async function buildMultiCatalogFixture() {
     recommended: true,
   });
   const tcgplayerDbs = await simpleCatalog("tcgplayer-dbs", "tcgplayer-dbs", {
-    game: "dragon-ball-super",
+    game: "dragon-ball-super-card-game",
     source: "tcgplayer",
     result_identifier: "tcgplayer_product",
     recommended: true,
@@ -1460,11 +1461,11 @@ await test("an explicit source overrides the default and still finds the recomme
   assert.equal(catalog.descriptor.result_identifier, "tcgplayer_product");
 });
 
-await test("the dbs alias resolves to dragon-ball-super with the TCGplayer fallback source", async () => {
+await test("the dbs alias resolves to dragon-ball-super-card-game", async () => {
   const fixture = await buildMultiCatalogFixture();
   const catalog = await client(fixture).loadGame("dbs");
   assert.equal(catalog.catalogKey, "milo1/tcgplayer/dbs");
-  assert.equal(catalog.descriptor.game, "dragon-ball-super");
+  assert.equal(catalog.descriptor.game, "dragon-ball-super-card-game");
   assert.equal(catalog.descriptor.source, "tcgplayer");
 });
 

@@ -26,7 +26,7 @@ const GAME_ALIASES = Object.freeze({
   digimon: "digimon-card-game",
   onepiece: "one-piece",
   swu: "star-wars-unlimited",
-  dbs: "dragon-ball-super",
+  dbs: "dragon-ball-super-card-game",
 });
 
 const DEFAULT_SOURCE_BY_GAME = Object.freeze({
@@ -117,7 +117,11 @@ export class BrowserCatalogV2 {
         : `${this.descriptor.source}:${record.id}:face:${record.faceIndex}`;
     const result = {
       key,
-      identifiers: { ...record.identifiers },
+      id: record.id,
+      identifiers: {
+        [this.descriptor.result_identifier]: record.id,
+        ...record.identifiers,
+      },
       face_index: record.faceIndex,
       result_identifier: this.descriptor.result_identifier,
       card_id: record.id,
@@ -839,9 +843,11 @@ function parseFaceIndex(rawFaceIndex, label) {
 }
 
 function compareIdentity(left, right) {
-  if (left.id < right.id) return -1;
-  if (left.id > right.id) return 1;
-  return left.faceIndex - right.faceIndex;
+  const leftKey = left.faceIndex === 0 ? left.id : `${left.id}:face:${left.faceIndex}`;
+  const rightKey = right.faceIndex === 0 ? right.id : `${right.id}:face:${right.faceIndex}`;
+  if (leftKey < rightKey) return -1;
+  if (leftKey > rightKey) return 1;
+  return 0;
 }
 
 function identityKey(id, faceIndex) {
