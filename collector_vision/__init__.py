@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 from collector_vision.catalog import Catalog
-from collector_vision.catalog_v2 import CatalogV2
+from collector_vision.catalog_v2 import CatalogV2, CatalogV2Error, catalog_v2_row_key
 from collector_vision.catalog_v2_downloader import CatalogV2Downloader
 from collector_vision.detectors import NeuralCornerDetector
 from collector_vision.embedders import NeuralEmbedder
@@ -30,6 +30,7 @@ except PackageNotFoundError:
 __all__ = [
     "Catalog",
     "CatalogV2",
+    "CatalogV2Error",
     "CatalogV2Downloader",
     "DetectionResult",
     "Embedding",
@@ -44,5 +45,6 @@ __all__ = [
     "load_model_registry",
     "resolve_model_artifact",
     "rotate_card_180",
+    "catalog_v2_row_key",
     "__version__",
 ]

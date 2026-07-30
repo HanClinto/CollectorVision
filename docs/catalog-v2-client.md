@@ -18,8 +18,10 @@ score, card_id = catalog.search(embedding, top_k=1)[0]
 `Game.MTG` is accepted too. Construction downloads the catalog when needed and
 reuses its cache afterward. The default source is Scryfall for MTG and
 TCGplayer for the other supported games. A small discovery feed selects a
-bounded base-plus-delta chain. The feed includes absolute URLs, checksums, and
-sizes for every client file, plus upstream and last-checked timestamps.
+bounded catalog-local base-plus-update route. The feed is the complete client
+contract: it includes immutable family embedding details, catalog descriptors,
+integer versions, absolute asset URLs, compressed sizes, and checksums. Clients
+do not fetch release indexes or per-version manifests.
 
 Load names, sets, languages, finishes, and peer IDs only when needed:
 
@@ -30,14 +32,39 @@ print(match["identifiers"])
 print(match["metadata"])
 ```
 
+The primary result appears as `id` and under the descriptor's namespace in
+`identifiers`. Recognition-level `finishes` are available without metadata.
+Current Scryfall metadata includes `promo` and canonical `layout`, including
+`layout == "art_series"` for art-card filtering.
+
 The familiar v1 attributes `card_ids`, `oracle_ids`, `source`, `algo_key`,
 `embeddings`, and `embedder` remain available. `offline=True` opens the latest
-locally installed feed version from the separate v2 cache without network
-access.
+compatible locally installed version from the separate v2 cache without network
+access:
 
-Release tags, catalog keys, checksums, cache layout, and exact-base deltas are
-managed internally. `CatalogV2Downloader` remains available for applications
-that need explicit control. Catalog v1 remains unchanged and can run beside v2.
+```python
+catalog = cv.CatalogV2("mtg", include_metadata=True, offline=True)
+```
+
+Catalog keys, checksums, cache layout, and exact-predecessor updates are managed
+internally. Cached snapshots are materialized atomically so subsequent updates
+start from the newest compatible local integer version. Only the latest snapshot
+per catalog and metadata mode is retained. Adding metadata to an installed
+recognition snapshot reuses its embeddings and reconstructs only the metadata
+layer.
+
+`CatalogV2Downloader` remains available for explicit catalog keys or versions:
+
+```python
+download = cv.CatalogV2Downloader.install_catalog(
+    "milo1/scryfall/mtg",
+    include_metadata=True,
+    version=2,
+)
+catalog = download.load()
+```
+
+Catalog v1 remains unchanged and can run beside v2.
 
 ## Browser
 
@@ -57,5 +84,6 @@ const [[score, cardId]] = catalog.search(queryEmbedding, 1);
 
 `queryEmbedding` is the normalized `Float32Array` from the existing Milo
 inference pipeline. The catalog keeps its matrix packed as FP16. Advanced
-applications can use `CatalogV2BrowserClient` and `CatalogV2IndexedDbCache`
-directly for explicit versions, mirrors, and persistent snapshots.
+applications can use `CatalogV2FeedClient` and `CatalogV2IndexedDbCache`
+directly for explicit catalog keys, family/profile selection, mirrors, and
+persistent snapshots.
