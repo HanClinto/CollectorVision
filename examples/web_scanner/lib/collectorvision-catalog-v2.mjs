@@ -10,6 +10,10 @@
 const DEFAULT_FEED_URL =
   "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-feed-v2.json";
 
+// The standard embedding family, matching Python's `Embedding.MILO` value.
+// Passing `family: null` searches every family in the feed instead.
+const DEFAULT_FAMILY = "milo1";
+
 // Short aliases are a purely ergonomic convenience for `forGame`/`loadGame`.
 // They are never used to construct a catalog path: the matching catalog is
 // always discovered from the feed by descriptor.
@@ -22,6 +26,7 @@ const GAME_ALIASES = Object.freeze({
   digimon: "digimon-card-game",
   onepiece: "one-piece",
   swu: "star-wars-unlimited",
+  dbs: "dragon-ball-super",
 });
 
 const DEFAULT_SOURCE_BY_GAME = Object.freeze({
@@ -73,7 +78,7 @@ export class BrowserCatalogV2 {
   }
 
   search(query, topK = 5) {
-    return this.searchRecords(query, topK).map(({ score, id }) => [score, id]);
+    return this.searchRecords(query, topK).map(({ score, card_id }) => [score, card_id]);
   }
 
   searchRecords(query, topK = 5) {
@@ -106,14 +111,20 @@ export class BrowserCatalogV2 {
   }
 
   #toPublicRecord(record, score) {
-    const identifiers = {
-      ...record.identifiers,
-      [this.descriptor.result_identifier]: record.id,
+    const key =
+      record.faceIndex === 0
+        ? `${this.descriptor.source}:${record.id}`
+        : `${this.descriptor.source}:${record.id}:face:${record.faceIndex}`;
+    const result = {
+      key,
+      identifiers: { ...record.identifiers },
+      face_index: record.faceIndex,
+      result_identifier: this.descriptor.result_identifier,
+      card_id: record.id,
+      finishes: record.finishes ? [...record.finishes] : [],
     };
-    const result = { id: record.id, identifiers, face_index: record.faceIndex };
-    if (record.finishes !== undefined) result.finishes = [...record.finishes];
-    if (this.metadataLoaded && record.metadata !== undefined) {
-      result.metadata = structuredClone(record.metadata);
+    if (this.metadataLoaded) {
+      result.metadata = record.metadata !== undefined ? structuredClone(record.metadata) : null;
     }
     if (score !== undefined) result.score = score;
     return result;
@@ -167,10 +178,12 @@ export class CatalogV2IndexedDbCache {
       throw new TypeError("Catalog v2 cache accepts BrowserCatalogV2 snapshots");
     }
     const database = await this.#database();
+    const metadataMode = catalog.metadataLoaded ? "metadata" : "recognition";
     const snapshot = {
       id: snapshotKey(catalog.version, catalog.catalogKey, catalog.metadataLoaded),
-      familyKey: catalog.familyKey,
       catalogKey: catalog.catalogKey,
+      metadataMode,
+      familyKey: catalog.familyKey,
       publicName: catalog.publicName,
       descriptor: structuredClone(catalog.descriptor),
       embedding: structuredClone(catalog.embedding),
@@ -180,18 +193,33 @@ export class CatalogV2IndexedDbCache {
       embeddings: catalog.embeddings.slice().buffer,
     };
     const transaction = database.transaction("catalogs", "readwrite");
-    transaction.objectStore("catalogs").put(snapshot);
+    const store = transaction.objectStore("catalogs");
+    store.put(snapshot);
+    // Only one snapshot per (catalogKey, metadataMode) is ever useful: an
+    // older version is superseded the moment a newer one is cached. Prune it
+    // here so the store never grows unbounded across intermediate updates.
+    await pruneOtherVersions(store, catalog.catalogKey, metadataMode, catalog.version);
+    await transactionComplete(transaction);
+  }
+
+  async delete(version, catalogKey, includeMetadata) {
+    const database = await this.#database();
+    const transaction = database.transaction("catalogs", "readwrite");
+    transaction.objectStore("catalogs").delete(snapshotKey(version, catalogKey, includeMetadata));
     await transactionComplete(transaction);
   }
 
   async #database() {
     if (!this.databasePromise) {
       this.databasePromise = new Promise((resolve, reject) => {
-        const request = this.indexedDb.open(this.databaseName, 1);
+        const request = this.indexedDb.open(this.databaseName, 2);
         request.onupgradeneeded = () => {
           const database = request.result;
-          if (!database.objectStoreNames.contains("catalogs")) {
-            database.createObjectStore("catalogs", { keyPath: "id" });
+          const store = database.objectStoreNames.contains("catalogs")
+            ? request.transaction.objectStore("catalogs")
+            : database.createObjectStore("catalogs", { keyPath: "id" });
+          if (!store.indexNames.contains("byCatalogMode")) {
+            store.createIndex("byCatalogMode", ["catalogKey", "metadataMode"], { unique: false });
           }
         };
         request.onsuccess = () => resolve(request.result);
@@ -201,6 +229,22 @@ export class CatalogV2IndexedDbCache {
     }
     return this.databasePromise;
   }
+}
+
+function pruneOtherVersions(store, catalogKey, metadataMode, keepVersion) {
+  return new Promise((resolve, reject) => {
+    const request = store.index("byCatalogMode").openCursor([catalogKey, metadataMode]);
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve();
+        return;
+      }
+      if (cursor.value.version !== keepVersion) cursor.delete();
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error);
+  });
 }
 
 export class CatalogV2FeedClient {
@@ -217,11 +261,14 @@ export class CatalogV2FeedClient {
     }
   }
 
-  async loadGame(game, { source = null, includeMetadata = false, previous = null } = {}) {
+  async loadGame(
+    game,
+    { source = null, family = DEFAULT_FAMILY, profile = null, includeMetadata = false, previous = null } = {},
+  ) {
     const normalizedGame = normalizeGame(game);
     const selectedSource = source ?? DEFAULT_SOURCE_BY_GAME[normalizedGame] ?? FALLBACK_SOURCE;
     const feed = await this.#fetchFeed();
-    const resolved = discoverCatalog(feed, normalizedGame, selectedSource);
+    const resolved = discoverCatalog(feed, normalizedGame, selectedSource, { family, profile });
     return this.#loadResolvedCatalog(resolved, { includeMetadata, previous });
   }
 
@@ -237,6 +284,7 @@ export class CatalogV2FeedClient {
 
     let snapshot = null;
     let startIndex = -1;
+    let mutated = false;
 
     if (previous !== null && isCompatibleSnapshot(previous, resolved, includeMetadata)) {
       const index = versions.indexOf(previous.version);
@@ -265,21 +313,40 @@ export class CatalogV2FeedClient {
 
     if (snapshot === null) {
       snapshot = await this.#loadBase(resolved, includeMetadata);
-      await this.#persistSnapshot(snapshot);
       startIndex = 0;
+      mutated = true;
     }
 
     for (let index = startIndex + 1; index < versions.length; index += 1) {
       const toVersion = versions[index];
       const updateEntry = catalog.updates[String(toVersion)];
       snapshot = await this.#applyUpdate(resolved, snapshot, updateEntry, includeMetadata);
-      await this.#persistSnapshot(snapshot);
+      mutated = true;
     }
 
     if (snapshot.version !== targetVersion || snapshot.records.length !== catalog.rows) {
       throw new CatalogV2Error("reconstructed catalog does not match the feed's current state");
     }
+
+    // Only the final, fully-resolved snapshot is worth persisting: every
+    // intermediate stage is superseded before the caller ever sees it.
+    if (mutated) {
+      await this.#persistSnapshot(snapshot);
+      await this.#pruneCachedVersions(resolved, includeMetadata, snapshot.version, versions);
+    }
     return snapshot;
+  }
+
+  async #pruneCachedVersions(resolved, includeMetadata, keepVersion, versions) {
+    if (this.cache === null || typeof this.cache.delete !== "function") return;
+    for (const version of versions) {
+      if (version === keepVersion) continue;
+      try {
+        await this.cache.delete(version, resolved.fullCatalogKey, includeMetadata);
+      } catch (error) {
+        console.warn("Catalog v2 persistent cache prune failed; stale snapshot may remain", error);
+      }
+    }
   }
 
   async #loadBase(resolved, includeMetadata) {
@@ -399,8 +466,10 @@ export class CatalogV2FeedClient {
     });
 
     let added = 0;
-    let updated = 0;
     let deleted = 0;
+    const recognitionAddedIds = new Set();
+    const recognitionDeletedIds = new Set();
+    const recognitionUpdatedIds = new Set();
     const usedEmbeddingIndexes = new Set();
     for (const operation of operations) {
       if (operation.op === "delete") {
@@ -414,6 +483,7 @@ export class CatalogV2FeedClient {
         faces.delete(target.faceIndex);
         if (faces.size === 0) byId.delete(target.id);
         deleted += 1;
+        recognitionDeletedIds.add(identityKey(target.id, target.faceIndex));
       } else if (operation.op === "upsert") {
         const record = parseIdentityRecord(
           operation.record,
@@ -445,7 +515,13 @@ export class CatalogV2FeedClient {
             (embeddingIndex + 1) * dimension,
           ),
         });
-        existing ? (updated += 1) : (added += 1);
+        const key = identityKey(record.id, record.faceIndex);
+        if (existing) {
+          recognitionUpdatedIds.add(key);
+        } else {
+          added += 1;
+          recognitionAddedIds.add(key);
+        }
       } else {
         throw new CatalogV2Error(`unsupported recognition delta operation ${JSON.stringify(operation.op)}`);
       }
@@ -453,14 +529,14 @@ export class CatalogV2FeedClient {
     if (usedEmbeddingIndexes.size !== upserts.length) {
       throw new CatalogV2Error("recognition delta embedding indexes must be contiguous and unique");
     }
-    if (
-      added !== updateEntry.rows.added ||
-      updated !== updateEntry.rows.updated ||
-      deleted !== updateEntry.rows.deleted
-    ) {
+    if (added !== updateEntry.rows.added || deleted !== updateEntry.rows.deleted) {
       throw new CatalogV2Error("recognition delta row classification does not match the feed");
     }
 
+    // `rows.updated` is a *global* classification: it also counts rows whose
+    // metadata changed with no corresponding recognition operation at all.
+    // Rows that were added or deleted this stage are never also "updated".
+    const metadataTouchedIds = new Set();
     if (includeMetadata) {
       const metadataRows = updateEntry.metadata.rows;
       const metadataOperations =
@@ -475,10 +551,15 @@ export class CatalogV2FeedClient {
       }
       for (const operation of metadataOperations) {
         const target = parseIdentityTarget(operation, "metadata delta");
+        const key = identityKey(target.id, target.faceIndex);
         const faces = byId.get(target.id);
         const entry = faces?.get(target.faceIndex);
+        const touchesSurvivingRow = !recognitionAddedIds.has(key) && !recognitionDeletedIds.has(key);
         if (operation.op === "delete") {
-          if (entry) delete entry.record.metadata;
+          if (entry) {
+            delete entry.record.metadata;
+            if (touchesSurvivingRow) metadataTouchedIds.add(key);
+          }
         } else if (operation.op === "upsert") {
           if (!entry) {
             throw new CatalogV2Error(
@@ -489,6 +570,7 @@ export class CatalogV2FeedClient {
             throw new CatalogV2Error("metadata delta upsert requires a metadata object");
           }
           entry.record.metadata = structuredClone(operation.metadata);
+          if (touchesSurvivingRow) metadataTouchedIds.add(key);
         } else {
           throw new CatalogV2Error(`unsupported metadata delta operation ${JSON.stringify(operation.op)}`);
         }
@@ -497,6 +579,17 @@ export class CatalogV2FeedClient {
       for (const faces of byId.values()) {
         for (const entry of faces.values()) delete entry.record.metadata;
       }
+    }
+
+    const updatedUnion = new Set([...recognitionUpdatedIds, ...metadataTouchedIds]);
+    if (includeMetadata) {
+      if (updatedUnion.size !== updateEntry.rows.updated) {
+        throw new CatalogV2Error("recognition delta row classification does not match the feed");
+      }
+    } else if (recognitionUpdatedIds.size > updateEntry.rows.updated) {
+      // Recognition-only mode never fetches metadata deltas, so a metadata-only
+      // touched row is invisible here; only a loose subset bound is checkable.
+      throw new CatalogV2Error("recognition delta row classification does not match the feed");
     }
 
     const flattened = [];
@@ -580,26 +673,29 @@ function normalizeGame(game) {
   return GAME_ALIASES[value] ?? value;
 }
 
-function discoverCatalog(feed, game, source) {
+function discoverCatalog(feed, game, source, { family = DEFAULT_FAMILY, profile = null } = {}) {
   const matches = [];
-  for (const [familyKey, family] of Object.entries(feed.families)) {
-    validateFamily(familyKey, family);
-    for (const [localKey, catalog] of Object.entries(family.catalogs)) {
+  for (const [familyKey, familyEntry] of Object.entries(feed.families)) {
+    if (family !== null && familyKey !== family) continue;
+    validateFamily(familyKey, familyEntry);
+    for (const [localKey, catalog] of Object.entries(familyEntry.catalogs)) {
       if (catalog.descriptor.game !== game || catalog.descriptor.source !== source) continue;
-      matches.push({ familyKey, localKey, family, catalog });
+      matches.push({ familyKey, localKey, family: familyEntry, catalog });
     }
   }
-  const recommended = matches.filter((match) => match.catalog.descriptor.recommended === true);
-  const pool = recommended.length > 0 ? recommended : matches;
+  const description = `game ${JSON.stringify(game)}, source ${JSON.stringify(source)}, family ${JSON.stringify(family)}${profile !== null ? `, profile ${JSON.stringify(profile)}` : ""}`;
+  const pool =
+    profile !== null
+      ? matches.filter((match) => match.catalog.descriptor.profile === profile)
+      : (() => {
+          const recommended = matches.filter((match) => match.catalog.descriptor.recommended === true);
+          return recommended.length > 0 ? recommended : matches;
+        })();
   if (pool.length === 0) {
-    throw new CatalogV2Error(
-      `no Catalog v2 feed entry matches game ${JSON.stringify(game)} and source ${JSON.stringify(source)}`,
-    );
+    throw new CatalogV2Error(`no Catalog v2 feed entry matches ${description}`);
   }
   if (pool.length > 1) {
-    throw new CatalogV2Error(
-      `multiple recommended Catalog v2 feed entries match game ${JSON.stringify(game)} and source ${JSON.stringify(source)}`,
-    );
+    throw new CatalogV2Error(`multiple Catalog v2 feed entries match ${description}`);
   }
   return finalizeResolution(pool[0]);
 }
@@ -661,6 +757,16 @@ function buildVersionChain(catalog) {
       throw new CatalogV2Error(`catalog has an unexpected update entry for version ${JSON.stringify(key)}`);
     }
   }
+  let runningRows = catalog.base.rows;
+  for (let index = 1; index < versions.length; index += 1) {
+    const update = catalog.updates[String(versions[index])];
+    runningRows += update.rows.added - update.rows.deleted;
+  }
+  if (runningRows !== catalog.rows) {
+    throw new CatalogV2Error(
+      "catalog's declared row count does not match its base and update row arithmetic",
+    );
+  }
   return versions;
 }
 
@@ -695,10 +801,7 @@ function parseIdentityRecord(value, descriptor, label) {
       `${label} identifier value`,
     );
   }
-  const faceIndex = value.face_index ?? 0;
-  if (!Number.isInteger(faceIndex) || faceIndex < 0) {
-    throw new CatalogV2Error(`${label} for id ${JSON.stringify(id)} has an invalid face_index`);
-  }
+  const faceIndex = parseFaceIndex(value.face_index, `${label} for id ${JSON.stringify(id)}`);
   let finishes;
   if (value.finishes !== undefined) {
     if (!Array.isArray(value.finishes) || value.finishes.length === 0) {
@@ -707,6 +810,13 @@ function parseIdentityRecord(value, descriptor, label) {
     finishes = value.finishes.map((finish, index) =>
       requiredString(finish, `${label} finishes[${index}]`),
     );
+    for (let index = 1; index < finishes.length; index += 1) {
+      if (finishes[index] <= finishes[index - 1]) {
+        throw new CatalogV2Error(
+          `${label} for id ${JSON.stringify(id)} has unsorted or duplicate finishes`,
+        );
+      }
+    }
   }
   return { id, faceIndex, identifiers, finishes };
 }
@@ -714,17 +824,28 @@ function parseIdentityRecord(value, descriptor, label) {
 function parseIdentityTarget(value, label) {
   if (!isObject(value)) throw new CatalogV2Error(`${label} must be a JSON object`);
   const id = requiredString(value.id, `${label} id`);
-  const faceIndex = value.face_index ?? 0;
-  if (!Number.isInteger(faceIndex) || faceIndex < 0) {
-    throw new CatalogV2Error(`${label} for id ${JSON.stringify(id)} has an invalid face_index`);
-  }
+  const faceIndex = parseFaceIndex(value.face_index, `${label} for id ${JSON.stringify(id)}`);
   return { id, faceIndex };
+}
+
+// `face_index` is omitted for front faces and defaults to 0; an explicit
+// literal 0 in the wire data is a non-canonical, rejected representation.
+function parseFaceIndex(rawFaceIndex, label) {
+  if (rawFaceIndex === undefined) return 0;
+  if (!Number.isInteger(rawFaceIndex) || rawFaceIndex <= 0) {
+    throw new CatalogV2Error(`${label} has an invalid face_index`);
+  }
+  return rawFaceIndex;
 }
 
 function compareIdentity(left, right) {
   if (left.id < right.id) return -1;
   if (left.id > right.id) return 1;
   return left.faceIndex - right.faceIndex;
+}
+
+function identityKey(id, faceIndex) {
+  return JSON.stringify([id, faceIndex]);
 }
 
 function parseFloat16Matrix(bytes, rows, dimension) {
@@ -842,14 +963,19 @@ function validateBaseEntry(base, fullCatalogKey) {
     !Number.isInteger(base.rows) ||
     base.rows < 0 ||
     typeof base.source_updated_at !== "string" ||
-    !isObject(base.recognition?.assets) ||
-    !isObject(base.metadata?.assets)
+    !isObject(base.recognition) ||
+    !isObject(base.metadata)
   ) {
     throw new CatalogV2Error(`catalog ${JSON.stringify(fullCatalogKey)} has an invalid base`);
   }
-  validateAssetReference(base.recognition.assets.embeddings, "base embeddings asset");
-  validateAssetReference(base.recognition.assets.identifiers, "base identifiers asset");
-  validateAssetReference(base.metadata.assets.records, "base metadata asset");
+  validateLayerAssets(base.recognition, base.rows, {
+    required: ["embeddings", "identifiers"],
+    label: `catalog ${JSON.stringify(fullCatalogKey)} base recognition`,
+  });
+  validateLayerAssets(base.metadata, base.rows, {
+    required: ["records"],
+    label: `catalog ${JSON.stringify(fullCatalogKey)} base metadata`,
+  });
 }
 
 function validateUpdateEntry(update, toVersion) {
@@ -865,20 +991,48 @@ function validateUpdateEntry(update, toVersion) {
     !isObject(update.recognition) ||
     !Number.isInteger(update.recognition.rows) ||
     update.recognition.rows < 0 ||
-    !isObject(update.recognition.assets) ||
     !isObject(update.metadata) ||
     !Number.isInteger(update.metadata.rows) ||
-    update.metadata.rows < 0 ||
-    !isObject(update.metadata.assets)
+    update.metadata.rows < 0
   ) {
     throw new CatalogV2Error(`update to version ${toVersion} has an invalid shape`);
   }
-  validateAssetReference(update.recognition.assets.identifiers, `update ${toVersion} recognition identifiers asset`);
-  if (update.recognition.rows > 0 || "embeddings" in update.recognition.assets) {
-    validateAssetReference(update.recognition.assets.embeddings, `update ${toVersion} recognition embeddings asset`);
+  validateLayerAssets(update.recognition, update.recognition.rows, {
+    required: ["identifiers"],
+    optional: ["embeddings"],
+    label: `update ${toVersion} recognition`,
+  });
+  validateLayerAssets(update.metadata, update.metadata.rows, {
+    required: ["records"],
+    label: `update ${toVersion} metadata`,
+  });
+}
+
+// A layer with zero rows carries no assets at all (e.g. a metadata-only
+// update stage has `recognition.rows === 0` and an empty `recognition.assets`
+// object); a layer with rows > 0 must declare every required asset and no
+// asset names beyond `required`/`optional`.
+function validateLayerAssets(layer, rows, { required = [], optional = [], label }) {
+  if (!isObject(layer.assets)) {
+    throw new CatalogV2Error(`${label} assets must be an object`);
   }
-  if (update.metadata.rows > 0 || "records" in update.metadata.assets) {
-    validateAssetReference(update.metadata.assets.records, `update ${toVersion} metadata asset`);
+  const allowed = new Set([...required, ...optional]);
+  for (const key of Object.keys(layer.assets)) {
+    if (!allowed.has(key)) {
+      throw new CatalogV2Error(`${label} has an unexpected asset ${JSON.stringify(key)}`);
+    }
+  }
+  if (rows === 0) {
+    if (Object.keys(layer.assets).length > 0) {
+      throw new CatalogV2Error(`${label} must not declare assets when rows is 0`);
+    }
+    return;
+  }
+  for (const name of required) {
+    validateAssetReference(layer.assets[name], `${label} ${name} asset`);
+  }
+  for (const name of optional) {
+    if (name in layer.assets) validateAssetReference(layer.assets[name], `${label} ${name} asset`);
   }
 }
 

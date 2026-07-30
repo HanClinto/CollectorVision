@@ -21,6 +21,7 @@ import {
   BrowserCatalogV2,
   CatalogV2FeedClient,
   CatalogV2Error,
+  CatalogV2IndexedDbCache,
 } from "../../examples/web_scanner/lib/collectorvision-catalog-v2.mjs";
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
@@ -158,6 +159,7 @@ class MemorySnapshotCache {
     this.snapshots = new Map();
     this.getCalls = 0;
     this.putCalls = 0;
+    this.deleteCalls = 0;
   }
 
   async get(version, catalogKey, includeMetadata) {
@@ -172,6 +174,181 @@ class MemorySnapshotCache {
       catalog,
     );
   }
+
+  async delete(version, catalogKey, includeMetadata) {
+    this.deleteCalls += 1;
+    this.snapshots.delete(`${version}\0${catalogKey}\0${includeMetadata}`);
+  }
+}
+
+/** A minimal, self-contained in-memory fake of the IndexedDB API surface used
+ * by CatalogV2IndexedDbCache: object stores keyed by `keyPath`, a single
+ * secondary index, cursors, and readwrite transactions. Real browsers behave
+ * the same way; Node has no native `indexedDB` global to test against.
+ * `pendingOps` tracks in-flight scheduled work so a transaction's
+ * `oncomplete` never fires before every request/cursor step it spawned
+ * (including cascading cursor `continue()` calls) has actually settled. */
+function makeFakeIndexedDb() {
+  const databases = new Map();
+  let pendingOps = 0;
+
+  function scheduleWork(fn) {
+    pendingOps += 1;
+    queueMicrotask(() => {
+      try {
+        fn();
+      } finally {
+        pendingOps -= 1;
+      }
+    });
+  }
+
+  class FakeRequest {
+    constructor() {
+      this.result = undefined;
+      this.error = undefined;
+      this.onsuccess = null;
+      this.onerror = null;
+    }
+    _succeed(result) {
+      this.result = result;
+      scheduleWork(() => this.onsuccess?.());
+    }
+    _fail(error) {
+      this.error = error;
+      scheduleWork(() => this.onerror?.());
+    }
+  }
+
+  class FakeIndex {
+    constructor(store, keyPath) {
+      this.store = store;
+      this.keyPath = keyPath;
+    }
+    #indexKeyFor(record) {
+      return JSON.stringify(this.keyPath.map((part) => record[part]));
+    }
+    openCursor(query) {
+      const request = new FakeRequest();
+      const targetKey = JSON.stringify(query);
+      const matches = [...this.store.records.values()].filter(
+        (record) => this.#indexKeyFor(record) === targetKey,
+      );
+      let index = 0;
+      const advance = () => {
+        if (index >= matches.length) {
+          request._succeed(null);
+          return;
+        }
+        const record = matches[index];
+        index += 1;
+        request._succeed({
+          value: record,
+          delete: () => this.store.records.delete(record.id),
+          continue: () => scheduleWork(advance),
+        });
+      };
+      scheduleWork(advance);
+      return request;
+    }
+  }
+
+  class FakeStore {
+    constructor(keyPath) {
+      this.keyPath = keyPath;
+      this.records = new Map();
+      this.indexes = new Map();
+    }
+    createIndex(name, keyPath) {
+      this.indexes.set(name, new FakeIndex(this, keyPath));
+    }
+    index(name) {
+      return this.indexes.get(name);
+    }
+    get indexNames() {
+      const names = this.indexes;
+      return { contains: (name) => names.has(name) };
+    }
+    get(key) {
+      const request = new FakeRequest();
+      scheduleWork(() => request._succeed(this.records.get(key)));
+      return request;
+    }
+    put(record) {
+      const request = new FakeRequest();
+      this.records.set(record[this.keyPath], structuredClone(record));
+      scheduleWork(() => request._succeed(record[this.keyPath]));
+      return request;
+    }
+    delete(key) {
+      const request = new FakeRequest();
+      this.records.delete(key);
+      scheduleWork(() => request._succeed(undefined));
+      return request;
+    }
+  }
+
+  class FakeTransaction {
+    constructor(store) {
+      this.store = store;
+      this.oncomplete = null;
+      this.onerror = null;
+      const check = () => {
+        if (pendingOps === 0) {
+          queueMicrotask(() => this.oncomplete?.());
+        } else {
+          queueMicrotask(check);
+        }
+      };
+      queueMicrotask(check);
+    }
+    objectStore() {
+      return this.store;
+    }
+  }
+
+  class FakeDatabase {
+    constructor() {
+      this.objectStoreMap = new Map();
+      this.version = 0;
+    }
+    get objectStoreNames() {
+      const names = this.objectStoreMap;
+      return { contains: (name) => names.has(name) };
+    }
+    createObjectStore(name, { keyPath }) {
+      const store = new FakeStore(keyPath);
+      this.objectStoreMap.set(name, store);
+      return store;
+    }
+    transaction(name) {
+      return new FakeTransaction(this.objectStoreMap.get(name));
+    }
+  }
+
+  return {
+    open(name, version) {
+      const request = new FakeRequest();
+      let database = databases.get(name);
+      const previousVersion = database ? database.version : 0;
+      const isNew = !database;
+      if (isNew) {
+        database = new FakeDatabase();
+        databases.set(name, database);
+      }
+      const needsUpgrade = version > previousVersion;
+      queueMicrotask(() => {
+        if (needsUpgrade) {
+          database.version = version;
+          request.result = database;
+          request.transaction = database.transaction("catalogs");
+          request.onupgradeneeded?.();
+        }
+        request._succeed(database);
+      });
+      return request;
+    },
+  };
 }
 
 /** Builds a single-family, single-catalog fixture with a base snapshot of two
@@ -180,7 +357,7 @@ class MemorySnapshotCache {
  * "card-b", update "card-c"). Returns the fixture plus the full catalog key. */
 async function buildFixture({ withUpdates = false, withMetadata = false } = {}) {
   const fixture = new FeedFixture();
-  const key = "fam1/scryfall/mtg";
+  const key = "milo1/scryfall/mtg";
 
   const baseIdentifiers = await fixture.putRows("scryfall-mtg/version/0/base/identifiers.jsonl.gz", [
     { id: "card-a", identifiers: { scryfall_oracle: "oracle-a" } },
@@ -268,7 +445,7 @@ async function buildFixture({ withUpdates = false, withMetadata = false } = {}) 
   fixture.setJson("catalog-feed-v2.json", {
     checked_at: "2026-07-26T12:00:00Z",
     families: {
-      fam1: {
+      milo1: {
         embedding: EMBEDDING,
         catalogs: { "scryfall/mtg": catalog },
       },
@@ -296,7 +473,7 @@ await test("loads a base-only catalog via BrowserCatalogV2.forGame", async () =>
   });
   assert(catalog instanceof BrowserCatalogV2);
   assert.equal(catalog.catalogKey, key);
-  assert.equal(catalog.familyKey, "fam1");
+  assert.equal(catalog.familyKey, "milo1");
   assert.equal(catalog.version, 0);
   assert.equal(catalog.rows, 2);
   assert.equal(catalog.dimension, 2);
@@ -314,17 +491,21 @@ await test("orders rows deterministically and reports public identifiers/finishe
     ],
   );
   const a = catalog.recordForIndex(0);
-  assert.equal(a.id, "card-a");
-  assert.equal(a.identifiers.scryfall_card, "card-a");
+  assert.equal(a.key, "scryfall:card-a");
+  assert.equal(a.card_id, "card-a");
+  assert.equal(a.result_identifier, "scryfall_card");
+  assert.equal("scryfall_card" in a.identifiers, false, "must not duplicate the primary id under identifiers");
   assert.equal(a.identifiers.scryfall_oracle, "oracle-a");
   assert.equal(a.face_index, 0);
-  assert.equal("finishes" in a, false);
+  assert.deepEqual(a.finishes, []);
   const b = catalog.recordForIndex(1);
+  assert.equal(b.key, "scryfall:card-b:face:1");
+  assert.equal(b.card_id, "card-b");
   assert.deepEqual(b.finishes, ["foil", "nonfoil"]);
   assert.equal(b.face_index, 1);
 });
 
-await test("search() dequantizes packed float16 embeddings and returns [score, id]", async () => {
+await test("search() dequantizes packed float16 embeddings and returns [score, card_id]", async () => {
   const { fixture } = await buildFixture();
   const catalog = await client(fixture).loadGame("mtg");
   assert.deepEqual(catalog.search(new Float32Array([0, 1]), 1), [[1, "card-b"]]);
@@ -339,7 +520,7 @@ console.log("\nMetadata optionality");
 
 await test("recognition-only load never fetches or exposes metadata", async () => {
   const { fixture } = await buildFixture();
-  const catalog = await client(fixture).loadCatalog("fam1/scryfall/mtg", { includeMetadata: false });
+  const catalog = await client(fixture).loadCatalog("milo1/scryfall/mtg", { includeMetadata: false });
   assert.equal(catalog.metadataLoaded, false);
   assert.equal("metadata" in catalog.recordForIndex(0), false);
   assert(fixture.calls.every((url) => !url.includes("metadata")));
@@ -347,10 +528,19 @@ await test("recognition-only load never fetches or exposes metadata", async () =
 
 await test("metadata load treats rows generically, including null and promo/layout fields", async () => {
   const { fixture } = await buildFixture({ withMetadata: true });
-  const catalog = await client(fixture).loadCatalog("fam1/scryfall/mtg", { includeMetadata: true });
+  const catalog = await client(fixture).loadCatalog("milo1/scryfall/mtg", { includeMetadata: true });
   assert.equal(catalog.metadataLoaded, true);
   assert.deepEqual(catalog.recordForIndex(0).metadata, { name: "Alpha" });
-  assert.equal("metadata" in catalog.recordForIndex(1), false, "null metadata rows expose no metadata field");
+  assert.equal(
+    "metadata" in catalog.recordForIndex(1),
+    true,
+    "metadata key must be present whenever metadataLoaded, even when there is no metadata",
+  );
+  assert.equal(
+    catalog.recordForIndex(1).metadata,
+    null,
+    "rows without metadata expose an explicit null, not an omitted key",
+  );
 });
 
 await test("metadata objects pass through opaque fields such as promo and layout untouched", async () => {
@@ -365,7 +555,7 @@ await test("metadata objects pass through opaque fields such as promo and layout
   fixture.setJson("catalog-feed-v2.json", {
     checked_at: "2026-07-26T12:00:00Z",
     families: {
-      fam1: {
+      milo1: {
         embedding: EMBEDDING,
         catalogs: {
           "scryfall/mtg": {
@@ -387,7 +577,7 @@ await test("metadata objects pass through opaque fields such as promo and layout
       },
     },
   });
-  const catalog = await client(fixture).loadCatalog("fam1/scryfall/mtg", { includeMetadata: true });
+  const catalog = await client(fixture).loadCatalog("milo1/scryfall/mtg", { includeMetadata: true });
   assert.deepEqual(catalog.recordForIndex(0).metadata, {
     name: "Wretched Gift",
     promo: true,
@@ -404,7 +594,7 @@ console.log("\nBase + multiple updates");
 
 await test("applies a base and two contiguous updates through current_version", async () => {
   const { fixture } = await buildFixture({ withUpdates: true, withMetadata: true });
-  const catalog = await client(fixture).loadCatalog("fam1/scryfall/mtg", { includeMetadata: true });
+  const catalog = await client(fixture).loadCatalog("milo1/scryfall/mtg", { includeMetadata: true });
   assert.equal(catalog.version, 2);
   assert.equal(catalog.rows, 2);
   assert.deepEqual(
@@ -420,7 +610,7 @@ await test("applies a base and two contiguous updates through current_version", 
 await test("reuses a compatible previous snapshot and only fetches remaining updates", async () => {
   const { fixture } = await buildFixture({ withUpdates: true });
   const feedClient = client(fixture);
-  const v1 = await feedClient.loadCatalog("fam1/scryfall/mtg", {
+  const v1 = await feedClient.loadCatalog("milo1/scryfall/mtg", {
     previous: null,
   });
   // Force the intermediate snapshot down to v1 for this assertion by loading
@@ -429,7 +619,7 @@ await test("reuses a compatible previous snapshot and only fetches remaining upd
   // all further network access.
   assert.equal(v1.version, 2);
   fixture.calls.length = 0;
-  const replayed = await feedClient.loadCatalog("fam1/scryfall/mtg", { previous: v1 });
+  const replayed = await feedClient.loadCatalog("milo1/scryfall/mtg", { previous: v1 });
   assert.equal(replayed, v1);
   assert.deepEqual(fixture.calls, [FEED_URL]);
 });
@@ -443,7 +633,7 @@ await test("continues from a mid-chain previous snapshot instead of restarting a
   const v1OnlyFeed = {
     checked_at: "2026-07-25T12:00:00Z",
     families: {
-      fam1: {
+      milo1: {
         embedding: EMBEDDING,
         catalogs: {
           "scryfall/mtg": {
@@ -457,11 +647,11 @@ await test("continues from a mid-chain previous snapshot instead of restarting a
     },
   };
   v0Fixture.setJson("catalog-feed-v2.json", v1OnlyFeed);
-  const v1 = await client(v0Fixture).loadCatalog("fam1/scryfall/mtg");
+  const v1 = await client(v0Fixture).loadCatalog("milo1/scryfall/mtg");
   assert.equal(v1.version, 1);
 
   fixture.calls.length = 0;
-  const v2 = await client(fixture).loadCatalog("fam1/scryfall/mtg", { previous: v1 });
+  const v2 = await client(fixture).loadCatalog("milo1/scryfall/mtg", { previous: v1 });
   assert.equal(v2.version, 2);
   assert(
     fixture.calls.some((url) => url.includes("version/2/delta-from-1")),
@@ -474,6 +664,227 @@ await test("continues from a mid-chain previous snapshot instead of restarting a
 });
 
 // ---------------------------------------------------------------------------
+// Global row classification: recognition/metadata overlap and rows==0 legality
+// ---------------------------------------------------------------------------
+
+console.log("\nGlobal row classification");
+
+/** A tcgplayer-MTG-style fixture whose single update stage touches "card-x"
+ * through both a recognition upsert and a metadata upsert, but touches
+ * "card-y" through a metadata upsert only (no recognition operation at all).
+ * The feed's `rows.updated` is a *global* union of both kinds of touches. */
+async function buildOverlapFixture() {
+  const fixture = new FeedFixture();
+  const key = "milo1/tcgplayer/mtg";
+
+  const baseIdentifiers = await fixture.putRows("tcgplayer-mtg/version/0/base/identifiers.jsonl.gz", [
+    { id: "card-x", identifiers: {} },
+    { id: "card-y", identifiers: {} },
+  ]);
+  const baseEmbeddings = await fixture.putEmbeddings("tcgplayer-mtg/version/0/base/embeddings.f16.gz", [
+    1, 0, 0, 1,
+  ]);
+  const baseMetadata = await fixture.putRows("tcgplayer-mtg/version/0/base/metadata.jsonl.gz", [
+    { name: "X" },
+    { name: "Y" },
+  ]);
+
+  const v1Identifiers = await fixture.putRows(
+    "tcgplayer-mtg/version/1/delta-from-0/identifiers.jsonl.gz",
+    [{ op: "upsert", record: { id: "card-x", identifiers: {} }, embedding_index: 0 }],
+  );
+  const v1Embeddings = await fixture.putEmbeddings(
+    "tcgplayer-mtg/version/1/delta-from-0/embeddings.f16.gz",
+    [0.5, 0.5],
+  );
+  const v1Metadata = await fixture.putRows("tcgplayer-mtg/version/1/delta-from-0/metadata.jsonl.gz", [
+    { op: "upsert", id: "card-x", metadata: { name: "X2" } },
+    { op: "upsert", id: "card-y", metadata: { name: "Y2" } },
+  ]);
+
+  fixture.setJson("catalog-feed-v2.json", {
+    checked_at: "2026-08-01T00:00:00Z",
+    families: {
+      milo1: {
+        embedding: EMBEDDING,
+        catalogs: {
+          "tcgplayer/mtg": {
+            public_name: "tcgplayer-mtg",
+            descriptor: descriptor({ source: "tcgplayer", result_identifier: "tcgplayer_product" }),
+            current_version: 1,
+            rows: 2,
+            source_updated_at: "2026-08-01T00:00:00Z",
+            base: {
+              version: 0,
+              rows: 2,
+              source_updated_at: "2026-07-31T00:00:00Z",
+              recognition: { assets: { embeddings: baseEmbeddings, identifiers: baseIdentifiers } },
+              metadata: { assets: { records: baseMetadata } },
+            },
+            updates: {
+              1: {
+                from_version: 0,
+                to_version: 1,
+                // Global: card-x (recognition + metadata) union card-y (metadata only) = 2.
+                rows: { added: 0, updated: 2, deleted: 0 },
+                source_updated_at: "2026-08-01T00:00:00Z",
+                recognition: { rows: 1, assets: { embeddings: v1Embeddings, identifiers: v1Identifiers } },
+                metadata: { rows: 2, assets: { records: v1Metadata } },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  return { fixture, key };
+}
+
+await test("with metadata loaded, rows.updated is the union of recognition- and metadata-touched rows", async () => {
+  const { fixture, key } = await buildOverlapFixture();
+  const catalog = await client(fixture).loadCatalog(key, { includeMetadata: true });
+  assert.equal(catalog.version, 1);
+  const byCardId = new Map(catalog.records.map((r, index) => [r.id, catalog.recordForIndex(index)]));
+  assert.equal(byCardId.get("card-x").metadata.name, "X2");
+  assert.equal(byCardId.get("card-y").metadata.name, "Y2");
+});
+
+await test("recognition-only mode never rejects a row that was only metadata-updated", async () => {
+  const { fixture, key } = await buildOverlapFixture();
+  const catalog = await client(fixture).loadCatalog(key, { includeMetadata: false });
+  assert.equal(catalog.version, 1);
+  assert.equal(catalog.metadataLoaded, false);
+  assert(
+    fixture.calls.every((url) => !url.includes("metadata")),
+    "recognition-only mode must never fetch metadata deltas just to validate row counts",
+  );
+});
+
+await test("a metadata-only update stage is legal with recognition.rows == 0 and empty assets", async () => {
+  const fixture = new FeedFixture();
+  const key = "milo1/scryfall/mtg";
+  const baseIdentifiers = await fixture.putRows("g/version/0/base/identifiers.jsonl.gz", [
+    { id: "card-a", identifiers: {} },
+    { id: "card-b", identifiers: {} },
+  ]);
+  const baseEmbeddings = await fixture.putEmbeddings("g/version/0/base/embeddings.f16.gz", [1, 0, 0, 1]);
+  const baseMetadata = await fixture.putRows("g/version/0/base/metadata.jsonl.gz", [
+    { name: "Alpha" },
+    { name: "Beta" },
+  ]);
+  const v1Metadata = await fixture.putRows("g/version/1/delta-from-0/metadata.jsonl.gz", [
+    { op: "upsert", id: "card-a", metadata: { name: "Alpha II" } },
+  ]);
+  fixture.setJson("catalog-feed-v2.json", {
+    checked_at: "2026-08-01T00:00:00Z",
+    families: {
+      milo1: {
+        embedding: EMBEDDING,
+        catalogs: {
+          "scryfall/mtg": {
+            public_name: "scryfall-mtg",
+            descriptor: descriptor(),
+            current_version: 1,
+            rows: 2,
+            source_updated_at: "2026-08-01T00:00:00Z",
+            base: {
+              version: 0,
+              rows: 2,
+              source_updated_at: "2026-07-31T00:00:00Z",
+              recognition: { assets: { embeddings: baseEmbeddings, identifiers: baseIdentifiers } },
+              metadata: { assets: { records: baseMetadata } },
+            },
+            updates: {
+              1: {
+                from_version: 0,
+                to_version: 1,
+                rows: { added: 0, updated: 1, deleted: 0 },
+                source_updated_at: "2026-08-01T00:00:00Z",
+                recognition: { rows: 0, assets: {} },
+                metadata: { rows: 1, assets: { records: v1Metadata } },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const catalog = await client(fixture).loadCatalog(key, { includeMetadata: true });
+  assert.equal(catalog.version, 1);
+  assert.equal(catalog.recordForIndex(0).metadata.name, "Alpha II");
+  assert(
+    fixture.calls.every((url) => !url.includes("version/1/delta-from-0/identifiers")),
+    "a recognition.rows == 0 stage must never fetch a recognition identifiers asset",
+  );
+});
+
+await test("rejects an update that declares recognition assets despite recognition.rows == 0", async () => {
+  const { fixture } = await buildFixture({ withUpdates: true });
+  const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
+  const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
+  entry.recognition.rows = 0;
+  // assets is left non-empty despite rows == 0: inconsistent and must be rejected.
+  fixture.setJson("catalog-feed-v2.json", feed);
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /must not declare assets when rows is 0/,
+  );
+});
+
+await test("rejects an update that omits required metadata assets despite metadata.rows > 0", async () => {
+  const { fixture } = await buildFixture({ withUpdates: true, withMetadata: true });
+  const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
+  const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
+  entry.metadata.assets = {};
+  fixture.setJson("catalog-feed-v2.json", feed);
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg", { includeMetadata: true }),
+    /metadata records asset/,
+  );
+});
+
+await test("rejects a catalog whose declared row count disagrees with base + update arithmetic", async () => {
+  const { fixture } = await buildFixture({ withUpdates: true });
+  const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
+  feed.families.milo1.catalogs["scryfall/mtg"].rows = 999;
+  fixture.setJson("catalog-feed-v2.json", feed);
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /row count does not match its base and update row arithmetic/,
+  );
+});
+
+await test("rejects a base row with an explicit face_index of 0", async () => {
+  const fixture = await buildBrokenBaseFixture([{ id: "card-a", identifiers: {}, face_index: 0 }]);
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /invalid face_index/,
+  );
+});
+
+await test("rejects unsorted finishes in a base row", async () => {
+  const fixture = await buildBrokenBaseFixture([
+    { id: "card-a", identifiers: {}, finishes: ["nonfoil", "foil"] },
+  ]);
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /unsorted or duplicate finishes/,
+  );
+});
+
+await test("rejects duplicate finishes in a base row", async () => {
+  const fixture = await buildBrokenBaseFixture([
+    { id: "card-a", identifiers: {}, finishes: ["foil", "foil"] },
+  ]);
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /unsorted or duplicate finishes/,
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Persistent cache: latest hit and stale/incompatible fallback
 // ---------------------------------------------------------------------------
 
@@ -482,12 +893,13 @@ console.log("\nPersistent cache");
 await test("a cached snapshot already at current_version skips every asset fetch", async () => {
   const { fixture } = await buildFixture({ withUpdates: true });
   const cache = new MemorySnapshotCache();
-  const warm = await client(fixture, { cache }).loadCatalog("fam1/scryfall/mtg");
+  const warm = await client(fixture, { cache }).loadCatalog("milo1/scryfall/mtg");
   assert.equal(warm.version, 2);
-  assert.equal(cache.snapshots.size, 3); // base, v1, v2 all persisted along the way
+  assert.equal(cache.putCalls, 1, "only the final resolved snapshot should ever be persisted");
+  assert.equal(cache.snapshots.size, 1);
 
   fixture.calls.length = 0;
-  const cached = await client(fixture, { cache }).loadCatalog("fam1/scryfall/mtg");
+  const cached = await client(fixture, { cache }).loadCatalog("milo1/scryfall/mtg");
   assert.equal(cached.version, 2);
   assert.deepEqual(fixture.calls, [FEED_URL], "only the feed document should be fetched on a cache hit");
 });
@@ -559,6 +971,104 @@ await test("cache read/write failures are tolerated and do not block loading", a
   }
 });
 
+await test("only the final snapshot is ever persisted across a base + multiple updates load", async () => {
+  const { fixture, key } = await buildFixture({ withUpdates: true });
+  const cache = new MemorySnapshotCache();
+  const catalog = await client(fixture, { cache }).loadCatalog(key);
+  assert.equal(catalog.version, 2);
+  assert.equal(cache.putCalls, 1, "intermediate base/v1 stages must never be persisted");
+  assert.equal(cache.snapshots.size, 1);
+});
+
+await test("advancing the feed prunes the now-stale cached version for the same catalog/mode", async () => {
+  const { fixture, key, catalog: catalogV2 } = await buildFixture({ withUpdates: true });
+  const cache = new MemorySnapshotCache();
+
+  // First, load and cache only the base (current_version 0) snapshot.
+  const v0Fixture = new FeedFixture();
+  v0Fixture.files = new Map(fixture.files);
+  v0Fixture.setJson("catalog-feed-v2.json", {
+    checked_at: "2026-07-24T12:00:00Z",
+    families: {
+      milo1: {
+        embedding: EMBEDDING,
+        catalogs: { "scryfall/mtg": { ...catalogV2, current_version: 0, rows: 2, updates: {} } },
+      },
+    },
+  });
+  const v0 = await client(v0Fixture, { cache }).loadCatalog(key);
+  assert.equal(v0.version, 0);
+  assert.equal(cache.snapshots.size, 1);
+  assert(cache.snapshots.has(`0\0${key}\0false`));
+
+  // Now the feed has advanced to current_version 2; loading again with the
+  // same cache must land on v2 and must not leave the stale v0 entry behind.
+  const v2 = await client(fixture, { cache }).loadCatalog(key);
+  assert.equal(v2.version, 2);
+  assert.equal(cache.snapshots.size, 1, "the stale v0 entry must be pruned, not accumulated alongside v2");
+  assert(cache.snapshots.has(`2\0${key}\0false`));
+  assert(!cache.snapshots.has(`0\0${key}\0false`));
+  assert(cache.deleteCalls > 0, "pruning must go through the cache's delete() method");
+});
+
+await test("CatalogV2IndexedDbCache keeps only one row per catalog/mode after multiple loads", async () => {
+  const indexedDb = makeFakeIndexedDb();
+  const { fixture, key, catalog: catalogV2 } = await buildFixture({ withUpdates: true });
+  const cache = new CatalogV2IndexedDbCache({ indexedDb, databaseName: "test-db" });
+
+  const v0Fixture = new FeedFixture();
+  v0Fixture.files = new Map(fixture.files);
+  v0Fixture.setJson("catalog-feed-v2.json", {
+    checked_at: "2026-07-24T12:00:00Z",
+    families: {
+      milo1: {
+        embedding: EMBEDDING,
+        catalogs: { "scryfall/mtg": { ...catalogV2, current_version: 0, rows: 2, updates: {} } },
+      },
+    },
+  });
+  const v0 = await client(v0Fixture, { cache }).loadCatalog(key);
+  assert.equal(v0.version, 0);
+
+  const v2 = await client(fixture, { cache }).loadCatalog(key);
+  assert.equal(v2.version, 2);
+
+  // Re-fetch straight from the cache to confirm exactly the final version survives.
+  const roundTripped = await cache.get(2, key, false);
+  assert.equal(roundTripped.version, 2);
+  const stale = await cache.get(0, key, false);
+  assert.equal(stale, null, "the stale v0 row must have been pruned by put()'s index scan");
+});
+
+await test("CatalogV2IndexedDbCache.delete() removes a specific version without touching others", async () => {
+  const indexedDb = makeFakeIndexedDb();
+  const cache = new CatalogV2IndexedDbCache({ indexedDb, databaseName: "test-db-2" });
+  const { fixture, key } = await buildFixture();
+  const snapshot = await client(fixture, { cache }).loadCatalog(key);
+  assert.equal((await cache.get(snapshot.version, key, false)).version, snapshot.version);
+  await cache.delete(snapshot.version, key, false);
+  assert.equal(await cache.get(snapshot.version, key, false), null);
+});
+
+await test("pruning is scoped per catalog/mode and never deletes unrelated cache entries", async () => {
+  const indexedDb = makeFakeIndexedDb();
+  const cache = new CatalogV2IndexedDbCache({ indexedDb, databaseName: "test-db-3" });
+  const { fixture, key } = await buildFixture({ withUpdates: true });
+
+  // Cache the same catalog in both recognition-only and metadata modes; the
+  // recognition-only mode's own prune pass must not disturb the metadata
+  // mode's cached row, and vice versa.
+  await client(fixture, { cache }).loadCatalog(key, { includeMetadata: false });
+  await client(fixture, { cache }).loadCatalog(key, { includeMetadata: true });
+
+  const recognitionOnly = await cache.get(2, key, false);
+  const withMetadata = await cache.get(2, key, true);
+  assert.equal(recognitionOnly.version, 2);
+  assert.equal(withMetadata.version, 2);
+  assert.equal(withMetadata.metadataLoaded, true);
+  assert.equal(recognitionOnly.metadataLoaded, false);
+});
+
 // ---------------------------------------------------------------------------
 // Checksums, sizes, and transport
 // ---------------------------------------------------------------------------
@@ -568,7 +1078,7 @@ console.log("\nChecksums, sizes, and HTTPS");
 await test("rejects an asset whose bytes do not match the declared size", async () => {
   const { fixture, key } = await buildFixture();
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  const embeddingsUrl = feed.families.fam1.catalogs["scryfall/mtg"].base.recognition.assets.embeddings.url;
+  const embeddingsUrl = feed.families.milo1.catalogs["scryfall/mtg"].base.recognition.assets.embeddings.url;
   fixture.replace(embeddingsUrl, new Uint8Array([1, 2, 3]));
   await assert.rejects(() => client(fixture).loadCatalog(key), /size mismatch/);
 });
@@ -576,7 +1086,7 @@ await test("rejects an asset whose bytes do not match the declared size", async 
 await test("rejects an asset whose bytes do not match the declared sha256", async () => {
   const { fixture, key } = await buildFixture();
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  const idsRef = feed.families.fam1.catalogs["scryfall/mtg"].base.recognition.assets.identifiers;
+  const idsRef = feed.families.milo1.catalogs["scryfall/mtg"].base.recognition.assets.identifiers;
   const original = fixture.files.get(idsRef.url);
   const tampered = new Uint8Array(original);
   tampered[tampered.length - 1] ^= 0xff; // flip a byte without changing length
@@ -588,8 +1098,8 @@ await test("rejects an asset whose bytes do not match the declared sha256", asyn
 await test("rejects a non-HTTPS asset URL", async () => {
   const { fixture, key } = await buildFixture();
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  feed.families.fam1.catalogs["scryfall/mtg"].base.recognition.assets.identifiers.url =
-    feed.families.fam1.catalogs["scryfall/mtg"].base.recognition.assets.identifiers.url.replace(
+  feed.families.milo1.catalogs["scryfall/mtg"].base.recognition.assets.identifiers.url =
+    feed.families.milo1.catalogs["scryfall/mtg"].base.recognition.assets.identifiers.url.replace(
       "https://",
       "http://",
     );
@@ -617,7 +1127,7 @@ async function buildBrokenBaseFixture(rows) {
   fixture.setJson("catalog-feed-v2.json", {
     checked_at: "2026-07-26T12:00:00Z",
     families: {
-      fam1: {
+      milo1: {
         embedding: EMBEDDING,
         catalogs: {
           "scryfall/mtg": {
@@ -648,7 +1158,7 @@ await test("rejects a duplicate (id, face_index) identity in the base", async ()
     { id: "dup", identifiers: {} },
   ]);
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /duplicate base row identity/,
   );
 });
@@ -658,7 +1168,7 @@ await test("rejects a base row that duplicates the primary id under identifiers"
     { id: "card-a", identifiers: { scryfall_card: "card-a" } },
   ]);
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /must not duplicate the primary id/,
   );
 });
@@ -666,7 +1176,7 @@ await test("rejects a base row that duplicates the primary id under identifiers"
 await test("rejects a base row with a negative face_index", async () => {
   const fixture = await buildBrokenBaseFixture([{ id: "card-a", identifiers: {}, face_index: -1 }]);
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /invalid face_index/,
   );
 });
@@ -674,7 +1184,7 @@ await test("rejects a base row with a negative face_index", async () => {
 await test("rejects a base row missing a non-empty id", async () => {
   const fixture = await buildBrokenBaseFixture([{ identifiers: {} }]);
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     CatalogV2Error,
   );
 });
@@ -688,7 +1198,7 @@ console.log("\nDelta failures");
 async function buildDeltaFailureFixture(mutateUpdate) {
   const { fixture, catalog } = await buildFixture({ withUpdates: true });
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  mutateUpdate(feed.families.fam1.catalogs["scryfall/mtg"].updates["1"], catalog);
+  mutateUpdate(feed.families.milo1.catalogs["scryfall/mtg"].updates["1"], catalog);
   fixture.setJson("catalog-feed-v2.json", feed);
   return fixture;
 }
@@ -698,7 +1208,7 @@ await test("rejects a recognition delta whose operation count does not match the
     update.recognition.rows = 3;
   });
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /operation count/,
   );
 });
@@ -710,11 +1220,11 @@ await test("rejects a recognition delta with an out-of-range embedding_index", a
     { op: "upsert", record: { id: "card-a", identifiers: {} }, embedding_index: 5 },
     { op: "upsert", record: { id: "card-c", identifiers: {} }, embedding_index: 1 },
   ]);
-  feed.families.fam1.catalogs["scryfall/mtg"].updates["1"].recognition.assets.identifiers = badIdentifiers;
+  feed.families.milo1.catalogs["scryfall/mtg"].updates["1"].recognition.assets.identifiers = badIdentifiers;
   fixture.setJson("catalog-feed-v2.json", feed);
   void catalog;
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /invalid embedding_index/,
   );
 });
@@ -726,10 +1236,10 @@ await test("rejects a recognition delta with duplicate embedding_index assignmen
     { op: "upsert", record: { id: "card-a", identifiers: {} }, embedding_index: 0 },
     { op: "upsert", record: { id: "card-c", identifiers: {} }, embedding_index: 0 },
   ]);
-  feed.families.fam1.catalogs["scryfall/mtg"].updates["1"].recognition.assets.identifiers = badIdentifiers;
+  feed.families.milo1.catalogs["scryfall/mtg"].updates["1"].recognition.assets.identifiers = badIdentifiers;
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /invalid embedding_index/,
   );
 });
@@ -748,23 +1258,28 @@ await test("rejects a recognition delta that deletes a row not present in the pr
     "scryfall-mtg/version/1/delta-from-0/missing-delete.f16.gz",
     [1, 0],
   );
-  const entry = feed.families.fam1.catalogs["scryfall/mtg"].updates["1"];
+  const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
   entry.recognition.assets.identifiers = badIdentifiers;
   entry.recognition.assets.embeddings = embeddings;
-  entry.rows = { added: 1, updated: 0, deleted: 1 };
+  // Keep added - deleted == 1 so the feed's row arithmetic still checks out;
+  // the malformed delete must fail during operation processing, not during
+  // the earlier row-arithmetic check.
+  entry.rows = { added: 1, updated: 0, deleted: 0 };
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /deletes a row that is not present/,
   );
 });
 
 await test("rejects a recognition delta whose row classification disagrees with the feed", async () => {
   const fixture = await buildDeltaFailureFixture((update) => {
-    update.rows = { added: 0, updated: 2, deleted: 0 };
+    // Only "updated" is wrong; added/deleted stay consistent with the feed's
+    // row arithmetic so this exercises the classification check specifically.
+    update.rows = { added: 1, updated: 0, deleted: 0 };
   });
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /row classification/,
   );
 });
@@ -783,12 +1298,12 @@ await test("rejects an unsupported recognition delta operation", async () => {
     "scryfall-mtg/version/1/delta-from-0/bad-op.f16.gz",
     [0.5, 0.5],
   );
-  const entry = feed.families.fam1.catalogs["scryfall/mtg"].updates["1"];
+  const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
   entry.recognition.assets.identifiers = badIdentifiers;
   entry.recognition.assets.embeddings = badEmbeddings;
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /unsupported recognition delta operation/,
   );
 });
@@ -800,12 +1315,12 @@ await test("rejects a metadata delta upsert that targets a row absent from recog
     "scryfall-mtg/version/1/delta-from-0/bad-metadata.jsonl.gz",
     [{ op: "upsert", id: "card-does-not-exist", metadata: { name: "Ghost" } }],
   );
-  const entry = feed.families.fam1.catalogs["scryfall/mtg"].updates["1"];
+  const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
   entry.metadata.assets.records = badMetadata;
   entry.metadata.rows = 1;
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg", { includeMetadata: true }),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg", { includeMetadata: true }),
     /metadata delta upserts a row that is not present/,
   );
 });
@@ -813,10 +1328,10 @@ await test("rejects a metadata delta upsert that targets a row absent from recog
 await test("rejects a catalog whose update chain skips a version", async () => {
   const { fixture } = await buildFixture({ withUpdates: true });
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  delete feed.families.fam1.catalogs["scryfall/mtg"].updates["1"];
+  delete feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /missing an update/,
   );
 });
@@ -824,10 +1339,10 @@ await test("rejects a catalog whose update chain skips a version", async () => {
 await test("rejects a catalog whose update declares the wrong exact-predecessor base", async () => {
   const { fixture } = await buildFixture({ withUpdates: true });
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  feed.families.fam1.catalogs["scryfall/mtg"].updates["2"].from_version = 0;
+  feed.families.milo1.catalogs["scryfall/mtg"].updates["2"].from_version = 0;
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(
-    () => client(fixture).loadCatalog("fam1/scryfall/mtg"),
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /exact-predecessor delta/,
   );
 });
@@ -869,6 +1384,13 @@ async function buildMultiCatalogFixture() {
     result_identifier: "scryfall_card",
     recommended: true,
   });
+  const scryfallMtgAlt = await simpleCatalog("scryfall-mtg-alt", "scryfall-mtg-alt", {
+    game: "magic-the-gathering",
+    source: "scryfall",
+    profile: "alt",
+    result_identifier: "scryfall_card",
+    recommended: false,
+  });
   const tcgplayerMtg = await simpleCatalog("tcgplayer-mtg", "tcgplayer-mtg", {
     game: "magic-the-gathering",
     source: "tcgplayer",
@@ -881,20 +1403,35 @@ async function buildMultiCatalogFixture() {
     result_identifier: "tcgplayer_product",
     recommended: true,
   });
+  const tcgplayerDbs = await simpleCatalog("tcgplayer-dbs", "tcgplayer-dbs", {
+    game: "dragon-ball-super",
+    source: "tcgplayer",
+    result_identifier: "tcgplayer_product",
+    recommended: true,
+  });
+  const tcgplayerLorcana = await simpleCatalog("tcgplayer-lorcana", "tcgplayer-lorcana", {
+    game: "lorcana",
+    source: "tcgplayer",
+    result_identifier: "tcgplayer_product",
+    recommended: true,
+  });
 
   fixture.setJson("catalog-feed-v2.json", {
     checked_at: "2026-07-26T12:00:00Z",
     families: {
-      fam1: {
+      milo1: {
         embedding: EMBEDDING,
         catalogs: {
           "scryfall/mtg": scryfallMtg,
+          "scryfall/mtg-alt": scryfallMtgAlt,
           "tcgplayer/mtg": tcgplayerMtg,
+          "tcgplayer/pokemon": tcgplayerPokemon,
+          "tcgplayer/dbs": tcgplayerDbs,
         },
       },
-      fam2: {
+      milo2: {
         embedding: EMBEDDING,
-        catalogs: { "tcgplayer/pokemon": tcgplayerPokemon },
+        catalogs: { "tcgplayer/lorcana": tcgplayerLorcana },
       },
     },
   });
@@ -904,22 +1441,58 @@ async function buildMultiCatalogFixture() {
 await test("defaults to the recommended Scryfall catalog for MTG", async () => {
   const fixture = await buildMultiCatalogFixture();
   const catalog = await client(fixture).loadGame("mtg");
-  assert.equal(catalog.catalogKey, "fam1/scryfall/mtg");
+  assert.equal(catalog.catalogKey, "milo1/scryfall/mtg");
+  assert.equal(catalog.familyKey, "milo1");
   assert.equal(catalog.descriptor.source, "scryfall");
 });
 
 await test("defaults to the recommended TCGplayer catalog for other games", async () => {
   const fixture = await buildMultiCatalogFixture();
   const catalog = await client(fixture).loadGame("pokemon");
-  assert.equal(catalog.catalogKey, "fam2/tcgplayer/pokemon");
+  assert.equal(catalog.catalogKey, "milo1/tcgplayer/pokemon");
   assert.equal(catalog.descriptor.source, "tcgplayer");
 });
 
 await test("an explicit source overrides the default and still finds the recommended descriptor", async () => {
   const fixture = await buildMultiCatalogFixture();
   const catalog = await client(fixture).loadGame("mtg", { source: "tcgplayer" });
-  assert.equal(catalog.catalogKey, "fam1/tcgplayer/mtg");
+  assert.equal(catalog.catalogKey, "milo1/tcgplayer/mtg");
   assert.equal(catalog.descriptor.result_identifier, "tcgplayer_product");
+});
+
+await test("the dbs alias resolves to dragon-ball-super with the TCGplayer fallback source", async () => {
+  const fixture = await buildMultiCatalogFixture();
+  const catalog = await client(fixture).loadGame("dbs");
+  assert.equal(catalog.catalogKey, "milo1/tcgplayer/dbs");
+  assert.equal(catalog.descriptor.game, "dragon-ball-super");
+  assert.equal(catalog.descriptor.source, "tcgplayer");
+});
+
+await test("the default family is milo1 and does not search other families", async () => {
+  const fixture = await buildMultiCatalogFixture();
+  await assert.rejects(
+    () => client(fixture).loadGame("lorcana"),
+    /no Catalog v2 feed entry matches/,
+  );
+});
+
+await test("an explicit family selects a catalog outside the default milo1 family", async () => {
+  const fixture = await buildMultiCatalogFixture();
+  const catalog = await client(fixture).loadGame("lorcana", { family: "milo2" });
+  assert.equal(catalog.catalogKey, "milo2/tcgplayer/lorcana");
+});
+
+await test("family: null searches every family in the feed", async () => {
+  const fixture = await buildMultiCatalogFixture();
+  const catalog = await client(fixture).loadGame("lorcana", { family: null });
+  assert.equal(catalog.catalogKey, "milo2/tcgplayer/lorcana");
+});
+
+await test("an explicit profile selects a catalog regardless of its recommended flag", async () => {
+  const fixture = await buildMultiCatalogFixture();
+  const catalog = await client(fixture).loadGame("mtg", { profile: "alt" });
+  assert.equal(catalog.catalogKey, "milo1/scryfall/mtg-alt");
+  assert.equal(catalog.descriptor.profile, "alt");
 });
 
 await test("rejects a game/source combination with no matching feed entry", async () => {
@@ -933,20 +1506,20 @@ await test("rejects a game/source combination with no matching feed entry", asyn
 await test("rejects an ambiguous game/source combination with multiple recommended entries", async () => {
   const fixture = await buildMultiCatalogFixture();
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  feed.families.fam2.catalogs["tcgplayer/mtg-2"] = {
-    ...feed.families.fam1.catalogs["tcgplayer/mtg"],
+  feed.families.milo1.catalogs["tcgplayer/mtg-2"] = {
+    ...feed.families.milo1.catalogs["tcgplayer/mtg"],
   };
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(
     () => client(fixture).loadGame("mtg", { source: "tcgplayer" }),
-    /multiple recommended/,
+    /multiple Catalog v2 feed entries match/,
   );
 });
 
 await test("loadCatalog() loads directly by full catalog key without game discovery", async () => {
   const fixture = await buildMultiCatalogFixture();
-  const catalog = await client(fixture).loadCatalog("fam2/tcgplayer/pokemon");
-  assert.equal(catalog.catalogKey, "fam2/tcgplayer/pokemon");
+  const catalog = await client(fixture).loadCatalog("milo1/tcgplayer/pokemon");
+  assert.equal(catalog.catalogKey, "milo1/tcgplayer/pokemon");
 });
 
 // ---------------------------------------------------------------------------
