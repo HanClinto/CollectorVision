@@ -1,9 +1,19 @@
-const BETA_TAG = /^catalog-v2-beta\.[1-9][0-9]*-[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
-const INDEX_FILENAME = "catalog-index-v2.json";
-const FEED_FILENAME = "catalog-feed-v2.json";
-const DEFAULT_RELEASE_BASE_URL =
-  "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/";
-const GAME_NAMES = Object.freeze({
+// Client for the live CollectorVisionCatalog v2 contract.
+//
+// The only document a normal client needs is the moving feed
+// (`catalog-feed-v2.json`). It nests catalogs under immutable embedding
+// families and advertises the newest usable base plus each subsequent
+// exact-predecessor update through `current_version`. There are no release
+// tags, manifests, or per-release indexes: every asset URL, size, and
+// SHA-256 in the feed is authoritative on its own.
+
+const DEFAULT_FEED_URL =
+  "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-feed-v2.json";
+
+// Short aliases are a purely ergonomic convenience for `forGame`/`loadGame`.
+// They are never used to construct a catalog path: the matching catalog is
+// always discovered from the feed by descriptor.
+const GAME_ALIASES = Object.freeze({
   mtg: "magic-the-gathering",
   pokemon: "pokemon",
   yugioh: "yugioh",
@@ -13,16 +23,11 @@ const GAME_NAMES = Object.freeze({
   onepiece: "one-piece",
   swu: "star-wars-unlimited",
 });
-const PRIMARY_SOURCES = Object.freeze({
-  mtg: "scryfall",
-  pokemon: "tcgplayer",
-  yugioh: "tcgplayer",
-  fab: "tcgplayer",
-  lorcana: "tcgplayer",
-  digimon: "tcgplayer",
-  onepiece: "tcgplayer",
-  swu: "tcgplayer",
+
+const DEFAULT_SOURCE_BY_GAME = Object.freeze({
+  "magic-the-gathering": "scryfall",
 });
+const FALLBACK_SOURCE = "tcgplayer";
 
 export class CatalogV2Error extends Error {}
 
@@ -30,28 +35,45 @@ export class BrowserCatalogV2 {
   static async forGame(game, options = {}) {
     const {
       fetchImpl = globalThis.fetch,
-      releaseBaseUrl = DEFAULT_RELEASE_BASE_URL,
+      feedUrl = DEFAULT_FEED_URL,
       cache = null,
       ...selection
     } = options;
-    const client = new CatalogV2BrowserClient({ fetchImpl, releaseBaseUrl, cache });
+    const client = new CatalogV2FeedClient({ fetchImpl, feedUrl, cache });
     return client.loadGame(game, selection);
   }
 
-  constructor({ manifest, records, embeddings, metadataLoaded = false }) {
-    this.manifest = Object.freeze(structuredClone(manifest));
-    this.catalogKey = manifest.catalog_key;
-    this.version = manifest.version;
-    this.embeddingModel = manifest.embedding_model;
-    this.descriptor = Object.freeze({ ...manifest.descriptor });
-    this.dimension = manifest.dim;
+  constructor({
+    familyKey,
+    catalogKey,
+    publicName,
+    descriptor,
+    embedding,
+    version,
+    sourceUpdatedAt,
+    records,
+    embeddings,
+    metadataLoaded,
+  }) {
+    this.familyKey = familyKey;
+    this.catalogKey = catalogKey;
+    this.publicName = publicName;
+    this.descriptor = Object.freeze({ ...descriptor });
+    this.embedding = Object.freeze({ ...embedding });
+    this.dimension = embedding.dimensions;
+    this.version = version;
+    this.sourceUpdatedAt = sourceUpdatedAt;
     this.records = Object.freeze(records);
     this.embeddings = embeddings;
     this.metadataLoaded = metadataLoaded;
   }
 
+  get rows() {
+    return this.records.length;
+  }
+
   search(query, topK = 5) {
-    return this.searchRecords(query, topK).map(({ score, card_id }) => [score, card_id]);
+    return this.searchRecords(query, topK).map(({ score, id }) => [score, id]);
   }
 
   searchRecords(query, topK = 5) {
@@ -80,14 +102,19 @@ export class BrowserCatalogV2 {
   recordForIndex(index, score = undefined) {
     const record = this.records[index];
     if (!record) throw new RangeError(`catalog row ${index} is out of range`);
-    const result = {
-      key: record.key,
-      identifiers: { ...record.identifiers },
-      face_index: record.face_index,
-      result_identifier: this.descriptor.result_identifier,
-      card_id: record.identifiers[this.descriptor.result_identifier],
+    return this.#toPublicRecord(record, score);
+  }
+
+  #toPublicRecord(record, score) {
+    const identifiers = {
+      ...record.identifiers,
+      [this.descriptor.result_identifier]: record.id,
     };
-    if (record.metadata !== undefined) result.metadata = structuredClone(record.metadata);
+    const result = { id: record.id, identifiers, face_index: record.faceIndex };
+    if (record.finishes !== undefined) result.finishes = [...record.finishes];
+    if (this.metadataLoaded && record.metadata !== undefined) {
+      result.metadata = structuredClone(record.metadata);
+    }
     if (score !== undefined) result.score = score;
     return result;
   }
@@ -104,24 +131,31 @@ export class CatalogV2IndexedDbCache {
     this.databasePromise = null;
   }
 
-  async get(tag, catalogKey, includeMetadata) {
+  async get(version, catalogKey, includeMetadata) {
     const database = await this.#database();
     const snapshot = await requestResult(
       database
         .transaction("catalogs", "readonly")
         .objectStore("catalogs")
-        .get(snapshotKey(tag, catalogKey, includeMetadata)),
+        .get(snapshotKey(version, catalogKey, includeMetadata)),
     );
     if (!snapshot) return null;
     if (
-      !isObject(snapshot.manifest) ||
+      !isObject(snapshot.descriptor) ||
+      !isObject(snapshot.embedding) ||
       !Array.isArray(snapshot.records) ||
       !(snapshot.embeddings instanceof ArrayBuffer)
     ) {
       throw new CatalogV2Error("invalid Catalog v2 snapshot in IndexedDB");
     }
     return new BrowserCatalogV2({
-      manifest: snapshot.manifest,
+      familyKey: snapshot.familyKey,
+      catalogKey: snapshot.catalogKey,
+      publicName: snapshot.publicName,
+      descriptor: snapshot.descriptor,
+      embedding: snapshot.embedding,
+      version: snapshot.version,
+      sourceUpdatedAt: snapshot.sourceUpdatedAt,
       records: snapshot.records,
       embeddings: new Uint16Array(snapshot.embeddings),
       metadataLoaded: includeMetadata,
@@ -135,7 +169,13 @@ export class CatalogV2IndexedDbCache {
     const database = await this.#database();
     const snapshot = {
       id: snapshotKey(catalog.version, catalog.catalogKey, catalog.metadataLoaded),
-      manifest: structuredClone(catalog.manifest),
+      familyKey: catalog.familyKey,
+      catalogKey: catalog.catalogKey,
+      publicName: catalog.publicName,
+      descriptor: structuredClone(catalog.descriptor),
+      embedding: structuredClone(catalog.embedding),
+      version: catalog.version,
+      sourceUpdatedAt: catalog.sourceUpdatedAt,
       records: structuredClone(catalog.records),
       embeddings: catalog.embeddings.slice().buffer,
     };
@@ -163,15 +203,11 @@ export class CatalogV2IndexedDbCache {
   }
 }
 
-export class CatalogV2BrowserClient {
-  constructor({
-    fetchImpl = globalThis.fetch,
-    releaseBaseUrl = DEFAULT_RELEASE_BASE_URL,
-    cache = null,
-  } = {}) {
+export class CatalogV2FeedClient {
+  constructor({ fetchImpl = globalThis.fetch, feedUrl = DEFAULT_FEED_URL, cache = null } = {}) {
     if (typeof fetchImpl !== "function") throw new TypeError("fetch implementation is required");
     this.fetchImpl = fetchImpl;
-    this.releaseBaseUrl = releaseBaseUrl;
+    this.feedUrl = feedUrl;
     this.cache = cache;
     if (
       this.cache !== null &&
@@ -181,144 +217,321 @@ export class CatalogV2BrowserClient {
     }
   }
 
-  async loadGame(
-    game,
-    {
-      source = null,
-      includeMetadata = false,
-      tag = null,
-      previous = null,
-    } = {},
-  ) {
+  async loadGame(game, { source = null, includeMetadata = false, previous = null } = {}) {
     const normalizedGame = normalizeGame(game);
-    const selectedSource = source ?? PRIMARY_SOURCES[normalizedGame];
-    if (selectedSource === "scryfall" && normalizedGame !== "mtg") {
-      throw new CatalogV2Error("Scryfall Catalog v2 is only available for MTG");
-    }
-    const catalogName = selectedSource === "scryfall" ? "mtg" : GAME_NAMES[normalizedGame];
-    const catalogKey = `milo1/${selectedSource}/${catalogName}`;
-    return tag === null
-      ? this.loadFromFeed(catalogKey, { includeMetadata, previous })
-      : this.load(tag, catalogKey, { includeMetadata, previous });
+    const selectedSource = source ?? DEFAULT_SOURCE_BY_GAME[normalizedGame] ?? FALLBACK_SOURCE;
+    const feed = await this.#fetchFeed();
+    const resolved = discoverCatalog(feed, normalizedGame, selectedSource);
+    return this.#loadResolvedCatalog(resolved, { includeMetadata, previous });
   }
 
-  async loadFromFeed(catalogKey, { includeMetadata = false, previous = null } = {}) {
-    const feed = await this.#fetchJson(
-      new URL(FEED_FILENAME, ensureTrailingSlash(this.releaseBaseUrl)),
-    );
-    const entry = validateFeedEntry(feed, catalogKey);
-    let catalog = await this.#loadFeedStage(entry.base, catalogKey, includeMetadata, previous);
-    for (const delta of entry.deltas) {
-      if (catalog.version !== delta.from) {
-        throw new CatalogV2Error("catalog feed delta chain does not match loaded base");
+  async loadCatalog(fullCatalogKey, { includeMetadata = false, previous = null } = {}) {
+    const feed = await this.#fetchFeed();
+    const resolved = resolveCatalogByKey(feed, fullCatalogKey);
+    return this.#loadResolvedCatalog(resolved, { includeMetadata, previous });
+  }
+
+  async #loadResolvedCatalog(resolved, { includeMetadata, previous }) {
+    const { catalog, versions } = resolved;
+    const targetVersion = catalog.current_version;
+
+    let snapshot = null;
+    let startIndex = -1;
+
+    if (previous !== null && isCompatibleSnapshot(previous, resolved, includeMetadata)) {
+      const index = versions.indexOf(previous.version);
+      if (index !== -1) {
+        snapshot = previous;
+        startIndex = index;
       }
-      catalog = await this.#loadFeedStage(delta, catalogKey, includeMetadata, catalog);
     }
-    return catalog;
+
+    if (snapshot === null && this.cache !== null) {
+      for (let index = versions.length - 1; index >= 0; index -= 1) {
+        const candidate = await this.#cachedSnapshot(
+          versions[index],
+          resolved.fullCatalogKey,
+          includeMetadata,
+        );
+        if (candidate === null) continue;
+        if (isCompatibleSnapshot(candidate, resolved, includeMetadata) && candidate.version === versions[index]) {
+          snapshot = candidate;
+          startIndex = index;
+          break;
+        }
+        console.warn("Ignoring incompatible Catalog v2 snapshot in persistent cache");
+      }
+    }
+
+    if (snapshot === null) {
+      snapshot = await this.#loadBase(resolved, includeMetadata);
+      await this.#persistSnapshot(snapshot);
+      startIndex = 0;
+    }
+
+    for (let index = startIndex + 1; index < versions.length; index += 1) {
+      const toVersion = versions[index];
+      const updateEntry = catalog.updates[String(toVersion)];
+      snapshot = await this.#applyUpdate(resolved, snapshot, updateEntry, includeMetadata);
+      await this.#persistSnapshot(snapshot);
+    }
+
+    if (snapshot.version !== targetVersion || snapshot.records.length !== catalog.rows) {
+      throw new CatalogV2Error("reconstructed catalog does not match the feed's current state");
+    }
+    return snapshot;
   }
 
-  async load(tag, catalogKey, { includeMetadata = false, previous = null } = {}) {
-    validateTag(tag);
-    if (!this.releaseBaseUrl) {
-      throw new TypeError(
-        "releaseBaseUrl must identify a same-origin or CORS-enabled Catalog v2 mirror",
-      );
-    }
-    const baseUrl = new URL(
-      `${encodeURIComponent(tag)}/`,
-      ensureTrailingSlash(this.releaseBaseUrl),
+  async #loadBase(resolved, includeMetadata) {
+    const { catalog, family } = resolved;
+    const base = catalog.base;
+    const dimension = family.embedding.dimensions;
+
+    const identifierRows = parseJsonLines(
+      await this.#fetchGzipAsset(base.recognition.assets.identifiers, "base identifiers"),
+      "base identifiers",
     );
-    const index = await this.#fetchJson(new URL(INDEX_FILENAME, baseUrl));
-    validateIndex(index, tag);
-    const entry = index.catalogs[catalogKey];
+    if (identifierRows.length !== base.rows) {
+      throw new CatalogV2Error("base identifier row count does not match the feed");
+    }
+    const embeddingBytes = await this.#fetchGzipAsset(
+      base.recognition.assets.embeddings,
+      "base embeddings",
+    );
+    const matrix = parseFloat16Matrix(embeddingBytes, base.rows, dimension);
+
+    const seen = new Map();
+    const staged = identifierRows.map((value, row) => {
+      const record = parseIdentityRecord(value, catalog.descriptor, "base identifier row");
+      let faces = seen.get(record.id);
+      if (!faces) {
+        faces = new Set();
+        seen.set(record.id, faces);
+      }
+      if (faces.has(record.faceIndex)) {
+        throw new CatalogV2Error(
+          `duplicate base row identity for id ${JSON.stringify(record.id)}`,
+        );
+      }
+      faces.add(record.faceIndex);
+      return { record, embedding: matrix.slice(row * dimension, (row + 1) * dimension) };
+    });
+
+    if (includeMetadata) {
+      const metadataRows = parseJsonLinesAllowNull(
+        await this.#fetchGzipAsset(base.metadata.assets.records, "base metadata"),
+        "base metadata",
+      );
+      if (metadataRows.length !== base.rows) {
+        throw new CatalogV2Error("base metadata row count does not match the feed");
+      }
+      metadataRows.forEach((value, row) => {
+        if (value === null) return;
+        if (!isObject(value)) throw new CatalogV2Error("base metadata rows must be objects or null");
+        staged[row].record.metadata = value;
+      });
+    }
+
+    staged.sort((left, right) => compareIdentity(left.record, right.record));
+    const records = staged.map(({ record }) => record);
+    const embeddings = new Uint16Array(records.length * dimension);
+    staged.forEach(({ embedding }, row) => embeddings.set(embedding, row * dimension));
+
+    return new BrowserCatalogV2({
+      familyKey: resolved.familyKey,
+      catalogKey: resolved.fullCatalogKey,
+      publicName: catalog.public_name,
+      descriptor: catalog.descriptor,
+      embedding: family.embedding,
+      version: base.version,
+      sourceUpdatedAt: base.source_updated_at,
+      records,
+      embeddings,
+      metadataLoaded: includeMetadata,
+    });
+  }
+
+  async #applyUpdate(resolved, snapshot, updateEntry, includeMetadata) {
+    const { catalog, family } = resolved;
+    const dimension = family.embedding.dimensions;
+    if (snapshot.version !== updateEntry.from_version) {
+      throw new CatalogV2Error("update does not extend the loaded snapshot's exact base version");
+    }
+
+    const recognitionRows = updateEntry.recognition.rows;
+    const operations =
+      recognitionRows === 0
+        ? []
+        : parseJsonLines(
+            await this.#fetchGzipAsset(
+              updateEntry.recognition.assets.identifiers,
+              "recognition delta",
+            ),
+            "recognition delta",
+          );
+    if (operations.length !== recognitionRows) {
+      throw new CatalogV2Error("recognition delta operation count does not match the feed");
+    }
+    const upserts = operations.filter((operation) => operation.op === "upsert");
+    const deltaEmbeddings =
+      upserts.length === 0
+        ? new Uint16Array()
+        : parseFloat16Matrix(
+            await this.#fetchGzipAsset(
+              updateEntry.recognition.assets.embeddings,
+              "recognition delta embeddings",
+            ),
+            upserts.length,
+            dimension,
+          );
+
+    const byId = new Map();
+    snapshot.records.forEach((record, row) => {
+      let faces = byId.get(record.id);
+      if (!faces) {
+        faces = new Map();
+        byId.set(record.id, faces);
+      }
+      faces.set(record.faceIndex, {
+        record: { ...record, identifiers: { ...record.identifiers } },
+        embedding: snapshot.embeddings.slice(row * dimension, (row + 1) * dimension),
+      });
+    });
+
+    let added = 0;
+    let updated = 0;
+    let deleted = 0;
+    const usedEmbeddingIndexes = new Set();
+    for (const operation of operations) {
+      if (operation.op === "delete") {
+        const target = parseIdentityTarget(operation, "recognition delta delete");
+        const faces = byId.get(target.id);
+        if (!faces || !faces.has(target.faceIndex)) {
+          throw new CatalogV2Error(
+            `recognition delta deletes a row that is not present: ${JSON.stringify(target)}`,
+          );
+        }
+        faces.delete(target.faceIndex);
+        if (faces.size === 0) byId.delete(target.id);
+        deleted += 1;
+      } else if (operation.op === "upsert") {
+        const record = parseIdentityRecord(
+          operation.record,
+          catalog.descriptor,
+          "recognition delta upsert",
+        );
+        const embeddingIndex = operation.embedding_index;
+        if (
+          !Number.isInteger(embeddingIndex) ||
+          embeddingIndex < 0 ||
+          embeddingIndex >= upserts.length ||
+          usedEmbeddingIndexes.has(embeddingIndex)
+        ) {
+          throw new CatalogV2Error(
+            `recognition delta upsert has an invalid embedding_index for id ${JSON.stringify(record.id)}`,
+          );
+        }
+        usedEmbeddingIndexes.add(embeddingIndex);
+        let faces = byId.get(record.id);
+        if (!faces) {
+          faces = new Map();
+          byId.set(record.id, faces);
+        }
+        const existing = faces.get(record.faceIndex);
+        faces.set(record.faceIndex, {
+          record: { ...record, metadata: existing?.record.metadata },
+          embedding: deltaEmbeddings.slice(
+            embeddingIndex * dimension,
+            (embeddingIndex + 1) * dimension,
+          ),
+        });
+        existing ? (updated += 1) : (added += 1);
+      } else {
+        throw new CatalogV2Error(`unsupported recognition delta operation ${JSON.stringify(operation.op)}`);
+      }
+    }
+    if (usedEmbeddingIndexes.size !== upserts.length) {
+      throw new CatalogV2Error("recognition delta embedding indexes must be contiguous and unique");
+    }
     if (
-      !isObject(entry) ||
-      !isSafeFilename(entry.manifest_filename) ||
-      !isSha256(entry.sha256)
+      added !== updateEntry.rows.added ||
+      updated !== updateEntry.rows.updated ||
+      deleted !== updateEntry.rows.deleted
     ) {
-      throw new CatalogV2Error(`catalog ${JSON.stringify(catalogKey)} is not valid in ${tag}`);
-    }
-    const manifestBytes = await this.#fetchBytes(new URL(entry.manifest_filename, baseUrl));
-    await verifyBytes(entry.manifest_filename, manifestBytes, entry.sha256);
-    const manifest = parseJsonObject(manifestBytes, "catalog manifest");
-    validateManifest(manifest, tag, catalogKey);
-    if (isCompatibleSnapshot(previous, manifest, includeMetadata)) {
-      return previous;
+      throw new CatalogV2Error("recognition delta row classification does not match the feed");
     }
 
-    const cached = await this.#cachedSnapshot(tag, catalogKey, includeMetadata);
-    if (cached !== null && cached !== undefined) {
-      if (isCompatibleSnapshot(cached, manifest, includeMetadata)) {
-        return cached;
+    if (includeMetadata) {
+      const metadataRows = updateEntry.metadata.rows;
+      const metadataOperations =
+        metadataRows === 0
+          ? []
+          : parseJsonLines(
+              await this.#fetchGzipAsset(updateEntry.metadata.assets.records, "metadata delta"),
+              "metadata delta",
+            );
+      if (metadataOperations.length !== metadataRows) {
+        throw new CatalogV2Error("metadata delta operation count does not match the feed");
       }
-      console.warn("Ignoring incompatible Catalog v2 snapshot in persistent cache");
-    }
-    if (previous === null && manifest.delta?.requires_exact_base === true) {
-      previous = await this.#cachedSnapshot(
-        manifest.delta.base_version,
-        catalogKey,
-        includeMetadata,
-      );
-    }
-    let catalog;
-    if (isExactCompatibleBase(previous, manifest, includeMetadata)) {
-      catalog = await this.#loadDelta(
-        baseUrl,
-        manifest,
-        previous,
-        includeMetadata,
-      );
+      for (const operation of metadataOperations) {
+        const target = parseIdentityTarget(operation, "metadata delta");
+        const faces = byId.get(target.id);
+        const entry = faces?.get(target.faceIndex);
+        if (operation.op === "delete") {
+          if (entry) delete entry.record.metadata;
+        } else if (operation.op === "upsert") {
+          if (!entry) {
+            throw new CatalogV2Error(
+              `metadata delta upserts a row that is not present: ${JSON.stringify(target)}`,
+            );
+          }
+          if (!isObject(operation.metadata)) {
+            throw new CatalogV2Error("metadata delta upsert requires a metadata object");
+          }
+          entry.record.metadata = structuredClone(operation.metadata);
+        } else {
+          throw new CatalogV2Error(`unsupported metadata delta operation ${JSON.stringify(operation.op)}`);
+        }
+      }
     } else {
-      catalog = await this.#loadFull(baseUrl, manifest, includeMetadata);
+      for (const faces of byId.values()) {
+        for (const entry of faces.values()) delete entry.record.metadata;
+      }
     }
-    await this.#persistSnapshot(catalog);
-    return catalog;
+
+    const flattened = [];
+    for (const faces of byId.values()) {
+      for (const entry of faces.values()) flattened.push(entry);
+    }
+    flattened.sort((left, right) => compareIdentity(left.record, right.record));
+
+    const expectedTotal = snapshot.records.length + updateEntry.rows.added - updateEntry.rows.deleted;
+    if (flattened.length !== expectedTotal) {
+      throw new CatalogV2Error("recognition delta reconstructed an unexpected row total");
+    }
+
+    const records = flattened.map(({ record }) => record);
+    const embeddings = new Uint16Array(records.length * dimension);
+    flattened.forEach(({ embedding }, row) => embeddings.set(embedding, row * dimension));
+
+    return new BrowserCatalogV2({
+      familyKey: resolved.familyKey,
+      catalogKey: resolved.fullCatalogKey,
+      publicName: catalog.public_name,
+      descriptor: catalog.descriptor,
+      embedding: family.embedding,
+      version: updateEntry.to_version,
+      sourceUpdatedAt: updateEntry.source_updated_at,
+      records,
+      embeddings,
+      metadataLoaded: includeMetadata,
+    });
   }
 
-  async #loadFeedStage(reference, catalogKey, includeMetadata, previous) {
-    const tag = reference.version ?? reference.to;
-    const manifestReference = reference.manifest;
-    const manifestBytes = await this.#fetchBytes(new URL(manifestReference.url));
-    await verifyBytes(
-      new URL(manifestReference.url).pathname.split("/").at(-1),
-      manifestBytes,
-      manifestReference.sha256,
-      manifestReference.size,
-    );
-    const manifest = parseJsonObject(manifestBytes, "catalog manifest");
-    validateManifest(manifest, tag, catalogKey);
-    validateFeedAssets(reference, manifest);
-    if (isCompatibleSnapshot(previous, manifest, includeMetadata)) {
-      return previous;
-    }
-    const cached = await this.#cachedSnapshot(tag, catalogKey, includeMetadata);
-    if (cached !== null && cached !== undefined && isCompatibleSnapshot(cached, manifest, includeMetadata)) {
-      return cached;
-    }
-    const baseUrl = new URL(".", manifestReference.url);
-    let catalog;
-    if (reference.to !== undefined) {
-      if (!isExactCompatibleBase(previous, manifest, includeMetadata)) {
-        throw new CatalogV2Error("catalog feed delta is missing its exact compatible base");
-      }
-      catalog = await this.#loadDelta(
-        baseUrl,
-        manifest,
-        previous,
-        includeMetadata,
-        reference.assets,
-      );
-    } else {
-      catalog = await this.#loadFull(baseUrl, manifest, includeMetadata, reference.assets);
-    }
-    await this.#persistSnapshot(catalog);
-    return catalog;
-  }
-
-  async #cachedSnapshot(tag, catalogKey, includeMetadata) {
+  async #cachedSnapshot(version, catalogKey, includeMetadata) {
     if (this.cache === null) return null;
     try {
-      return await this.cache.get(tag, catalogKey, includeMetadata);
+      return await this.cache.get(version, catalogKey, includeMetadata);
     } catch (error) {
       console.warn("Catalog v2 persistent cache read failed; using network assets", error);
       return null;
@@ -334,183 +547,20 @@ export class CatalogV2BrowserClient {
     }
   }
 
-  async #loadFull(baseUrl, manifest, includeMetadata, feedAssets = null) {
-    const records = parseRecognitionRows(
-      await this.#fetchGzipAsset(
-        baseUrl,
-        manifest.assets.identifiers,
-        feedAssets?.identifiers,
-      ),
-      manifest,
-    );
-    const embeddings = parseFloat16Matrix(
-      await this.#fetchGzipAsset(
-        baseUrl,
-        manifest.assets.embeddings,
-        feedAssets?.embeddings,
-      ),
-      manifest.rows,
-      manifest.dim,
-    );
-    let metadataLoaded = false;
-    if (includeMetadata) {
-      attachMetadata(
-        records,
-        parseJsonLines(
-          await this.#fetchGzipAsset(
-            baseUrl,
-            manifest.assets.metadata,
-            feedAssets?.metadata,
-          ),
-          "metadata",
-        ),
-      );
-      metadataLoaded = true;
-    }
-    return new BrowserCatalogV2({ manifest, records, embeddings, metadataLoaded });
+  async #fetchFeed() {
+    const feed = await this.#fetchJson(new URL(this.feedUrl));
+    validateFeed(feed);
+    return feed;
   }
 
-  async #loadDelta(baseUrl, manifest, previous, includeMetadata, feedAssets = null) {
-    const operations =
-      manifest.delta.operations === 0
-        ? []
-        : parseJsonLines(
-            await this.#fetchGzipAsset(
-              baseUrl,
-              manifest.assets.identifiers_delta,
-              feedAssets?.identifiers_delta,
-            ),
-            "identifier delta operations",
-          );
-    if (operations.length !== manifest.delta.operations) {
-      throw new CatalogV2Error("delta operation count does not match manifest");
-    }
-    const upserts = operations.filter((operation) => operation.op === "upsert");
-    const deltaEmbeddings =
-      upserts.length === 0
-        ? new Float32Array()
-        : parseFloat16Matrix(
-            await this.#fetchGzipAsset(
-              baseUrl,
-              manifest.assets.embeddings_delta,
-              feedAssets?.embeddings_delta,
-            ),
-            upserts.length,
-            manifest.dim,
-          );
-    const records = new Map(previous.records.map((record) => [record.key, structuredClone(record)]));
-    if (!includeMetadata) {
-      for (const record of records.values()) delete record.metadata;
-    }
-    const embeddings = new Map();
-    previous.records.forEach((record, row) => {
-      embeddings.set(
-        record.key,
-        previous.embeddings.slice(
-          row * previous.dimension,
-          (row + 1) * previous.dimension,
-        ),
-      );
-    });
-    const usedIndexes = new Set();
-    const operatedKeys = new Set();
-    for (const operation of operations) {
-      if (operation.op === "delete") {
-        const key = requiredString(operation.key, "delta delete key");
-        if (operatedKeys.has(key) || !records.delete(key)) {
-          throw new CatalogV2Error(`invalid delta delete for ${JSON.stringify(key)}`);
-        }
-        embeddings.delete(key);
-        operatedKeys.add(key);
-      } else if (operation.op === "upsert") {
-        const record = parseRecognitionRecord(operation.record, manifest);
-        const embeddingIndex = operation.embedding_index;
-        if (
-          operatedKeys.has(record.key) ||
-          !Number.isInteger(embeddingIndex) ||
-          embeddingIndex < 0 ||
-          embeddingIndex >= upserts.length ||
-          usedIndexes.has(embeddingIndex)
-        ) {
-          throw new CatalogV2Error(`invalid delta upsert for ${JSON.stringify(record.key)}`);
-        }
-        record.metadata = records.get(record.key)?.metadata;
-        records.set(record.key, record);
-        embeddings.set(
-          record.key,
-          deltaEmbeddings.slice(
-            embeddingIndex * manifest.dim,
-            (embeddingIndex + 1) * manifest.dim,
-          ),
-        );
-        operatedKeys.add(record.key);
-        usedIndexes.add(embeddingIndex);
-      } else {
-        throw new CatalogV2Error(`unsupported delta operation ${JSON.stringify(operation.op)}`);
-      }
-    }
-    if (usedIndexes.size !== upserts.length) {
-      throw new CatalogV2Error("delta embedding indexes must be contiguous and unique");
-    }
-
-    if (includeMetadata) {
-      const metadataOperations =
-        manifest.delta.metadata_operations === 0
-          ? []
-          : parseJsonLines(
-              await this.#fetchGzipAsset(
-                baseUrl,
-                manifest.assets.metadata_delta,
-                feedAssets?.metadata_delta,
-              ),
-              "metadata delta operations",
-            );
-      if (metadataOperations.length !== manifest.delta.metadata_operations) {
-        throw new CatalogV2Error("metadata delta operation count does not match manifest");
-      }
-      for (const operation of metadataOperations) {
-        const key = requiredString(operation.key, "metadata delta key");
-        const record = records.get(key);
-        if (operation.op === "delete") {
-          if (record) delete record.metadata;
-        } else if (operation.op === "upsert" && isObject(operation.metadata) && record) {
-          record.metadata = structuredClone(operation.metadata);
-        } else {
-          throw new CatalogV2Error(`invalid metadata delta for ${JSON.stringify(key)}`);
-        }
-      }
-    }
-
-    const sortedRecords = [...records.values()].sort((left, right) =>
-      compareStableKeys(left.key, right.key),
-    );
-    if (sortedRecords.length !== manifest.rows) {
-      throw new CatalogV2Error("delta reconstructed an unexpected row count");
-    }
-    const matrix = new Uint16Array(manifest.rows * manifest.dim);
-    sortedRecords.forEach((record, row) => {
-      matrix.set(embeddings.get(record.key), row * manifest.dim);
-    });
-    return new BrowserCatalogV2({
-      manifest,
-      records: sortedRecords,
-      embeddings: matrix,
-      metadataLoaded: includeMetadata,
-    });
-  }
-
-  async #fetchGzipAsset(baseUrl, asset, feedReference = null) {
-    validateAsset(asset);
-    if (
-      feedReference !== null &&
-      (feedReference.sha256 !== asset.sha256 || feedReference.size !== asset.size)
-    ) {
-      throw new Error(`Feed reference does not match manifest asset ${asset.filename}`);
-    }
-    const url =
-      feedReference === null ? new URL(asset.filename, baseUrl) : new URL(feedReference.url);
+  async #fetchGzipAsset(assetReference, label) {
+    validateAssetReference(assetReference, label);
+    const url = new URL(assetReference.url);
     const compressed = await this.#fetchBytes(url);
-    await verifyBytes(asset.filename, compressed, asset.sha256, asset.size);
+    if (compressed.byteLength !== assetReference.size) {
+      throw new CatalogV2Error(`asset size mismatch for ${label}`);
+    }
+    await verifySha256(compressed, assetReference.sha256, label);
     return gunzip(compressed);
   }
 
@@ -525,199 +575,161 @@ export class CatalogV2BrowserClient {
   }
 }
 
-function validateTag(tag) {
-  if (!BETA_TAG.test(tag)) throw new TypeError("Catalog v2 requires an explicit immutable beta tag");
-  const dateText = tag.slice(-10);
-  const [year, month, day] = dateText.split("-").map(Number);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() !== month - 1 ||
-    parsed.getUTCDate() !== day
-  ) {
-    throw new TypeError("Catalog v2 beta tag contains an invalid date");
-  }
-}
-
-function validateIndex(index, tag) {
-  if (index.schema_version !== 2 || index.release_version !== tag || !isObject(index.catalogs)) {
-    throw new CatalogV2Error("invalid Catalog v2 index");
-  }
-}
-
-function validateFeedEntry(feed, catalogKey) {
-  if (
-    !isObject(feed) ||
-    feed.schema_version !== 2 ||
-    typeof feed.release_version !== "string" ||
-    typeof feed.checked_at !== "string" ||
-    typeof feed.source_updated_at !== "string" ||
-    !isObject(feed.catalogs)
-  ) {
-    throw new CatalogV2Error("invalid Catalog v2 feed");
-  }
-  const entry = feed.catalogs[catalogKey];
-  if (
-    !isObject(entry) ||
-    typeof entry.source_updated_at !== "string" ||
-    !isObject(entry.base) ||
-    !Array.isArray(entry.deltas)
-  ) {
-    throw new CatalogV2Error(`catalog ${JSON.stringify(catalogKey)} is not valid in the feed`);
-  }
-  validateFeedStage(entry.base, entry.base.version, false);
-  let expected = entry.base.version;
-  for (const delta of entry.deltas) {
-    if (!isObject(delta) || delta.from !== expected) {
-      throw new CatalogV2Error("catalog feed delta chain is not contiguous");
-    }
-    validateFeedStage(delta, delta.to, true);
-    expected = delta.to;
-  }
-  return entry;
-}
-
-function validateFeedStage(reference, version, isDelta) {
-  validateTag(version);
-  validateFileReference(reference.manifest, version);
-  if (!isObject(reference.assets)) {
-    throw new CatalogV2Error("catalog feed stage assets must be an object");
-  }
-  if (isDelta && Object.keys(reference.assets).length === 0) {
-    throw new CatalogV2Error("catalog feed delta must contain assets");
-  }
-  if (
-    !isDelta &&
-    (!("identifiers" in reference.assets) || !("embeddings" in reference.assets))
-  ) {
-    throw new CatalogV2Error("catalog feed base lacks required assets");
-  }
-  for (const asset of Object.values(reference.assets)) {
-    validateFileReference(asset, version);
-  }
-}
-
-function validateFileReference(reference, version) {
-  if (!isObject(reference) || typeof reference.url !== "string") {
-    throw new CatalogV2Error("catalog feed contains an invalid file reference");
-  }
-  const url = new URL(reference.url);
-  const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-  if (
-    url.protocol !== "https:" ||
-    parts.length < 2 ||
-    parts.at(-2) !== version ||
-    !isSafeFilename(parts.at(-1)) ||
-    !isSha256(reference.sha256) ||
-    !Number.isInteger(reference.size) ||
-    reference.size < 0
-  ) {
-    throw new CatalogV2Error("catalog feed contains an invalid file reference");
-  }
-}
-
-function validateFeedAssets(reference, manifest) {
-  const names =
-    reference.to === undefined
-      ? ["identifiers", "embeddings", "metadata"]
-      : ["identifiers_delta", "embeddings_delta", "metadata_delta"];
-  const expected = names.filter((name) => name in manifest.assets).sort();
-  const actual = Object.keys(reference.assets).sort();
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new CatalogV2Error("catalog feed assets do not match the manifest");
-  }
-  for (const name of expected) {
-    const feedAsset = reference.assets[name];
-    const manifestAsset = manifest.assets[name];
-    const filename = decodeURIComponent(new URL(feedAsset.url).pathname.split("/").at(-1));
-    if (
-      filename !== manifestAsset.filename ||
-      feedAsset.sha256 !== manifestAsset.sha256 ||
-      feedAsset.size !== manifestAsset.size
-    ) {
-      throw new CatalogV2Error(`catalog feed asset ${JSON.stringify(name)} is inconsistent`);
-    }
-  }
-}
-
 function normalizeGame(game) {
   const value = String(game).trim().toLowerCase();
-  if (!(value in GAME_NAMES)) {
-    throw new RangeError(
-      `unknown game ${JSON.stringify(game)}; expected one of ${Object.keys(GAME_NAMES).join(", ")}`,
+  return GAME_ALIASES[value] ?? value;
+}
+
+function discoverCatalog(feed, game, source) {
+  const matches = [];
+  for (const [familyKey, family] of Object.entries(feed.families)) {
+    validateFamily(familyKey, family);
+    for (const [localKey, catalog] of Object.entries(family.catalogs)) {
+      if (catalog.descriptor.game !== game || catalog.descriptor.source !== source) continue;
+      matches.push({ familyKey, localKey, family, catalog });
+    }
+  }
+  const recommended = matches.filter((match) => match.catalog.descriptor.recommended === true);
+  const pool = recommended.length > 0 ? recommended : matches;
+  if (pool.length === 0) {
+    throw new CatalogV2Error(
+      `no Catalog v2 feed entry matches game ${JSON.stringify(game)} and source ${JSON.stringify(source)}`,
     );
   }
-  return value;
-}
-
-function validateManifest(manifest, tag, catalogKey) {
-  if (
-    manifest.schema_version !== 2 ||
-    manifest.version !== tag ||
-    manifest.catalog_key !== catalogKey ||
-    manifest.dtype !== "float16" ||
-    !Number.isInteger(manifest.rows) ||
-    manifest.rows < 0 ||
-    !Number.isInteger(manifest.dim) ||
-    manifest.dim <= 0 ||
-    !isObject(manifest.assets) ||
-    !isObject(manifest.descriptor) ||
-    !requiredString(manifest.descriptor.result_identifier, "result identifier")
-  ) {
-    throw new CatalogV2Error("invalid Catalog v2 manifest");
+  if (pool.length > 1) {
+    throw new CatalogV2Error(
+      `multiple recommended Catalog v2 feed entries match game ${JSON.stringify(game)} and source ${JSON.stringify(source)}`,
+    );
   }
+  return finalizeResolution(pool[0]);
 }
 
-function parseRecognitionRows(bytes, manifest) {
-  const values = parseJsonLines(bytes, "identifiers");
-  if (values.length !== manifest.rows) throw new CatalogV2Error("recognition row count mismatch");
-  const keys = new Set();
-  return values.map((value) => {
-    const record = parseRecognitionRecord(value, manifest);
-    if (keys.has(record.key)) throw new CatalogV2Error(`duplicate recognition key ${record.key}`);
-    keys.add(record.key);
-    return record;
-  });
-}
-
-function parseRecognitionRecord(value, manifest) {
-  if (!isObject(value) || !isObject(value.identifiers)) {
-    throw new CatalogV2Error("invalid recognition record");
+function resolveCatalogByKey(feed, fullCatalogKey) {
+  const separator = fullCatalogKey.indexOf("/");
+  if (separator <= 0 || separator === fullCatalogKey.length - 1) {
+    throw new CatalogV2Error(`invalid Catalog v2 catalog key ${JSON.stringify(fullCatalogKey)}`);
   }
-  const key = requiredString(value.key, "recognition key");
+  const familyKey = fullCatalogKey.slice(0, separator);
+  const localKey = fullCatalogKey.slice(separator + 1);
+  const family = feed.families?.[familyKey];
+  if (!isObject(family)) {
+    throw new CatalogV2Error(`unknown Catalog v2 family ${JSON.stringify(familyKey)}`);
+  }
+  validateFamily(familyKey, family);
+  const catalog = family.catalogs?.[localKey];
+  if (!isObject(catalog)) {
+    throw new CatalogV2Error(`unknown Catalog v2 catalog ${JSON.stringify(fullCatalogKey)}`);
+  }
+  return finalizeResolution({ familyKey, localKey, family, catalog });
+}
+
+function finalizeResolution({ familyKey, localKey, family, catalog }) {
+  validateCatalogEntry(catalog, `${familyKey}/${localKey}`);
+  const versions = buildVersionChain(catalog);
+  return {
+    familyKey,
+    localKey,
+    fullCatalogKey: `${familyKey}/${localKey}`,
+    family,
+    catalog,
+    versions,
+  };
+}
+
+function buildVersionChain(catalog) {
+  const versions = [];
+  for (let version = catalog.base.version; version <= catalog.current_version; version += 1) {
+    versions.push(version);
+  }
+  if (versions.length === 0 || versions.at(-1) !== catalog.current_version) {
+    throw new CatalogV2Error("catalog current_version is not reachable from its base version");
+  }
+  for (let index = 1; index < versions.length; index += 1) {
+    const toVersion = versions[index];
+    const update = catalog.updates?.[String(toVersion)];
+    if (!isObject(update)) {
+      throw new CatalogV2Error(`catalog is missing an update to version ${toVersion}`);
+    }
+    if (update.from_version !== versions[index - 1] || update.to_version !== toVersion) {
+      throw new CatalogV2Error(`catalog update to version ${toVersion} is not an exact-predecessor delta`);
+    }
+    validateUpdateEntry(update, toVersion);
+  }
+  const expectedKeys = new Set(versions.slice(1).map(String));
+  for (const key of Object.keys(catalog.updates ?? {})) {
+    if (!expectedKeys.has(key)) {
+      throw new CatalogV2Error(`catalog has an unexpected update entry for version ${JSON.stringify(key)}`);
+    }
+  }
+  return versions;
+}
+
+function isCompatibleSnapshot(snapshot, resolved, includeMetadata) {
+  return (
+    snapshot instanceof BrowserCatalogV2 &&
+    snapshot.catalogKey === resolved.fullCatalogKey &&
+    snapshot.familyKey === resolved.familyKey &&
+    snapshot.metadataLoaded === includeMetadata &&
+    snapshot.dimension === resolved.family.embedding.dimensions &&
+    snapshot.embeddings.length === snapshot.records.length * snapshot.dimension &&
+    deepEqual(snapshot.embedding, resolved.family.embedding) &&
+    deepEqual(snapshot.descriptor, resolved.catalog.descriptor)
+  );
+}
+
+function parseIdentityRecord(value, descriptor, label) {
+  if (!isObject(value)) throw new CatalogV2Error(`${label} must be a JSON object`);
+  const id = requiredString(value.id, `${label} id`);
+  if (!isObject(value.identifiers ?? {})) {
+    throw new CatalogV2Error(`${label} identifiers must be an object`);
+  }
   const identifiers = {};
-  for (const [name, identifier] of Object.entries(value.identifiers)) {
-    identifiers[requiredString(name, "identifier name")] = requiredString(
+  for (const [name, identifier] of Object.entries(value.identifiers ?? {})) {
+    if (name === descriptor.result_identifier) {
+      throw new CatalogV2Error(
+        `${label} must not duplicate the primary id under identifiers.${name}`,
+      );
+    }
+    identifiers[requiredString(name, `${label} identifier name`)] = requiredString(
       identifier,
-      "identifier value",
+      `${label} identifier value`,
     );
-  }
-  if (!identifiers[manifest.descriptor.result_identifier]) {
-    throw new CatalogV2Error(`recognition record ${JSON.stringify(key)} lacks result identifier`);
   }
   const faceIndex = value.face_index ?? 0;
   if (!Number.isInteger(faceIndex) || faceIndex < 0) {
-    throw new CatalogV2Error(`recognition record ${JSON.stringify(key)} has invalid face_index`);
+    throw new CatalogV2Error(`${label} for id ${JSON.stringify(id)} has an invalid face_index`);
   }
-  return { key, identifiers, face_index: faceIndex };
+  let finishes;
+  if (value.finishes !== undefined) {
+    if (!Array.isArray(value.finishes) || value.finishes.length === 0) {
+      throw new CatalogV2Error(`${label} for id ${JSON.stringify(id)} has invalid finishes`);
+    }
+    finishes = value.finishes.map((finish, index) =>
+      requiredString(finish, `${label} finishes[${index}]`),
+    );
+  }
+  return { id, faceIndex, identifiers, finishes };
 }
 
-function attachMetadata(records, metadataRows) {
-  const byKey = new Map(records.map((record) => [record.key, record]));
-  const seen = new Set();
-  for (const value of metadataRows) {
-    const key = requiredString(value.key, "metadata key");
-    if (seen.has(key) || !byKey.has(key) || !isObject(value.metadata)) {
-      throw new CatalogV2Error(`invalid metadata record for ${JSON.stringify(key)}`);
-    }
-    seen.add(key);
-    byKey.get(key).metadata = structuredClone(value.metadata);
+function parseIdentityTarget(value, label) {
+  if (!isObject(value)) throw new CatalogV2Error(`${label} must be a JSON object`);
+  const id = requiredString(value.id, `${label} id`);
+  const faceIndex = value.face_index ?? 0;
+  if (!Number.isInteger(faceIndex) || faceIndex < 0) {
+    throw new CatalogV2Error(`${label} for id ${JSON.stringify(id)} has an invalid face_index`);
   }
+  return { id, faceIndex };
+}
+
+function compareIdentity(left, right) {
+  if (left.id < right.id) return -1;
+  if (left.id > right.id) return 1;
+  return left.faceIndex - right.faceIndex;
 }
 
 function parseFloat16Matrix(bytes, rows, dimension) {
   if (bytes.byteLength !== rows * dimension * 2) {
-    throw new CatalogV2Error("FP16 matrix size does not match manifest");
+    throw new CatalogV2Error("FP16 matrix size does not match the feed's declared shape");
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const values = new Uint16Array(rows * dimension);
@@ -740,6 +752,21 @@ function parseJsonLines(bytes, label) {
     });
 }
 
+function parseJsonLinesAllowNull(bytes, label) {
+  const text = new TextDecoder().decode(bytes);
+  if (!text) return [];
+  return text
+    .trimEnd()
+    .split("\n")
+    .map((line) => {
+      const value = JSON.parse(line);
+      if (value !== null && !isObject(value)) {
+        throw new CatalogV2Error(`${label} rows must be JSON objects or null`);
+      }
+      return value;
+    });
+}
+
 function parseJsonObject(bytes, label) {
   let value;
   try {
@@ -751,43 +778,130 @@ function parseJsonObject(bytes, label) {
   return value;
 }
 
-function isExactCompatibleBase(previous, manifest, includeMetadata) {
-  return (
-    previous instanceof BrowserCatalogV2 &&
-    manifest.delta?.requires_exact_base === true &&
-    manifest.delta.base_version === previous.version &&
-    previous.catalogKey === manifest.catalog_key &&
-    previous.embeddingModel === manifest.embedding_model &&
-    previous.dimension === manifest.dim &&
-    JSON.stringify(previous.descriptor) === JSON.stringify(manifest.descriptor) &&
-    (!includeMetadata || previous.metadataLoaded)
-  );
+function validateFeed(feed) {
+  if (!isObject(feed) || typeof feed.checked_at !== "string" || !isObject(feed.families)) {
+    throw new CatalogV2Error("invalid Catalog v2 feed");
+  }
 }
 
-function isCompatibleSnapshot(snapshot, manifest, includeMetadata) {
-  return (
-    snapshot instanceof BrowserCatalogV2 &&
-    snapshot.version === manifest.version &&
-    snapshot.catalogKey === manifest.catalog_key &&
-    snapshot.embeddingModel === manifest.embedding_model &&
-    snapshot.dimension === manifest.dim &&
-    snapshot.records.length === manifest.rows &&
-    snapshot.embeddings.length === manifest.rows * manifest.dim &&
-    JSON.stringify(snapshot.descriptor) === JSON.stringify(manifest.descriptor) &&
-    snapshot.metadataLoaded === includeMetadata
-  );
+function validateFamily(familyKey, family) {
+  if (!isObject(family) || !isObject(family.embedding) || !isObject(family.catalogs)) {
+    throw new CatalogV2Error(`invalid Catalog v2 family ${JSON.stringify(familyKey)}`);
+  }
+  const embedding = family.embedding;
+  if (
+    typeof embedding.model !== "string" ||
+    embedding.model.length === 0 ||
+    !Number.isInteger(embedding.dimensions) ||
+    embedding.dimensions <= 0 ||
+    embedding.dtype !== "float16" ||
+    embedding.byte_order !== "little" ||
+    embedding.layout !== "row-major"
+  ) {
+    throw new CatalogV2Error(`family ${JSON.stringify(familyKey)} has an unsupported embedding contract`);
+  }
 }
 
-async function verifyBytes(filename, bytes, expectedSha256, expectedSize = undefined) {
-  if (expectedSize !== undefined && bytes.byteLength !== expectedSize) {
-    throw new CatalogV2Error(`asset size mismatch: ${filename}`);
+function validateCatalogEntry(catalog, fullCatalogKey) {
+  if (
+    !isObject(catalog) ||
+    typeof catalog.public_name !== "string" ||
+    catalog.public_name.length === 0 ||
+    !isObject(catalog.descriptor) ||
+    !Number.isInteger(catalog.current_version) ||
+    catalog.current_version < 0 ||
+    !Number.isInteger(catalog.rows) ||
+    catalog.rows < 0 ||
+    typeof catalog.source_updated_at !== "string" ||
+    !isObject(catalog.base)
+  ) {
+    throw new CatalogV2Error(`invalid Catalog v2 catalog entry ${JSON.stringify(fullCatalogKey)}`);
   }
-  if (!isSha256(expectedSha256)) {
-    throw new CatalogV2Error(`invalid asset checksum: ${filename}`);
+  validateDescriptor(catalog.descriptor, fullCatalogKey);
+  validateBaseEntry(catalog.base, fullCatalogKey);
+}
+
+function validateDescriptor(descriptor, fullCatalogKey) {
+  if (
+    typeof descriptor.game !== "string" ||
+    typeof descriptor.source !== "string" ||
+    typeof descriptor.profile !== "string" ||
+    typeof descriptor.description !== "string" ||
+    typeof descriptor.result_identifier !== "string" ||
+    descriptor.result_identifier.length === 0 ||
+    typeof descriptor.recommended !== "boolean"
+  ) {
+    throw new CatalogV2Error(`catalog ${JSON.stringify(fullCatalogKey)} has an invalid descriptor`);
   }
+}
+
+function validateBaseEntry(base, fullCatalogKey) {
+  if (
+    !Number.isInteger(base.version) ||
+    base.version < 0 ||
+    !Number.isInteger(base.rows) ||
+    base.rows < 0 ||
+    typeof base.source_updated_at !== "string" ||
+    !isObject(base.recognition?.assets) ||
+    !isObject(base.metadata?.assets)
+  ) {
+    throw new CatalogV2Error(`catalog ${JSON.stringify(fullCatalogKey)} has an invalid base`);
+  }
+  validateAssetReference(base.recognition.assets.embeddings, "base embeddings asset");
+  validateAssetReference(base.recognition.assets.identifiers, "base identifiers asset");
+  validateAssetReference(base.metadata.assets.records, "base metadata asset");
+}
+
+function validateUpdateEntry(update, toVersion) {
+  if (
+    !isObject(update.rows) ||
+    !Number.isInteger(update.rows.added) ||
+    update.rows.added < 0 ||
+    !Number.isInteger(update.rows.updated) ||
+    update.rows.updated < 0 ||
+    !Number.isInteger(update.rows.deleted) ||
+    update.rows.deleted < 0 ||
+    typeof update.source_updated_at !== "string" ||
+    !isObject(update.recognition) ||
+    !Number.isInteger(update.recognition.rows) ||
+    update.recognition.rows < 0 ||
+    !isObject(update.recognition.assets) ||
+    !isObject(update.metadata) ||
+    !Number.isInteger(update.metadata.rows) ||
+    update.metadata.rows < 0 ||
+    !isObject(update.metadata.assets)
+  ) {
+    throw new CatalogV2Error(`update to version ${toVersion} has an invalid shape`);
+  }
+  validateAssetReference(update.recognition.assets.identifiers, `update ${toVersion} recognition identifiers asset`);
+  if (update.recognition.rows > 0 || "embeddings" in update.recognition.assets) {
+    validateAssetReference(update.recognition.assets.embeddings, `update ${toVersion} recognition embeddings asset`);
+  }
+  if (update.metadata.rows > 0 || "records" in update.metadata.assets) {
+    validateAssetReference(update.metadata.assets.records, `update ${toVersion} metadata asset`);
+  }
+}
+
+function validateAssetReference(reference, label) {
+  if (!isObject(reference) || typeof reference.url !== "string") {
+    throw new CatalogV2Error(`${label} is missing a valid url`);
+  }
+  const url = new URL(reference.url);
+  if (url.protocol !== "https:") {
+    throw new CatalogV2Error(`${label} must use https`);
+  }
+  if (!Number.isInteger(reference.size) || reference.size < 0) {
+    throw new CatalogV2Error(`${label} has an invalid size`);
+  }
+  if (!isSha256(reference.sha256)) {
+    throw new CatalogV2Error(`${label} has an invalid sha256`);
+  }
+}
+
+async function verifySha256(bytes, expectedSha256, label) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   const actual = [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
-  if (actual !== expectedSha256) throw new CatalogV2Error(`asset checksum mismatch: ${filename}`);
+  if (actual !== expectedSha256) throw new CatalogV2Error(`asset checksum mismatch: ${label}`);
 }
 
 async function gunzip(bytes) {
@@ -796,27 +910,6 @@ async function gunzip(bytes) {
   }
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
-function validateAsset(asset) {
-  if (
-    !isObject(asset) ||
-    !isSafeFilename(asset.filename) ||
-    !isSha256(asset.sha256) ||
-    !Number.isInteger(asset.size) ||
-    asset.size < 0
-  ) {
-    throw new CatalogV2Error("invalid Catalog v2 asset descriptor");
-  }
-}
-
-function isSafeFilename(value) {
-  return (
-    typeof value === "string" &&
-    /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) &&
-    value !== "." &&
-    value !== ".."
-  );
 }
 
 function isSha256(value) {
@@ -834,12 +927,18 @@ function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function ensureTrailingSlash(value) {
-  return value.endsWith("/") ? value : `${value}/`;
+function deepEqual(left, right) {
+  if (left === right) return true;
+  if (typeof left !== typeof right || left === null || right === null) return false;
+  if (typeof left !== "object") return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => Object.hasOwn(right, key) && deepEqual(left[key], right[key]));
 }
 
-function snapshotKey(tag, catalogKey, includeMetadata) {
-  return `${tag}\u0000${catalogKey}\u0000${includeMetadata ? "metadata" : "recognition"}`;
+function snapshotKey(version, catalogKey, includeMetadata) {
+  return `${version}\u0000${catalogKey}\u0000${includeMetadata ? "metadata" : "recognition"}`;
 }
 
 function requestResult(request) {
@@ -856,12 +955,6 @@ function transactionComplete(transaction) {
     transaction.onabort = () =>
       reject(transaction.error ?? new CatalogV2Error("Catalog v2 cache transaction aborted"));
   });
-}
-
-function compareStableKeys(left, right) {
-  if (left < right) return -1;
-  if (left > right) return 1;
-  return 0;
 }
 
 function float16ToNumber(value) {
