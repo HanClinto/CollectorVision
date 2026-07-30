@@ -230,9 +230,7 @@ class CatalogV2:
             "card_id": record.id,
         }
         if self.metadata_loaded:
-            result["metadata"] = (
-                None if record.metadata is None else dict(record.metadata)
-            )
+            result["metadata"] = None if record.metadata is None else dict(record.metadata)
         if score is not None:
             result["score"] = score
         return result
@@ -273,9 +271,7 @@ def _parse_embedding(value: object) -> CatalogV2Embedding:
         or embedding.byte_order != "little"
         or embedding.layout != "row-major"
     ):
-        raise CatalogV2Error(
-            "Catalog v2 requires little-endian, row-major float16 embeddings"
-        )
+        raise CatalogV2Error("Catalog v2 requires little-endian, row-major float16 embeddings")
     if _MODEL_IDENTITY.fullmatch(embedding.model) is None:
         raise CatalogV2Error("catalog family contains an unsupported model identity")
     return embedding

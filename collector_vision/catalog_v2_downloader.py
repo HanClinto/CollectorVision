@@ -286,9 +286,7 @@ class CatalogV2Downloader:
         version: int | None,
     ) -> CatalogV2Downloader:
         target = (
-            selection.entry["current_version"]
-            if version is None
-            else _version(version, "version")
+            selection.entry["current_version"] if version is None else _version(version, "version")
         )
         candidates = _cached_versions(
             root,
@@ -397,9 +395,7 @@ def _select_catalog(
         return recommended[0]
     if len(candidates) == 1:
         return candidates[0]
-    criteria = (
-        f"game={descriptor_game!r}, source={selected_source!r}, profile={profile!r}"
-    )
+    criteria = f"game={descriptor_game!r}, source={selected_source!r}, profile={profile!r}"
     if not candidates:
         raise CatalogV2Error(f"no Catalog v2 entry matches {criteria}")
     raise CatalogV2Error(f"multiple Catalog v2 entries match {criteria}; specify source/profile")
@@ -772,9 +768,7 @@ def _attach_metadata_route(
         descriptor=selection.descriptor,
         source=selection.descriptor.source,
     )
-    metadata = {
-        record.key(selection.descriptor.source): record.metadata for record in base_records
-    }
+    metadata = {record.key(selection.descriptor.source): record.metadata for record in base_records}
     for update in updates:
         operations = (
             _jsonl_asset(update["metadata"]["assets"]["records"], "metadata delta")
@@ -1039,13 +1033,10 @@ def _load_snapshot(
         try:
             payload = (path / filename).read_bytes()
         except FileNotFoundError as error:
-            raise CatalogV2Error(
-                f"cached Catalog v2 {name} asset is missing"
-            ) from error
-        if (
-            len(payload) != reference.get("size")
-            or hashlib.sha256(payload).hexdigest() != reference.get("sha256")
-        ):
+            raise CatalogV2Error(f"cached Catalog v2 {name} asset is missing") from error
+        if len(payload) != reference.get("size") or hashlib.sha256(
+            payload
+        ).hexdigest() != reference.get("sha256"):
             raise CatalogV2Error(f"cached Catalog v2 {name} asset is corrupt")
         try:
             decoded[name] = gzip.decompress(payload)
@@ -1069,9 +1060,7 @@ def _load_snapshot(
     if len(decoded["embeddings"]) != expected_matrix:
         raise CatalogV2Error("cached Catalog v2 embedding matrix size is invalid")
     matrix = (
-        np.frombuffer(decoded["embeddings"], dtype="<f2")
-        .reshape(rows, embedding.dimensions)
-        .copy()
+        np.frombuffer(decoded["embeddings"], dtype="<f2").reshape(rows, embedding.dimensions).copy()
     )
     return CatalogV2._from_data(
         embeddings=matrix,
@@ -1103,8 +1092,7 @@ def _parse_jsonl_bytes(payload: bytes, label: str, *, allow_null: bool = False) 
 
 def _write_gzip_jsonl(path: Path, values: list[Any]) -> dict[str, Any]:
     payload = b"".join(
-        json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True).encode()
-        + b"\n"
+        json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True).encode() + b"\n"
         for value in values
     )
     return _write_gzip(path, payload)

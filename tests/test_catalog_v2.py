@@ -121,7 +121,9 @@ class PublishedCatalog:
             "source_updated_at": "2026-07-24T00:00:00Z",
             "recognition": {
                 "assets": {
-                    "identifiers": self.jsonl("demo/version/0/base/identifiers.jsonl.gz", base_identifiers),
+                    "identifiers": self.jsonl(
+                        "demo/version/0/base/identifiers.jsonl.gz", base_identifiers
+                    ),
                     "embeddings": self.asset(
                         "demo/version/0/base/embeddings.f16.gz",
                         np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype="<f2").tobytes(),
@@ -358,13 +360,11 @@ def test_incremental_install_reuses_cached_snapshot(
     assert current.version == 2
     assert publication.calls == [
         FEED_URL,
-        publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["updates"]["2"][
-            "metadata"
-        ]["assets"]["records"]["url"],
+        publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["updates"]["2"]["metadata"][
+            "assets"
+        ]["records"]["url"],
     ]
-    recognition_root = (
-        tmp_path / "catalog-v2" / "snapshots" / "milo1--test--demo" / "metadata"
-    )
+    recognition_root = tmp_path / "catalog-v2" / "snapshots" / "milo1--test--demo" / "metadata"
     assert [path.name for path in recognition_root.iterdir()] == ["version-2"]
 
 
@@ -588,9 +588,7 @@ def test_cached_snapshot_accepts_feed_presentation_changes(
         cache_dir=tmp_path,
         feed_url=FEED_URL,
     )
-    descriptor = publication.feed["families"]["milo1"]["catalogs"]["test/demo"][
-        "descriptor"
-    ]
+    descriptor = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["descriptor"]
     descriptor["description"] = "Updated description."
     publication.publish_feed()
     publication.calls.clear()
