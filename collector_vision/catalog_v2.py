@@ -50,6 +50,7 @@ class CatalogV2Record:
     """One recognition row and its optional metadata."""
 
     id: str
+    name: str
     identifiers: Mapping[str, str]
     face_index: int = 0
     finishes: tuple[str, ...] = ()
@@ -223,6 +224,7 @@ class CatalogV2:
         result: dict[str, Any] = {
             "key": record.key(self.descriptor.source),
             "id": record.id,
+            "name": record.name,
             "identifiers": identifiers,
             "face_index": record.face_index,
             "finishes": list(record.finishes),
@@ -301,8 +303,8 @@ def _parse_record(
 ) -> CatalogV2Record:
     if not isinstance(value, dict):
         raise CatalogV2Error("recognition record must be an object")
-    allowed = {"id", "identifiers", "face_index", "finishes"}
-    if set(value) - allowed or not {"id", "identifiers"}.issubset(value):
+    allowed = {"id", "name", "identifiers", "face_index", "finishes"}
+    if set(value) - allowed or not {"id", "name", "identifiers"}.issubset(value):
         raise CatalogV2Error("recognition record has invalid fields")
     primary_id = _required_string(value, "id", "recognition record")
     if ":" in primary_id:
@@ -337,6 +339,7 @@ def _parse_record(
         raise CatalogV2Error("recognition record finishes must be sorted and unique")
     return CatalogV2Record(
         id=primary_id,
+        name=_required_string(value, "name", "recognition record"),
         identifiers=parsed_identifiers,
         face_index=face_index,
         finishes=finishes,
@@ -350,6 +353,7 @@ def _with_metadata(
 ) -> CatalogV2Record:
     return CatalogV2Record(
         id=record.id,
+        name=record.name,
         identifiers=record.identifiers,
         face_index=record.face_index,
         finishes=record.finishes,

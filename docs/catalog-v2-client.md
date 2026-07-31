@@ -23,17 +23,20 @@ contract: it includes immutable family embedding details, catalog descriptors,
 integer versions, absolute asset URLs, compressed sizes, and checksums. Clients
 do not fetch release indexes or per-version manifests.
 
-Load names, sets, languages, finishes, and peer IDs only when needed:
+Names, finishes, and peer IDs are part of the lightweight recognition layer.
+Load sets, languages, rarity, and other display/filter metadata only when needed:
 
 ```python
 catalog = cv.CatalogV2("mtg", include_metadata=True)
 match = catalog.search_records(embedding, top_k=1)[0]
 print(match["identifiers"])
+print(match["name"])
 print(match["metadata"])
 ```
 
 The primary result appears as `id` and under the descriptor's namespace in
-`identifiers`. Recognition-level `finishes` are available without metadata.
+`identifiers`. Recognition-level `name` and `finishes` are available without
+metadata.
 Current Scryfall metadata includes `promo` and canonical `layout`, including
 `layout == "art_series"` for art-card filtering.
 

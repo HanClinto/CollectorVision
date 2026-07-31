@@ -936,6 +936,7 @@ def _write_snapshot(root: Path, catalog: CatalogV2) -> Path:
         for record in catalog.records:
             value: dict[str, Any] = {
                 "id": record.id,
+                "name": record.name,
                 "identifiers": dict(sorted(record.identifiers.items())),
             }
             if record.face_index:

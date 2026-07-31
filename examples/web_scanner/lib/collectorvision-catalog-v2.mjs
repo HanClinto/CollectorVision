@@ -136,6 +136,7 @@ export class BrowserCatalogV2 {
     const result = {
       key,
       id: record.id,
+      name: record.name,
       identifiers: {
         [this.descriptor.result_identifier]: record.id,
         ...record.identifiers,
@@ -827,6 +828,7 @@ function isCompatibleSnapshot(snapshot, resolved, includeMetadata) {
 function parseIdentityRecord(value, descriptor, label) {
   if (!isObject(value)) throw new CatalogV2Error(`${label} must be a JSON object`);
   const id = requiredString(value.id, `${label} id`);
+  const name = requiredString(value.name, `${label} name`);
   if (!isObject(value.identifiers ?? {})) {
     throw new CatalogV2Error(`${label} identifiers must be an object`);
   }
@@ -859,7 +861,7 @@ function parseIdentityRecord(value, descriptor, label) {
       }
     }
   }
-  return { id, faceIndex, identifiers, finishes };
+  return { id, name, faceIndex, identifiers, finishes };
 }
 
 function parseIdentityTarget(value, label) {

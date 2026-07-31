@@ -38,6 +38,8 @@ class PublishedCatalog:
         }
 
     def jsonl(self, path: str, values: list[object]) -> dict[str, object]:
+        if "identifiers" in path:
+            values = [_with_test_name(value) for value in values]
         return self.asset(
             path,
             b"".join(
@@ -250,6 +252,7 @@ def test_installs_current_catalog_from_feed(
     assert catalog.record_for_index(0) == {
         "key": "test:b:face:1",
         "id": "b",
+        "name": "b",
         "identifiers": {
             "source_card": "b",
             "scryfall_oracle": "oracle-b2",
@@ -461,6 +464,30 @@ def test_rejects_noncanonical_identity(
         )
 
 
+def test_rejects_recognition_row_without_name(
+    tmp_path: Path,
+    publication: PublishedCatalog,
+) -> None:
+    base = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["base"]
+    base["recognition"]["assets"]["identifiers"] = publication.jsonl(
+        "missing-name.jsonl.gz",
+        [
+            {"id": "a", "identifiers": {}},
+            {"id": "b", "identifiers": {}, "face_index": 1},
+        ],
+    )
+    publication.publish_feed()
+
+    with pytest.raises(CatalogV2Error, match="invalid fields"):
+        CatalogV2Downloader.install(
+            "pokemon",
+            source="test",
+            cache_dir=tmp_path,
+            version=0,
+            feed_url=FEED_URL,
+        )
+
+
 def test_rejects_invalid_delta_embedding_indexes(
     tmp_path: Path,
     publication: PublishedCatalog,
@@ -651,6 +678,18 @@ def test_loaded_null_metadata_is_explicit(
 def test_v2_error_and_row_key_are_public() -> None:
     assert ExportedCatalogV2Error is CatalogV2Error
     assert catalog_v2_row_key("scryfall", "card", 1) == "scryfall:card:face:1"
+
+
+def _with_test_name(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    rendered = dict(value)
+    record = rendered.get("record")
+    if isinstance(record, dict) and isinstance(record.get("id"), str):
+        rendered["record"] = {"name": record["id"], **record}
+    elif "op" not in rendered and isinstance(rendered.get("id"), str):
+        rendered = {"name": rendered["id"], **rendered}
+    return rendered
 
 
 def test_v2_maps_all_published_tcgplayer_games() -> None:

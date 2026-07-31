@@ -115,6 +115,9 @@ class FeedFixture {
   }
 
   async putRows(path, values) {
+    if (path.includes("identifiers")) {
+      values = values.map((value) => withTestName(value));
+    }
     return this.#putGzip(path, jsonLines(values));
   }
 
@@ -132,6 +135,17 @@ class FeedFixture {
   replace(url, bytes) {
     this.files.set(url, bytes);
   }
+}
+
+function withTestName(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  if (value.record?.id && typeof value.record.id === "string") {
+    return { ...value, record: { name: value.record.id, ...value.record } };
+  }
+  if (!("op" in value) && typeof value.id === "string") {
+    return { name: value.id, ...value };
+  }
+  return value;
 }
 
 function descriptor(overrides = {}) {
@@ -493,6 +507,7 @@ await test("orders rows deterministically and reports public identifiers/finishe
   const a = catalog.recordForIndex(0);
   assert.equal(a.key, "scryfall:card-a");
   assert.equal(a.id, "card-a");
+  assert.equal(a.name, "card-a");
   assert.equal(a.card_id, "card-a");
   assert.equal(a.result_identifier, "scryfall_card");
   assert.equal(a.identifiers.scryfall_card, "card-a");
@@ -1162,9 +1177,9 @@ await test("rejects a non-HTTPS asset URL", async () => {
 
 console.log("\nMalformed identities");
 
-async function buildBrokenBaseFixture(rows) {
+async function buildBrokenBaseFixture(rows, path = "g/version/0/base/identifiers.jsonl.gz") {
   const fixture = new FeedFixture();
-  const identifiers = await fixture.putRows("g/version/0/base/identifiers.jsonl.gz", rows);
+  const identifiers = await fixture.putRows(path, rows);
   const embeddings = await fixture.putEmbeddings(
     "g/version/0/base/embeddings.f16.gz",
     rows.flatMap(() => [1, 0]),
@@ -1235,6 +1250,17 @@ await test("rejects a base row missing a non-empty id", async () => {
   await assert.rejects(
     () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     CatalogV2Error,
+  );
+});
+
+await test("rejects a base row missing a non-empty name", async () => {
+  const fixture = await buildBrokenBaseFixture(
+    [{ id: "card-a", identifiers: {} }],
+    "g/version/0/base/missing-name.jsonl.gz",
+  );
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /name must be a non-empty string/,
   );
 });
 
