@@ -41,7 +41,7 @@ export class BrowserCatalogV2 {
     const {
       fetchImpl = globalThis.fetch,
       feedUrl = DEFAULT_FEED_URL,
-      cache = null,
+      cache = defaultCatalogV2Cache(),
       ...selection
     } = options;
     const client = new CatalogV2FeedClient({ fetchImpl, feedUrl, cache });
@@ -251,8 +251,27 @@ function pruneOtherVersions(store, catalogKey, metadataMode, keepVersion) {
   });
 }
 
+const DEFAULT_CACHES = new WeakMap();
+
+function defaultCatalogV2Cache() {
+  const indexedDb = globalThis.indexedDB;
+  if (!indexedDb || (typeof indexedDb !== "object" && typeof indexedDb !== "function")) {
+    return null;
+  }
+  let cache = DEFAULT_CACHES.get(indexedDb);
+  if (!cache) {
+    cache = new CatalogV2IndexedDbCache({ indexedDb });
+    DEFAULT_CACHES.set(indexedDb, cache);
+  }
+  return cache;
+}
+
 export class CatalogV2FeedClient {
-  constructor({ fetchImpl = globalThis.fetch, feedUrl = DEFAULT_FEED_URL, cache = null } = {}) {
+  constructor({
+    fetchImpl = globalThis.fetch,
+    feedUrl = DEFAULT_FEED_URL,
+    cache = defaultCatalogV2Cache(),
+  } = {}) {
     if (typeof fetchImpl !== "function") throw new TypeError("fetch implementation is required");
     this.fetchImpl = fetchImpl;
     this.feedUrl = feedUrl;

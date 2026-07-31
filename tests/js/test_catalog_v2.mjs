@@ -891,6 +891,54 @@ await test("rejects duplicate finishes in a base row", async () => {
 
 console.log("\nPersistent cache");
 
+await test("browser entry points use a shared IndexedDB cache by default", async () => {
+  const previousIndexedDb = globalThis.indexedDB;
+  const hadIndexedDb = Object.hasOwn(globalThis, "indexedDB");
+  globalThis.indexedDB = makeFakeIndexedDb();
+  try {
+    const { fixture } = await buildFixture();
+    await BrowserCatalogV2.forGame("mtg", {
+      fetchImpl: fixture.fetchImpl(),
+      feedUrl: FEED_URL,
+    });
+
+    fixture.calls.length = 0;
+    await BrowserCatalogV2.forGame("mtg", {
+      fetchImpl: fixture.fetchImpl(),
+      feedUrl: FEED_URL,
+    });
+    assert.deepEqual(fixture.calls, [FEED_URL], "the second load should reuse the default cache");
+  } finally {
+    if (hadIndexedDb) globalThis.indexedDB = previousIndexedDb;
+    else delete globalThis.indexedDB;
+  }
+});
+
+await test("cache: null explicitly disables default IndexedDB persistence", async () => {
+  const previousIndexedDb = globalThis.indexedDB;
+  const hadIndexedDb = Object.hasOwn(globalThis, "indexedDB");
+  globalThis.indexedDB = makeFakeIndexedDb();
+  try {
+    const { fixture } = await buildFixture();
+    const options = {
+      fetchImpl: fixture.fetchImpl(),
+      feedUrl: FEED_URL,
+      cache: null,
+    };
+    await BrowserCatalogV2.forGame("mtg", options);
+
+    fixture.calls.length = 0;
+    await BrowserCatalogV2.forGame("mtg", options);
+    assert(
+      fixture.calls.some((url) => url.includes("identifiers.jsonl.gz")),
+      "an opted-out second load should fetch catalog assets again",
+    );
+  } finally {
+    if (hadIndexedDb) globalThis.indexedDB = previousIndexedDb;
+    else delete globalThis.indexedDB;
+  }
+});
+
 await test("a cached snapshot already at current_version skips every asset fetch", async () => {
   const { fixture } = await buildFixture({ withUpdates: true });
   const cache = new MemorySnapshotCache();

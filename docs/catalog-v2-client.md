@@ -83,7 +83,8 @@ const [[score, cardId]] = catalog.search(queryEmbedding, 1);
 ```
 
 `queryEmbedding` is the normalized `Float32Array` from the existing Milo
-inference pipeline. The catalog keeps its matrix packed as FP16. Advanced
-applications can use `CatalogV2FeedClient` and `CatalogV2IndexedDbCache`
-directly for explicit catalog keys, family/profile selection, mirrors, and
-persistent snapshots.
+inference pipeline. The catalog keeps its matrix packed as FP16 and persists
+the newest compatible snapshot in IndexedDB by default. Pass `cache: null` to
+disable persistent caching. Advanced applications can use `CatalogV2FeedClient`
+and `CatalogV2IndexedDbCache` directly for explicit catalog keys,
+family/profile selection, mirrors, and custom cache management.
