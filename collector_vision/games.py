@@ -44,20 +44,22 @@ class Game(str, Enum):
     """
 
     # -----------------------------------------------------------------------
-    # Currently supported (catalogs published)
+    # Currently supported (Catalog v2 catalogs published)
     # -----------------------------------------------------------------------
     MTG = "mtg"  # Magic: The Gathering  (source: Scryfall)
     POKEMON = "pokemon"  # Pokémon TCG           (source: TCGplayer / PokémonTCG.io)
-
-    # -----------------------------------------------------------------------
-    # Planned (catalogs not yet published)
-    # -----------------------------------------------------------------------
+    POKEMON_JAPAN = "pokemon-japan"  # Pokémon Japan        (source: TCGplayer)
     YUGIOH = "yugioh"  # Yu-Gi-Oh!             (source: TCGplayer)
     FAB = "fab"  # Flesh and Blood        (source: TCGplayer)
     LORCANA = "lorcana"  # Disney Lorcana         (source: TCGplayer)
     DIGIMON = "digimon"  # Digimon Card Game      (source: TCGplayer)
     ONEPIECE = "onepiece"  # One Piece Card Game    (source: TCGplayer)
     SWU = "swu"  # Star Wars: Unlimited   (source: TCGplayer)
+    UNION_ARENA = "union-arena"  # Union Arena           (source: TCGplayer)
+    GUNDAM = "gundam"  # Gundam Card Game      (source: TCGplayer)
+    RIFTBOUND = "riftbound"  # Riftbound             (source: TCGplayer)
+
+    # Planned (catalog not yet published)
     DBS = "dbs"  # Dragon Ball Super CG   (source: TCGplayer)
 
     def __str__(self) -> str:
@@ -68,12 +70,16 @@ class Game(str, Enum):
 GAME_DISPLAY_NAMES: dict[Game, str] = {
     Game.MTG: "Magic: The Gathering",
     Game.POKEMON: "Pokémon TCG",
+    Game.POKEMON_JAPAN: "Pokémon Japan",
     Game.YUGIOH: "Yu-Gi-Oh!",
     Game.FAB: "Flesh and Blood",
     Game.LORCANA: "Disney Lorcana",
     Game.DIGIMON: "Digimon Card Game",
     Game.ONEPIECE: "One Piece Card Game",
     Game.SWU: "Star Wars: Unlimited",
+    Game.UNION_ARENA: "Union Arena",
+    Game.GUNDAM: "Gundam Card Game",
+    Game.RIFTBOUND: "Riftbound",
     Game.DBS: "Dragon Ball Super Card Game",
 }
 
@@ -82,12 +88,16 @@ GAME_DISPLAY_NAMES: dict[Game, str] = {
 GAME_PRIMARY_SOURCE: dict[Game, str] = {
     Game.MTG: "scryfall",
     Game.POKEMON: "tcgplayer",
+    Game.POKEMON_JAPAN: "tcgplayer",
     Game.YUGIOH: "tcgplayer",
     Game.FAB: "tcgplayer",
     Game.LORCANA: "tcgplayer",
     Game.DIGIMON: "tcgplayer",
     Game.ONEPIECE: "tcgplayer",
     Game.SWU: "tcgplayer",
+    Game.UNION_ARENA: "tcgplayer",
+    Game.GUNDAM: "tcgplayer",
+    Game.RIFTBOUND: "tcgplayer",
     Game.DBS: "tcgplayer",
 }
 

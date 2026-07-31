@@ -20,12 +20,18 @@ const DEFAULT_FAMILY = "milo1";
 const GAME_ALIASES = Object.freeze({
   mtg: "magic-the-gathering",
   pokemon: "pokemon",
+  pokemonjapan: "pokemon-japan",
+  "pokemon-japan": "pokemon-japan",
   yugioh: "yugioh",
   fab: "flesh-and-blood",
   lorcana: "lorcana",
   digimon: "digimon-card-game",
   onepiece: "one-piece",
   swu: "star-wars-unlimited",
+  unionarena: "union-arena",
+  "union-arena": "union-arena",
+  gundam: "gundam-card-game",
+  riftbound: "riftbound",
   dbs: "dragon-ball-super-card-game",
 });
 

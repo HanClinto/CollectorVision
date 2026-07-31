@@ -653,6 +653,13 @@ def test_v2_error_and_row_key_are_public() -> None:
     assert catalog_v2_row_key("scryfall", "card", 1) == "scryfall:card:face:1"
 
 
+def test_v2_maps_all_published_tcgplayer_games() -> None:
+    assert downloader_module._GAME_NAMES["pokemon-japan"] == "pokemon-japan"
+    assert downloader_module._GAME_NAMES["union-arena"] == "union-arena"
+    assert downloader_module._GAME_NAMES["gundam"] == "gundam-card-game"
+    assert downloader_module._GAME_NAMES["riftbound"] == "riftbound"
+
+
 def test_cold_offline_mode_explains_missing_feed(tmp_path: Path) -> None:
     with pytest.raises(CatalogV2Error, match="install a catalog online"):
         CatalogV2Downloader.open("pokemon", cache_dir=tmp_path)

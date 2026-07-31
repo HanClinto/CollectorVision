@@ -37,12 +37,16 @@ _SNAPSHOT_SCHEMA = 1
 _GAME_NAMES = {
     "mtg": "magic-the-gathering",
     "pokemon": "pokemon",
+    "pokemon-japan": "pokemon-japan",
     "yugioh": "yugioh",
     "fab": "flesh-and-blood",
     "lorcana": "lorcana",
     "digimon": "digimon-card-game",
     "onepiece": "one-piece",
     "swu": "star-wars-unlimited",
+    "union-arena": "union-arena",
+    "gundam": "gundam-card-game",
+    "riftbound": "riftbound",
     "dbs": "dragon-ball-super-card-game",
 }
 
