@@ -33,6 +33,7 @@ const DEFAULT_SOURCE_BY_GAME = Object.freeze({
   "magic-the-gathering": "scryfall",
 });
 const FALLBACK_SOURCE = "tcgplayer";
+const FLOAT16_LOOKUP = createFloat16LookupTable();
 
 export class CatalogV2Error extends Error {}
 
@@ -88,20 +89,31 @@ export class BrowserCatalogV2 {
     if (!Number.isInteger(topK) || topK <= 0) {
       throw new RangeError("topK must be a positive integer");
     }
-    const best = [];
+    const resultCount = Math.min(topK, this.records.length);
+    const bestScores = new Float64Array(resultCount);
+    bestScores.fill(-Infinity);
+    const bestIndexes = new Int32Array(resultCount);
+    bestIndexes.fill(-1);
     for (let row = 0; row < this.records.length; row += 1) {
       let score = 0;
       const offset = row * this.dimension;
       for (let column = 0; column < this.dimension; column += 1) {
-        score += float16ToNumber(this.embeddings[offset + column]) * query[column];
+        score += FLOAT16_LOOKUP[this.embeddings[offset + column]] * query[column];
       }
-      const candidate = { score, index: row };
-      let position = best.findIndex((item) => score > item.score);
-      if (position < 0) position = best.length;
-      best.splice(position, 0, candidate);
-      if (best.length > topK) best.pop();
+      if (score <= bestScores[resultCount - 1]) continue;
+      let position = resultCount - 1;
+      while (position > 0 && score > bestScores[position - 1]) {
+        bestScores[position] = bestScores[position - 1];
+        bestIndexes[position] = bestIndexes[position - 1];
+        position -= 1;
+      }
+      bestScores[position] = score;
+      bestIndexes[position] = row;
     }
-    return best.map(({ score, index }) => this.recordForIndex(index, score));
+    return Array.from(
+      { length: resultCount },
+      (_, index) => this.recordForIndex(bestIndexes[index], bestScores[index]),
+    );
   }
 
   recordForIndex(index, score = undefined) {
@@ -1143,4 +1155,8 @@ function float16ToNumber(value) {
   if (exponent === 0) return sign * 2 ** -14 * (fraction / 1024);
   if (exponent === 0x1f) return fraction ? Number.NaN : sign * Number.POSITIVE_INFINITY;
   return sign * 2 ** (exponent - 15) * (1 + fraction / 1024);
+}
+
+function createFloat16LookupTable() {
+  return Float32Array.from({ length: 65536 }, (_, value) => float16ToNumber(value));
 }
