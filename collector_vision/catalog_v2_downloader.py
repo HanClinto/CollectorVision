@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import uuid
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,8 @@ from collector_vision.catalog_v2 import (
     CatalogV2Embedding,
     CatalogV2Error,
     CatalogV2Record,
+    _core_equal,
+    _parse_base_row,
     _parse_descriptor,
     _parse_embedding,
     _parse_record,
@@ -33,7 +36,7 @@ DEFAULT_FEED_URL = (
     "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-feed-v2.json"
 )
 _USER_AGENT = "CollectorVision-CatalogV2/0.2"
-_SNAPSHOT_SCHEMA = 1
+_SNAPSHOT_SCHEMA = 2
 _GAME_NAMES = {
     "mtg": "magic-the-gathering",
     "pokemon": "pokemon",
@@ -464,18 +467,17 @@ def _validate_base(value: object) -> dict[str, Any]:
     rows = _non_negative_int(value.get("rows"), "catalog base rows")
     if not isinstance(value.get("source_updated_at"), str):
         raise CatalogV2Error("catalog base source_updated_at must be a string")
-    recognition = _layer(value.get("recognition"), "catalog base recognition")
-    metadata = _layer(value.get("metadata"), "catalog base metadata")
-    if set(recognition["assets"]) != {"embeddings", "identifiers"}:
-        raise CatalogV2Error("catalog base recognition assets are incomplete")
-    if set(metadata["assets"]) != {"records"}:
-        raise CatalogV2Error("catalog base metadata assets are incomplete")
+    assets = value.get("assets")
+    if not isinstance(assets, dict) or set(assets) != {"records", "embeddings"}:
+        raise CatalogV2Error("catalog base assets must contain records and embeddings")
+    parsed_assets = {
+        key: _asset(reference, f"catalog base asset {key}") for key, reference in assets.items()
+    }
     return {
         **value,
         "version": version,
         "rows": rows,
-        "recognition": recognition,
-        "metadata": metadata,
+        "assets": parsed_assets,
     }
 
 
@@ -491,37 +493,37 @@ def _validate_update(value: dict[str, Any]) -> dict[str, Any]:
         name: _non_negative_int(rows.get(name), f"catalog update rows.{name}")
         for name in ("added", "updated", "deleted")
     }
-    recognition = _layer(value.get("recognition"), "catalog update recognition", rows=True)
-    metadata = _layer(value.get("metadata"), "catalog update metadata", rows=True)
-    if recognition["rows"] and "identifiers" not in recognition["assets"]:
-        raise CatalogV2Error("catalog update recognition operations asset is missing")
-    if not recognition["rows"] and recognition["assets"]:
-        raise CatalogV2Error("empty recognition update must not advertise assets")
-    if metadata["rows"] and set(metadata["assets"]) != {"records"}:
-        raise CatalogV2Error("catalog update metadata operations asset is missing")
-    if not metadata["rows"] and metadata["assets"]:
-        raise CatalogV2Error("empty metadata update must not advertise assets")
+    recognition_rows = _non_negative_int(
+        value.get("recognition_rows"), "catalog update recognition_rows"
+    )
+    metadata_rows = _non_negative_int(value.get("metadata_rows"), "catalog update metadata_rows")
+    total_ops = parsed_rows["added"] + parsed_rows["updated"] + parsed_rows["deleted"]
+    if recognition_rows > total_ops or metadata_rows > total_ops:
+        raise CatalogV2Error(
+            "catalog update recognition_rows and metadata_rows cannot exceed total operations"
+        )
+    assets = value.get("assets")
+    if not isinstance(assets, dict):
+        raise CatalogV2Error("catalog update assets must be an object")
+    parsed_assets = {
+        key: _asset(reference, f"catalog update asset {key}") for key, reference in assets.items()
+    }
+    if set(parsed_assets) - {"records", "embeddings"}:
+        raise CatalogV2Error("catalog update assets contain unsupported entries")
+    if total_ops:
+        if "records" not in parsed_assets:
+            raise CatalogV2Error("catalog update records asset is missing")
+    elif parsed_assets:
+        raise CatalogV2Error("empty catalog update must not advertise assets")
     return {
         **value,
         "from_version": from_version,
         "to_version": to_version,
         "rows": parsed_rows,
-        "recognition": recognition,
-        "metadata": metadata,
+        "recognition_rows": recognition_rows,
+        "metadata_rows": metadata_rows,
+        "assets": parsed_assets,
     }
-
-
-def _layer(value: object, name: str, *, rows: bool = False) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise CatalogV2Error(f"{name} must be an object")
-    assets = value.get("assets")
-    if not isinstance(assets, dict):
-        raise CatalogV2Error(f"{name} assets must be an object")
-    parsed = {key: _asset(reference, f"{name} asset {key}") for key, reference in assets.items()}
-    result = {**value, "assets": parsed}
-    if rows:
-        result["rows"] = _non_negative_int(value.get("rows"), f"{name} rows")
-    return result
 
 
 def _asset(value: object, name: str) -> dict[str, Any]:
@@ -567,25 +569,17 @@ def _update_chain(
 
 def _download_base(selection: _Selection, *, include_metadata: bool) -> CatalogV2:
     base = selection.entry["base"]
-    identifiers = _jsonl_asset(
-        base["recognition"]["assets"]["identifiers"],
-        "base identifiers",
-    )
-    if len(identifiers) != base["rows"]:
-        raise CatalogV2Error("base identifier count does not match advertised rows")
-    metadata = (
-        _metadata_asset(base["metadata"]["assets"]["records"], base["rows"])
-        if include_metadata
-        else [None] * base["rows"]
-    )
+    rows = _jsonl_asset(base["assets"]["records"], "base records")
+    if len(rows) != base["rows"]:
+        raise CatalogV2Error("base record count does not match advertised rows")
     records = _records(
-        identifiers,
-        metadata,
+        rows,
         descriptor=selection.descriptor,
         source=selection.descriptor.source,
+        include_metadata=include_metadata,
     )
     embeddings = _embedding_asset(
-        base["recognition"]["assets"]["embeddings"],
+        base["assets"]["embeddings"],
         rows=base["rows"],
         dimensions=selection.embedding.dimensions,
         label="base embeddings",
@@ -616,61 +610,80 @@ def _apply_update(
         record.key(source): previous.embeddings[index].copy()
         for index, record in enumerate(previous.records)
     }
-    recognition_operations = (
-        _jsonl_asset(
-            update["recognition"]["assets"]["identifiers"],
-            "identifier delta",
-        )
-        if update["recognition"]["rows"]
-        else []
-    )
-    if len(recognition_operations) != update["recognition"]["rows"]:
-        raise CatalogV2Error("identifier delta count does not match feed")
-    parsed_operations: list[tuple[str, str, CatalogV2Record | None, int | None]] = []
+    total_ops = update["rows"]["added"] + update["rows"]["updated"] + update["rows"]["deleted"]
+    operations = _jsonl_asset(update["assets"]["records"], "records delta") if total_ops else []
+    if len(operations) != total_ops:
+        raise CatalogV2Error("records delta count does not match feed")
+
+    # First pass: parse and validate every operation's structure against the
+    # *predecessor* state, without mutating it yet.
+    parsed_operations: list[
+        tuple[str, str, CatalogV2Record | None, bool, Mapping[str, Any] | None, int | None]
+    ] = []
     upsert_indexes: set[int] = set()
     operated: set[str] = set()
     added: set[str] = set()
     changed: set[str] = set()
     deleted: set[str] = set()
-    for operation in recognition_operations:
+    for operation in operations:
         if not isinstance(operation, dict):
-            raise CatalogV2Error("identifier delta operation must be an object")
+            raise CatalogV2Error("records delta operation must be an object")
         op = operation.get("op")
         if op == "delete":
             if set(operation) - {"op", "id", "face_index"}:
-                raise CatalogV2Error("identifier delta delete has invalid fields")
-            key = _operation_key(operation, source, "identifier delta delete")
+                raise CatalogV2Error("records delta delete has invalid fields")
+            key = _operation_key(operation, source, "records delta delete")
             if key in operated or key not in records:
-                raise CatalogV2Error("identifier delta delete targets a missing or duplicate row")
+                raise CatalogV2Error("records delta delete targets a missing or duplicate row")
             operated.add(key)
             deleted.add(key)
-            parsed_operations.append((op, key, None, None))
+            parsed_operations.append(("delete", key, None, False, None, None))
         elif op == "upsert":
-            if set(operation) != {"op", "record", "embedding_index"}:
-                raise CatalogV2Error("identifier delta upsert has invalid fields")
-            record = _parse_record(
-                operation.get("record"),
-                descriptor=previous.descriptor,
-            )
+            allowed = {"op", "record", "metadata", "embedding_index"}
+            if set(operation) - allowed or "record" not in operation:
+                raise CatalogV2Error("records delta upsert has invalid fields")
+            record = _parse_record(operation.get("record"), descriptor=previous.descriptor)
             key = record.key(source)
-            index = _non_negative_int(
-                operation.get("embedding_index"),
-                "identifier delta embedding_index",
-            )
-            if key in operated or index in upsert_indexes:
-                raise CatalogV2Error("identifier delta upsert is duplicated")
+            if key in operated:
+                raise CatalogV2Error("records delta upsert is duplicated")
+            has_index = "embedding_index" in operation
+            has_metadata = "metadata" in operation
+            if not has_index and not has_metadata:
+                raise CatalogV2Error("records delta upsert must change recognition or metadata")
+            index: int | None = None
+            if has_index:
+                index = _non_negative_int(
+                    operation["embedding_index"], "records delta embedding_index"
+                )
+                if index in upsert_indexes:
+                    raise CatalogV2Error("records delta upsert is duplicated")
+                upsert_indexes.add(index)
+            metadata_value = operation.get("metadata") if has_metadata else None
+            if has_metadata and metadata_value is not None and not isinstance(metadata_value, dict):
+                raise CatalogV2Error("records delta metadata must be an object or null")
             operated.add(key)
-            upsert_indexes.add(index)
-            (changed if key in records else added).add(key)
-            parsed_operations.append((op, key, record, index))
+            is_new = key not in records
+            if is_new:
+                if not has_index:
+                    raise CatalogV2Error("an added records delta row must include embedding_index")
+                added.add(key)
+            else:
+                if not has_index and not _core_equal(records[key], record):
+                    raise CatalogV2Error(
+                        "records delta upsert without embedding_index must repeat the "
+                        "unchanged core record"
+                    )
+                changed.add(key)
+            parsed_operations.append(("upsert", key, record, has_metadata, metadata_value, index))
         else:
-            raise CatalogV2Error(f"unsupported identifier delta operation {op!r}")
+            raise CatalogV2Error(f"unsupported records delta operation {op!r}")
+
     if upsert_indexes != set(range(len(upsert_indexes))):
-        raise CatalogV2Error("identifier delta embedding indexes must be contiguous")
+        raise CatalogV2Error("records delta embedding indexes must be contiguous")
     if upsert_indexes:
-        asset = update["recognition"]["assets"].get("embeddings")
+        asset = update["assets"].get("embeddings")
         if asset is None:
-            raise CatalogV2Error("identifier delta embeddings asset is missing")
+            raise CatalogV2Error("records delta embeddings asset is missing")
         delta_embeddings = _embedding_asset(
             asset,
             rows=len(upsert_indexes),
@@ -678,62 +691,55 @@ def _apply_update(
             label="delta embeddings",
         )
     else:
-        if "embeddings" in update["recognition"]["assets"]:
-            raise CatalogV2Error("delete-only identifier delta must not contain embeddings")
-        delta_embeddings = np.empty((0, previous.embedding.dimensions), dtype="<f2")
-    for op, key, record, index in parsed_operations:
-        if op == "delete":
-            records.pop(key)
-            embeddings.pop(key)
-            continue
-        assert record is not None and index is not None
-        existing_metadata = records[key].metadata if key in records else None
-        records[key] = _with_metadata(record, existing_metadata)
-        embeddings[key] = delta_embeddings[index].copy()
-
-    metadata_changed: set[str] = set()
-    if include_metadata:
-        metadata_operations = (
-            _jsonl_asset(
-                update["metadata"]["assets"]["records"],
-                "metadata delta",
+        if "embeddings" in update["assets"]:
+            raise CatalogV2Error(
+                "records delta without recognition changes must not contain embeddings"
             )
-            if update["metadata"]["rows"]
-            else []
+        delta_embeddings = np.empty((0, previous.embedding.dimensions), dtype="<f2")
+
+    recognition_changed_count = len(deleted) + sum(
+        1 for kind, _, _, _, _, index in parsed_operations if kind == "upsert" and index is not None
+    )
+    if recognition_changed_count != update["recognition_rows"]:
+        raise CatalogV2Error("catalog update recognition_rows does not match operations")
+
+    metadata_field_count = sum(
+        1
+        for kind, _, _, has_metadata, _, _ in parsed_operations
+        if kind == "upsert" and has_metadata
+    )
+
+    # Second pass: apply the validated operations to the mutable state.
+    delete_with_metadata_count = 0
+    for kind, key, record, has_metadata, metadata_value, index in parsed_operations:
+        if kind == "delete":
+            prior = records.pop(key)
+            embeddings.pop(key)
+            if include_metadata and prior.metadata is not None:
+                delete_with_metadata_count += 1
+            continue
+        assert record is not None
+        if index is not None:
+            embeddings[key] = delta_embeddings[index].copy()
+        existing_metadata = records[key].metadata if key in records else None
+        new_metadata = metadata_value if has_metadata else existing_metadata
+        records[key] = _with_metadata(record, new_metadata if include_metadata else None)
+
+    if include_metadata:
+        if metadata_field_count + delete_with_metadata_count != update["metadata_rows"]:
+            raise CatalogV2Error("catalog update metadata_rows does not match operations")
+    elif metadata_field_count > update["metadata_rows"]:
+        raise CatalogV2Error(
+            "catalog update metadata_rows is smaller than its observable metadata operations"
         )
-        if len(metadata_operations) != update["metadata"]["rows"]:
-            raise CatalogV2Error("metadata delta count does not match feed")
-        seen_metadata: set[str] = set()
-        for operation in metadata_operations:
-            if not isinstance(operation, dict):
-                raise CatalogV2Error("metadata delta operation must be an object")
-            key = _operation_key(operation, source, "metadata delta")
-            if key in seen_metadata:
-                raise CatalogV2Error("metadata delta contains duplicate operations")
-            seen_metadata.add(key)
-            op = operation.get("op")
-            if op == "delete":
-                if set(operation) - {"op", "id", "face_index"}:
-                    raise CatalogV2Error("metadata delta delete has invalid fields")
-                if key in records:
-                    records[key] = _with_metadata(records[key], None)
-            elif op == "upsert":
-                if set(operation) - {"op", "id", "face_index", "metadata"}:
-                    raise CatalogV2Error("metadata delta upsert has invalid fields")
-                metadata = operation.get("metadata")
-                if not isinstance(metadata, dict) or key not in records:
-                    raise CatalogV2Error("metadata delta upsert targets an invalid row")
-                records[key] = _with_metadata(records[key], metadata)
-            else:
-                raise CatalogV2Error(f"unsupported metadata delta operation {op!r}")
-            if key not in added and key not in deleted:
-                metadata_changed.add(key)
 
     row_changes = update["rows"]
-    if len(added) != row_changes["added"] or len(deleted) != row_changes["deleted"]:
-        raise CatalogV2Error("catalog update added/deleted counts do not match operations")
-    if include_metadata and len(changed | metadata_changed) != row_changes["updated"]:
-        raise CatalogV2Error("catalog update updated count does not match operations")
+    if (
+        len(added) != row_changes["added"]
+        or len(deleted) != row_changes["deleted"]
+        or len(changed) != row_changes["updated"]
+    ):
+        raise CatalogV2Error("catalog update added/updated/deleted counts do not match operations")
     expected_rows = len(previous) + row_changes["added"] - row_changes["deleted"]
     if len(records) != expected_rows:
         raise CatalogV2Error("catalog update reconstructed the wrong row count")
@@ -760,39 +766,48 @@ def _attach_metadata_route(
     selection: _Selection,
     updates: list[dict[str, Any]],
 ) -> CatalogV2:
+    """Extract metadata by replaying combined base/update records, without
+    redownloading (or otherwise touching) the embeddings assets."""
     base = selection.entry["base"]
-    base_identifiers = _jsonl_asset(
-        base["recognition"]["assets"]["identifiers"],
-        "base identifiers",
-    )
-    base_metadata = _metadata_asset(base["metadata"]["assets"]["records"], base["rows"])
+    base_rows = _jsonl_asset(base["assets"]["records"], "base records")
+    if len(base_rows) != base["rows"]:
+        raise CatalogV2Error("base record count does not match advertised rows")
     base_records = _records(
-        base_identifiers,
-        base_metadata,
+        base_rows,
         descriptor=selection.descriptor,
         source=selection.descriptor.source,
+        include_metadata=True,
     )
     metadata = {record.key(selection.descriptor.source): record.metadata for record in base_records}
     for update in updates:
-        operations = (
-            _jsonl_asset(update["metadata"]["assets"]["records"], "metadata delta")
-            if update["metadata"]["rows"]
-            else []
-        )
-        if len(operations) != update["metadata"]["rows"]:
-            raise CatalogV2Error("metadata delta count does not match feed")
+        total_ops = update["rows"]["added"] + update["rows"]["updated"] + update["rows"]["deleted"]
+        operations = _jsonl_asset(update["assets"]["records"], "records delta") if total_ops else []
+        if len(operations) != total_ops:
+            raise CatalogV2Error("records delta count does not match feed")
         seen: set[str] = set()
         for operation in operations:
-            key = _operation_key(operation, selection.descriptor.source, "metadata delta")
-            if key in seen:
-                raise CatalogV2Error("metadata delta contains duplicate operations")
-            seen.add(key)
-            if operation.get("op") == "delete":
+            if not isinstance(operation, dict):
+                raise CatalogV2Error("records delta operation must be an object")
+            op = operation.get("op")
+            if op == "delete":
+                key = _operation_key(operation, selection.descriptor.source, "records delta delete")
+                if key in seen:
+                    raise CatalogV2Error("records delta contains duplicate operations")
+                seen.add(key)
                 metadata.pop(key, None)
-            elif operation.get("op") == "upsert" and isinstance(operation.get("metadata"), dict):
-                metadata[key] = operation["metadata"]
+            elif op == "upsert":
+                record = _parse_record(operation.get("record"), descriptor=selection.descriptor)
+                key = record.key(selection.descriptor.source)
+                if key in seen:
+                    raise CatalogV2Error("records delta contains duplicate operations")
+                seen.add(key)
+                if "metadata" in operation:
+                    value = operation["metadata"]
+                    if value is not None and not isinstance(value, dict):
+                        raise CatalogV2Error("records delta metadata must be an object or null")
+                    metadata[key] = value
             else:
-                raise CatalogV2Error("metadata delta contains an invalid operation")
+                raise CatalogV2Error(f"unsupported records delta operation {op!r}")
     records = [
         _with_metadata(record, metadata.get(record.key(selection.descriptor.source)))
         for record in recognition.records
@@ -810,39 +825,25 @@ def _attach_metadata_route(
 
 
 def _records(
-    identifiers: list[Any],
-    metadata: list[dict[str, Any] | None],
+    rows: list[Any],
     *,
     descriptor: CatalogV2Descriptor,
     source: str,
+    include_metadata: bool = True,
 ) -> tuple[CatalogV2Record, ...]:
-    if len(identifiers) != len(metadata):
-        raise CatalogV2Error("base identifiers and metadata are not aligned")
-    records = tuple(
-        _parse_record(value, descriptor=descriptor, metadata=fields)
-        for value, fields in zip(identifiers, metadata, strict=True)
-    )
+    records = []
+    for value in rows:
+        record = _parse_base_row(value, descriptor=descriptor)
+        if not include_metadata:
+            record = _with_metadata(record, None)
+        records.append(record)
     keys = [record.key(source) for record in records]
     if keys != sorted(keys) or len(keys) != len(set(keys)):
-        raise CatalogV2Error("base identifiers must be uniquely sorted by derived identity")
-    return records
+        raise CatalogV2Error("base records must be uniquely sorted by derived identity")
+    return tuple(records)
 
 
-def _metadata_asset(reference: dict[str, Any], rows: int) -> list[dict[str, Any] | None]:
-    values = _jsonl_asset(reference, "base metadata", allow_null=True)
-    if len(values) != rows:
-        raise CatalogV2Error("base metadata count does not match advertised rows")
-    if any(value is not None and not isinstance(value, dict) for value in values):
-        raise CatalogV2Error("base metadata rows must be objects or null")
-    return values
-
-
-def _jsonl_asset(
-    reference: dict[str, Any],
-    label: str,
-    *,
-    allow_null: bool = False,
-) -> list[Any]:
+def _jsonl_asset(reference: dict[str, Any], label: str) -> list[Any]:
     decoded = _gzip_asset(reference, label)
     values: list[Any] = []
     for line_number, line in enumerate(decoded.splitlines(), start=1):
@@ -850,12 +851,9 @@ def _jsonl_asset(
             value = json.loads(line)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise CatalogV2Error(f"invalid JSON in {label} at line {line_number}") from error
-        if value is None and allow_null:
-            values.append(None)
-        elif not isinstance(value, dict):
+        if not isinstance(value, dict):
             raise CatalogV2Error(f"{label} line {line_number} must be an object")
-        else:
-            values.append(value)
+        values.append(value)
     return values
 
 
@@ -932,7 +930,7 @@ def _write_snapshot(root: Path, catalog: CatalogV2) -> Path:
     temporary = destination.with_name(f".{destination.name}.tmp-{uuid.uuid4().hex}")
     temporary.mkdir(parents=True)
     try:
-        identifier_rows = []
+        record_rows = []
         for record in catalog.records:
             value: dict[str, Any] = {
                 "id": record.id,
@@ -943,22 +941,20 @@ def _write_snapshot(root: Path, catalog: CatalogV2) -> Path:
                 value["face_index"] = record.face_index
             if record.finishes:
                 value["finishes"] = list(record.finishes)
-            identifier_rows.append(value)
+            # A recognition-only cache variant never retains metadata content;
+            # its rows still carry the required field, always null.
+            value["metadata"] = record.metadata if catalog.metadata_loaded else None
+            record_rows.append(value)
         assets = {
-            "identifiers": _write_gzip_jsonl(
-                temporary / "identifiers.jsonl.gz",
-                identifier_rows,
+            "records": _write_gzip_jsonl(
+                temporary / "records.jsonl.gz",
+                record_rows,
             ),
             "embeddings": _write_gzip(
                 temporary / "embeddings.f16.gz",
                 catalog.embeddings.astype("<f2", copy=False).tobytes(order="C"),
             ),
         }
-        if catalog.metadata_loaded:
-            assets["metadata"] = _write_gzip_jsonl(
-                temporary / "metadata.jsonl.gz",
-                [record.metadata for record in catalog.records],
-            )
         receipt = {
             "schema": _SNAPSHOT_SCHEMA,
             "catalog_key": catalog.catalog_key,
@@ -1023,13 +1019,10 @@ def _load_snapshot(
     if include_metadata is True and not stored_metadata:
         raise CatalogV2Error("cached Catalog v2 snapshot does not contain metadata")
     metadata_loaded = stored_metadata if include_metadata is None else include_metadata
-    expected_assets = {"identifiers", "embeddings", *(["metadata"] if stored_metadata else [])}
-    if not isinstance(assets, dict) or set(assets) != expected_assets:
+    if not isinstance(assets, dict) or set(assets) != {"records", "embeddings"}:
         raise CatalogV2Error("cached Catalog v2 snapshot assets are invalid")
     decoded: dict[str, bytes] = {}
     for name, reference in assets.items():
-        if name == "metadata" and not metadata_loaded:
-            continue
         if not isinstance(reference, dict):
             raise CatalogV2Error("cached Catalog v2 asset reference is invalid")
         filename = reference.get("filename")
@@ -1047,19 +1040,16 @@ def _load_snapshot(
             decoded[name] = gzip.decompress(payload)
         except (OSError, EOFError) as error:
             raise CatalogV2Error(f"cached Catalog v2 {name} asset is invalid gzip") from error
-    identifiers = _parse_jsonl_bytes(decoded["identifiers"], "cached identifiers")
-    metadata = (
-        _parse_jsonl_bytes(decoded["metadata"], "cached metadata", allow_null=True)
-        if metadata_loaded
-        else [None] * rows
-    )
-    if len(identifiers) != rows or len(metadata) != rows:
+    row_values = _parse_jsonl_bytes(decoded["records"], "cached records")
+    if len(row_values) != rows:
         raise CatalogV2Error("cached Catalog v2 row count is invalid")
+    # Discard nested metadata immediately when the caller does not want it,
+    # rather than keeping every parsed metadata object reachable in memory.
     records = _records(
-        identifiers,
-        metadata,
+        row_values,
         descriptor=descriptor,
         source=descriptor.source,
+        include_metadata=metadata_loaded,
     )
     expected_matrix = rows * embedding.dimensions * np.dtype("<f2").itemsize
     if len(decoded["embeddings"]) != expected_matrix:
@@ -1079,19 +1069,16 @@ def _load_snapshot(
     )
 
 
-def _parse_jsonl_bytes(payload: bytes, label: str, *, allow_null: bool = False) -> list[Any]:
+def _parse_jsonl_bytes(payload: bytes, label: str) -> list[Any]:
     values = []
     for line_number, line in enumerate(payload.splitlines(), start=1):
         try:
             value = json.loads(line)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise CatalogV2Error(f"invalid {label} JSON at line {line_number}") from error
-        if value is None and allow_null:
-            values.append(None)
-        elif not isinstance(value, dict):
+        if not isinstance(value, dict):
             raise CatalogV2Error(f"{label} line {line_number} must be an object")
-        else:
-            values.append(value)
+        values.append(value)
     return values
 
 

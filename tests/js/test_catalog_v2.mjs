@@ -3,11 +3,14 @@
  *
  * These tests build fully synthetic, deterministic feeds and gzip assets in
  * memory (no network, no real CollectorVisionCatalog data) that follow the
- * live `catalog-feed-v2.json` contract described in
+ * live combined-record `catalog-feed-v2.json` contract described in
  * HanClinto/CollectorVisionCatalog `docs/catalog-v2.md` and
  * `docs/versioning.md`: a feed of embedding families, each nesting catalogs
- * keyed by `family/local-key`, each catalog advertising a base snapshot and
- * zero or more exact-predecessor updates through `current_version`.
+ * keyed by `family/local-key`, each catalog advertising a base snapshot
+ * (`assets: {records, embeddings}`, every records row carrying a required
+ * `metadata` field) and zero or more exact-predecessor updates through
+ * `current_version` (`rows: {added, updated, deleted}`, `recognition_rows`,
+ * `metadata_rows`, `assets: {records, embeddings?}`).
  *
  * Usage
  * -----
@@ -114,10 +117,17 @@ class FeedFixture {
     this.files.set(`${this.baseUrl}${path}`, encoder.encode(JSON.stringify(value)));
   }
 
-  async putRows(path, values) {
-    if (path.includes("identifiers")) {
-      values = values.map((value) => withTestName(value));
-    }
+  /** Writes a gzip JSON-lines records asset (combined base rows or delta
+   * operations); base rows and upsert operations are auto-completed with a
+   * `name` field via withTestName() so terse fixture literals stay readable. */
+  async putRecords(path, values) {
+    return this.#putGzip(path, jsonLines(values.map(withTestName)));
+  }
+
+  /** Like putRecords(), but writes rows verbatim without auto-completing a
+   * `name` field; used by tests that specifically exercise the "name is
+   * required" validation path. */
+  async putRecordsRaw(path, values) {
     return this.#putGzip(path, jsonLines(values));
   }
 
@@ -137,6 +147,9 @@ class FeedFixture {
   }
 }
 
+// Real records rows/upserts must carry `name`; terse fixture literals lacking
+// it are auto-completed from `id` for both base rows and delta `record`
+// payloads (delete ops and bare identity targets are left untouched).
 function withTestName(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   if (value.record?.id && typeof value.record.id === "string") {
@@ -367,22 +380,29 @@ function makeFakeIndexedDb() {
 
 /** Builds a single-family, single-catalog fixture with a base snapshot of two
  * rows ("card-a" front face, "card-b" back face) and, optionally, a chain of
- * updates through version 2 (add "card-c", update "card-a"; then delete
- * "card-b", update "card-c"). Returns the fixture plus the full catalog key. */
+ * updates through version 2. Each update stage's records asset carries one
+ * combined operation per globally affected identity (never separate
+ * recognition/metadata operations for the same id):
+ *   v0->v1: upsert card-a (recognition + metadata), add card-c (recognition + metadata)
+ *   v1->v2: delete card-b, upsert card-c (recognition + metadata)
+ * `withMetadata` toggles whether card-b's base metadata is null (used to
+ * exercise the explicit-null-metadata path) or a plain object. */
 async function buildFixture({ withUpdates = false, withMetadata = false } = {}) {
   const fixture = new FeedFixture();
   const key = "milo1/scryfall/mtg";
 
-  const baseIdentifiers = await fixture.putRows("scryfall-mtg/version/0/base/identifiers.jsonl.gz", [
-    { id: "card-a", identifiers: { scryfall_oracle: "oracle-a" } },
-    { id: "card-b", identifiers: {}, face_index: 1, finishes: ["foil", "nonfoil"] },
+  const baseRecords = await fixture.putRecords("scryfall-mtg/version/0/base/records.jsonl.gz", [
+    { id: "card-a", identifiers: { scryfall_oracle: "oracle-a" }, metadata: { name: "Alpha" } },
+    {
+      id: "card-b",
+      identifiers: {},
+      face_index: 1,
+      finishes: ["foil", "nonfoil"],
+      metadata: withMetadata ? null : { name: "Beta" },
+    },
   ]);
   const baseEmbeddings = await fixture.putEmbeddings("scryfall-mtg/version/0/base/embeddings.f16.gz", [
     1, 0, 0, 1,
-  ]);
-  const baseMetadata = await fixture.putRows("scryfall-mtg/version/0/base/metadata.jsonl.gz", [
-    { name: "Alpha" },
-    withMetadata ? null : { name: "Beta" },
   ]);
 
   const catalog = {
@@ -395,62 +415,70 @@ async function buildFixture({ withUpdates = false, withMetadata = false } = {}) 
       version: 0,
       rows: 2,
       source_updated_at: "2026-07-24T00:00:00Z",
-      recognition: { assets: { embeddings: baseEmbeddings, identifiers: baseIdentifiers } },
-      metadata: { assets: { records: baseMetadata } },
+      assets: { records: baseRecords, embeddings: baseEmbeddings },
     },
     updates: {},
   };
 
   if (withUpdates) {
-    const v1Identifiers = await fixture.putRows(
-      "scryfall-mtg/version/1/delta-from-0/identifiers.jsonl.gz",
+    const v1Records = await fixture.putRecords(
+      "scryfall-mtg/version/1/delta-from-0/records.jsonl.gz",
       [
-        { op: "upsert", record: { id: "card-a", identifiers: { scryfall_oracle: "oracle-a-2" } }, embedding_index: 0 },
-        { op: "upsert", record: { id: "card-c", identifiers: {} }, embedding_index: 1 },
+        {
+          op: "upsert",
+          record: { id: "card-a", identifiers: { scryfall_oracle: "oracle-a-2" } },
+          metadata: { name: "Alpha II" },
+          embedding_index: 0,
+        },
+        {
+          op: "upsert",
+          record: { id: "card-c", identifiers: {} },
+          metadata: { name: "Gamma" },
+          embedding_index: 1,
+        },
       ],
     );
     const v1Embeddings = await fixture.putEmbeddings(
       "scryfall-mtg/version/1/delta-from-0/embeddings.f16.gz",
       [-1, 0, 0.5, 0.5],
     );
-    const v1Metadata = await fixture.putRows(
-      "scryfall-mtg/version/1/delta-from-0/metadata.jsonl.gz",
-      [
-        { op: "upsert", id: "card-a", metadata: { name: "Alpha II" } },
-        { op: "upsert", id: "card-c", metadata: { name: "Gamma" } },
-      ],
-    );
     catalog.updates["1"] = {
       from_version: 0,
       to_version: 1,
       rows: { added: 1, updated: 1, deleted: 0 },
       source_updated_at: "2026-07-25T00:00:00Z",
-      recognition: { rows: 2, assets: { embeddings: v1Embeddings, identifiers: v1Identifiers } },
-      metadata: { rows: 2, assets: { records: v1Metadata } },
+      recognition_rows: 2,
+      metadata_rows: 2,
+      assets: { records: v1Records, embeddings: v1Embeddings },
     };
 
-    const v2Identifiers = await fixture.putRows(
-      "scryfall-mtg/version/2/delta-from-1/identifiers.jsonl.gz",
+    // card-b's base metadata is only non-null when withMetadata is false, so
+    // its deletion here only contributes to metadata_rows in that case.
+    const v2MetadataRows = 1 + (withMetadata ? 0 : 1);
+    const v2Records = await fixture.putRecords(
+      "scryfall-mtg/version/2/delta-from-1/records.jsonl.gz",
       [
         { op: "delete", id: "card-b", face_index: 1 },
-        { op: "upsert", record: { id: "card-c", identifiers: {} }, embedding_index: 0 },
+        {
+          op: "upsert",
+          record: { id: "card-c", identifiers: {} },
+          metadata: { name: "Gamma II" },
+          embedding_index: 0,
+        },
       ],
     );
     const v2Embeddings = await fixture.putEmbeddings(
       "scryfall-mtg/version/2/delta-from-1/embeddings.f16.gz",
       [2, 0],
     );
-    const v2Metadata = await fixture.putRows(
-      "scryfall-mtg/version/2/delta-from-1/metadata.jsonl.gz",
-      [{ op: "upsert", id: "card-c", metadata: { name: "Gamma II" } }],
-    );
     catalog.updates["2"] = {
       from_version: 1,
       to_version: 2,
       rows: { added: 0, updated: 1, deleted: 1 },
       source_updated_at: "2026-07-26T00:00:00Z",
-      recognition: { rows: 2, assets: { embeddings: v2Embeddings, identifiers: v2Identifiers } },
-      metadata: { rows: 1, assets: { records: v2Metadata } },
+      recognition_rows: 2,
+      metadata_rows: v2MetadataRows,
+      assets: { records: v2Records, embeddings: v2Embeddings },
     };
     catalog.current_version = 2;
     catalog.rows = 2; // card-a, card-c (card-b deleted)
@@ -534,12 +562,15 @@ await test("search() dequantizes packed float16 embeddings and returns [score, c
 
 console.log("\nMetadata optionality");
 
-await test("recognition-only load never fetches or exposes metadata", async () => {
-  const { fixture } = await buildFixture();
+await test("recognition-only load always fetches combined records but discards metadata after parsing", async () => {
+  const { fixture } = await buildFixture({ withMetadata: true });
   const catalog = await client(fixture).loadCatalog("milo1/scryfall/mtg", { includeMetadata: false });
   assert.equal(catalog.metadataLoaded, false);
   assert.equal("metadata" in catalog.recordForIndex(0), false);
-  assert(fixture.calls.every((url) => !url.includes("metadata")));
+  assert(
+    fixture.calls.some((url) => url.includes("records.jsonl.gz")),
+    "the combined records asset must still be fetched even when metadata is not wanted",
+  );
 });
 
 await test("metadata load treats rows generically, including null and promo/layout fields", async () => {
@@ -561,13 +592,10 @@ await test("metadata load treats rows generically, including null and promo/layo
 
 await test("metadata objects pass through opaque fields such as promo and layout untouched", async () => {
   const fixture = new FeedFixture();
-  const identifiers = await fixture.putRows("g/version/0/base/identifiers.jsonl.gz", [
-    { id: "x" },
+  const records = await fixture.putRecords("g/version/0/base/records.jsonl.gz", [
+    { id: "x", metadata: { name: "Wretched Gift", promo: true, layout: "normal", cmc: 2 } },
   ]);
   const embeddings = await fixture.putEmbeddings("g/version/0/base/embeddings.f16.gz", [1, 0]);
-  const metadata = await fixture.putRows("g/version/0/base/metadata.jsonl.gz", [
-    { name: "Wretched Gift", promo: true, layout: "normal", cmc: 2 },
-  ]);
   fixture.setJson("catalog-feed-v2.json", {
     checked_at: "2026-07-26T12:00:00Z",
     families: {
@@ -584,8 +612,7 @@ await test("metadata objects pass through opaque fields such as promo and layout
               version: 0,
               rows: 1,
               source_updated_at: "2026-07-24T00:00:00Z",
-              recognition: { assets: { embeddings, identifiers } },
-              metadata: { assets: { records: metadata } },
+              assets: { records, embeddings },
             },
             updates: {},
           },
@@ -680,43 +707,44 @@ await test("continues from a mid-chain previous snapshot instead of restarting a
 });
 
 // ---------------------------------------------------------------------------
-// Global row classification: recognition/metadata overlap and rows==0 legality
+// Combined-record delta semantics
 // ---------------------------------------------------------------------------
 
-console.log("\nGlobal row classification");
+console.log("\nCombined-record delta semantics");
 
-/** A tcgplayer-MTG-style fixture whose single update stage touches "card-x"
- * through both a recognition upsert and a metadata upsert, but touches
- * "card-y" through a metadata upsert only (no recognition operation at all).
- * The feed's `rows.updated` is a *global* union of both kinds of touches. */
+/** A tcgplayer-MTG-style fixture whose single update stage upserts "card-x"
+ * with both a recognition change and metadata in one combined operation, and
+ * upserts "card-y" with a metadata-only operation (no embedding_index at
+ * all), exercising the "metadata-only no-embedding-index upsert" contract
+ * requirement using an existing, surviving row. */
 async function buildOverlapFixture() {
   const fixture = new FeedFixture();
   const key = "milo1/tcgplayer/mtg";
 
-  const baseIdentifiers = await fixture.putRows("tcgplayer-mtg/version/0/base/identifiers.jsonl.gz", [
-    { id: "card-x", identifiers: {} },
-    { id: "card-y", identifiers: {} },
+  const baseRecords = await fixture.putRecords("tcgplayer-mtg/version/0/base/records.jsonl.gz", [
+    { id: "card-x", identifiers: {}, metadata: { name: "X" } },
+    { id: "card-y", identifiers: {}, metadata: { name: "Y" } },
   ]);
   const baseEmbeddings = await fixture.putEmbeddings("tcgplayer-mtg/version/0/base/embeddings.f16.gz", [
     1, 0, 0, 1,
   ]);
-  const baseMetadata = await fixture.putRows("tcgplayer-mtg/version/0/base/metadata.jsonl.gz", [
-    { name: "X" },
-    { name: "Y" },
-  ]);
 
-  const v1Identifiers = await fixture.putRows(
-    "tcgplayer-mtg/version/1/delta-from-0/identifiers.jsonl.gz",
-    [{ op: "upsert", record: { id: "card-x", identifiers: {} }, embedding_index: 0 }],
+  const v1Records = await fixture.putRecords(
+    "tcgplayer-mtg/version/1/delta-from-0/records.jsonl.gz",
+    [
+      {
+        op: "upsert",
+        record: { id: "card-x", identifiers: {} },
+        metadata: { name: "X2" },
+        embedding_index: 0,
+      },
+      { op: "upsert", record: { id: "card-y", identifiers: {} }, metadata: { name: "Y2" } },
+    ],
   );
   const v1Embeddings = await fixture.putEmbeddings(
     "tcgplayer-mtg/version/1/delta-from-0/embeddings.f16.gz",
     [0.5, 0.5],
   );
-  const v1Metadata = await fixture.putRows("tcgplayer-mtg/version/1/delta-from-0/metadata.jsonl.gz", [
-    { op: "upsert", id: "card-x", metadata: { name: "X2" } },
-    { op: "upsert", id: "card-y", metadata: { name: "Y2" } },
-  ]);
 
   fixture.setJson("catalog-feed-v2.json", {
     checked_at: "2026-08-01T00:00:00Z",
@@ -734,18 +762,17 @@ async function buildOverlapFixture() {
               version: 0,
               rows: 2,
               source_updated_at: "2026-07-31T00:00:00Z",
-              recognition: { assets: { embeddings: baseEmbeddings, identifiers: baseIdentifiers } },
-              metadata: { assets: { records: baseMetadata } },
+              assets: { records: baseRecords, embeddings: baseEmbeddings },
             },
             updates: {
               1: {
                 from_version: 0,
                 to_version: 1,
-                // Global: card-x (recognition + metadata) union card-y (metadata only) = 2.
                 rows: { added: 0, updated: 2, deleted: 0 },
                 source_updated_at: "2026-08-01T00:00:00Z",
-                recognition: { rows: 1, assets: { embeddings: v1Embeddings, identifiers: v1Identifiers } },
-                metadata: { rows: 2, assets: { records: v1Metadata } },
+                recognition_rows: 1,
+                metadata_rows: 2,
+                assets: { records: v1Records, embeddings: v1Embeddings },
               },
             },
           },
@@ -757,13 +784,15 @@ async function buildOverlapFixture() {
   return { fixture, key };
 }
 
-await test("with metadata loaded, rows.updated is the union of recognition- and metadata-touched rows", async () => {
+await test("a metadata-only upsert without embedding_index changes only metadata for a surviving row", async () => {
   const { fixture, key } = await buildOverlapFixture();
   const catalog = await client(fixture).loadCatalog(key, { includeMetadata: true });
   assert.equal(catalog.version, 1);
   const byCardId = new Map(catalog.records.map((r, index) => [r.id, catalog.recordForIndex(index)]));
   assert.equal(byCardId.get("card-x").metadata.name, "X2");
   assert.equal(byCardId.get("card-y").metadata.name, "Y2");
+  // card-y's embedding must be untouched by its metadata-only upsert.
+  assert.deepEqual(catalog.search(new Float32Array([0, 1]), 1), [[1, "card-y"]]);
 });
 
 await test("recognition-only mode never rejects a row that was only metadata-updated", async () => {
@@ -771,26 +800,20 @@ await test("recognition-only mode never rejects a row that was only metadata-upd
   const catalog = await client(fixture).loadCatalog(key, { includeMetadata: false });
   assert.equal(catalog.version, 1);
   assert.equal(catalog.metadataLoaded, false);
-  assert(
-    fixture.calls.every((url) => !url.includes("metadata")),
-    "recognition-only mode must never fetch metadata deltas just to validate row counts",
-  );
 });
 
-await test("a metadata-only update stage is legal with recognition.rows == 0 and empty assets", async () => {
+await test("rejects a no-embedding-index upsert whose core record differs from its predecessor", async () => {
   const fixture = new FeedFixture();
-  const key = "milo1/scryfall/mtg";
-  const baseIdentifiers = await fixture.putRows("g/version/0/base/identifiers.jsonl.gz", [
-    { id: "card-a", identifiers: {} },
-    { id: "card-b", identifiers: {} },
+  const baseRecords = await fixture.putRecords("g/version/0/base/records.jsonl.gz", [
+    { id: "card-x", identifiers: {}, metadata: { name: "X" } },
   ]);
-  const baseEmbeddings = await fixture.putEmbeddings("g/version/0/base/embeddings.f16.gz", [1, 0, 0, 1]);
-  const baseMetadata = await fixture.putRows("g/version/0/base/metadata.jsonl.gz", [
-    { name: "Alpha" },
-    { name: "Beta" },
-  ]);
-  const v1Metadata = await fixture.putRows("g/version/1/delta-from-0/metadata.jsonl.gz", [
-    { op: "upsert", id: "card-a", metadata: { name: "Alpha II" } },
+  const baseEmbeddings = await fixture.putEmbeddings("g/version/0/base/embeddings.f16.gz", [1, 0]);
+  const v1Records = await fixture.putRecords("g/version/1/delta-from-0/records.jsonl.gz", [
+    {
+      op: "upsert",
+      record: { id: "card-x", identifiers: { scryfall_oracle: "changed" } },
+      metadata: { name: "X2" },
+    },
   ]);
   fixture.setJson("catalog-feed-v2.json", {
     checked_at: "2026-08-01T00:00:00Z",
@@ -802,14 +825,13 @@ await test("a metadata-only update stage is legal with recognition.rows == 0 and
             public_name: "scryfall-mtg",
             descriptor: descriptor(),
             current_version: 1,
-            rows: 2,
+            rows: 1,
             source_updated_at: "2026-08-01T00:00:00Z",
             base: {
               version: 0,
-              rows: 2,
+              rows: 1,
               source_updated_at: "2026-07-31T00:00:00Z",
-              recognition: { assets: { embeddings: baseEmbeddings, identifiers: baseIdentifiers } },
-              metadata: { assets: { records: baseMetadata } },
+              assets: { records: baseRecords, embeddings: baseEmbeddings },
             },
             updates: {
               1: {
@@ -817,8 +839,9 @@ await test("a metadata-only update stage is legal with recognition.rows == 0 and
                 to_version: 1,
                 rows: { added: 0, updated: 1, deleted: 0 },
                 source_updated_at: "2026-08-01T00:00:00Z",
-                recognition: { rows: 0, assets: {} },
-                metadata: { rows: 1, assets: { records: v1Metadata } },
+                recognition_rows: 0,
+                metadata_rows: 1,
+                assets: { records: v1Records },
               },
             },
           },
@@ -826,38 +849,162 @@ await test("a metadata-only update stage is legal with recognition.rows == 0 and
       },
     },
   });
-
-  const catalog = await client(fixture).loadCatalog(key, { includeMetadata: true });
-  assert.equal(catalog.version, 1);
-  assert.equal(catalog.recordForIndex(0).metadata.name, "Alpha II");
-  assert(
-    fixture.calls.every((url) => !url.includes("version/1/delta-from-0/identifiers")),
-    "a recognition.rows == 0 stage must never fetch a recognition identifiers asset",
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg", { includeMetadata: true }),
+    /unchanged core record/,
   );
 });
 
-await test("rejects an update that declares recognition assets despite recognition.rows == 0", async () => {
+await test("explicit null metadata on an upsert removes the row's metadata", async () => {
+  const fixture = new FeedFixture();
+  const baseRecords = await fixture.putRecords("g/version/0/base/records.jsonl.gz", [
+    { id: "card-x", identifiers: {}, metadata: { name: "X" } },
+  ]);
+  const baseEmbeddings = await fixture.putEmbeddings("g/version/0/base/embeddings.f16.gz", [1, 0]);
+  const v1Records = await fixture.putRecords("g/version/1/delta-from-0/records.jsonl.gz", [
+    { op: "upsert", record: { id: "card-x", identifiers: {} }, metadata: null },
+  ]);
+  fixture.setJson("catalog-feed-v2.json", {
+    checked_at: "2026-08-01T00:00:00Z",
+    families: {
+      milo1: {
+        embedding: EMBEDDING,
+        catalogs: {
+          "scryfall/mtg": {
+            public_name: "scryfall-mtg",
+            descriptor: descriptor(),
+            current_version: 1,
+            rows: 1,
+            source_updated_at: "2026-08-01T00:00:00Z",
+            base: {
+              version: 0,
+              rows: 1,
+              source_updated_at: "2026-07-31T00:00:00Z",
+              assets: { records: baseRecords, embeddings: baseEmbeddings },
+            },
+            updates: {
+              1: {
+                from_version: 0,
+                to_version: 1,
+                rows: { added: 0, updated: 1, deleted: 0 },
+                source_updated_at: "2026-08-01T00:00:00Z",
+                recognition_rows: 0,
+                metadata_rows: 1,
+                assets: { records: v1Records },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  const catalog = await client(fixture).loadCatalog("milo1/scryfall/mtg", { includeMetadata: true });
+  assert.equal(catalog.recordForIndex(0).metadata, null);
+});
+
+await test("an added records delta row must include embedding_index", async () => {
   const { fixture } = await buildFixture({ withUpdates: true });
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
-  entry.recognition.rows = 0;
-  // assets is left non-empty despite rows == 0: inconsistent and must be rejected.
-  fixture.setJson("catalog-feed-v2.json", feed);
-  await assert.rejects(
-    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
-    /must not declare assets when rows is 0/,
+  const badRecords = await fixture.putRecords(
+    "scryfall-mtg/version/1/delta-from-0/no-index-add.jsonl.gz",
+    [
+      {
+        op: "upsert",
+        record: { id: "card-a", identifiers: { scryfall_oracle: "oracle-a-2" } },
+        metadata: { name: "Alpha II" },
+        embedding_index: 0,
+      },
+      { op: "upsert", record: { id: "card-c", identifiers: {} }, metadata: { name: "Gamma" } },
+    ],
   );
-});
-
-await test("rejects an update that omits required metadata assets despite metadata.rows > 0", async () => {
-  const { fixture } = await buildFixture({ withUpdates: true, withMetadata: true });
-  const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
+  const badEmbeddings = await fixture.putEmbeddings(
+    "scryfall-mtg/version/1/delta-from-0/no-index-add.f16.gz",
+    [-1, 0],
+  );
   const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
-  entry.metadata.assets = {};
+  entry.assets = { records: badRecords, embeddings: badEmbeddings };
+  entry.recognition_rows = 1;
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(
     () => client(fixture).loadCatalog("milo1/scryfall/mtg", { includeMetadata: true }),
-    /metadata records asset/,
+    /added .* row must include embedding_index/,
+  );
+});
+
+await test("rejects an upsert with neither embedding_index nor metadata", async () => {
+  const fixture = new FeedFixture();
+  const baseRecords = await fixture.putRecords("g/version/0/base/records.jsonl.gz", [
+    { id: "card-x", identifiers: {}, metadata: { name: "X" } },
+  ]);
+  const baseEmbeddings = await fixture.putEmbeddings("g/version/0/base/embeddings.f16.gz", [1, 0]);
+  const v1Records = await fixture.putRecords("g/version/1/delta-from-0/records.jsonl.gz", [
+    { op: "upsert", record: { id: "card-x", identifiers: {} } },
+  ]);
+  fixture.setJson("catalog-feed-v2.json", {
+    checked_at: "2026-08-01T00:00:00Z",
+    families: {
+      milo1: {
+        embedding: EMBEDDING,
+        catalogs: {
+          "scryfall/mtg": {
+            public_name: "scryfall-mtg",
+            descriptor: descriptor(),
+            current_version: 1,
+            rows: 1,
+            source_updated_at: "2026-08-01T00:00:00Z",
+            base: {
+              version: 0,
+              rows: 1,
+              source_updated_at: "2026-07-31T00:00:00Z",
+              assets: { records: baseRecords, embeddings: baseEmbeddings },
+            },
+            updates: {
+              1: {
+                from_version: 0,
+                to_version: 1,
+                rows: { added: 0, updated: 1, deleted: 0 },
+                source_updated_at: "2026-08-01T00:00:00Z",
+                recognition_rows: 0,
+                metadata_rows: 0,
+                assets: { records: v1Records },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /must change recognition or metadata/,
+  );
+});
+
+await test("rejects an update that declares assets despite having no operations", async () => {
+  const { fixture } = await buildFixture({ withUpdates: true });
+  const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
+  const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
+  entry.rows = { added: 0, updated: 0, deleted: 0 };
+  entry.recognition_rows = 0;
+  entry.metadata_rows = 0;
+  // assets is left non-empty despite zero total operations: inconsistent and
+  // must be rejected.
+  fixture.setJson("catalog-feed-v2.json", feed);
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /must not declare assets when it has no operations/,
+  );
+});
+
+await test("rejects an update that omits its required records asset despite having operations", async () => {
+  const { fixture } = await buildFixture({ withUpdates: true });
+  const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
+  const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
+  entry.assets = {};
+  fixture.setJson("catalog-feed-v2.json", feed);
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /records asset is missing/,
   );
 });
 
@@ -945,7 +1092,7 @@ await test("cache: null explicitly disables default IndexedDB persistence", asyn
     fixture.calls.length = 0;
     await BrowserCatalogV2.forGame("mtg", options);
     assert(
-      fixture.calls.some((url) => url.includes("identifiers.jsonl.gz")),
+      fixture.calls.some((url) => url.includes("records.jsonl.gz")),
       "an opted-out second load should fetch catalog assets again",
     );
   } finally {
@@ -1142,7 +1289,7 @@ console.log("\nChecksums, sizes, and HTTPS");
 await test("rejects an asset whose bytes do not match the declared size", async () => {
   const { fixture, key } = await buildFixture();
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  const embeddingsUrl = feed.families.milo1.catalogs["scryfall/mtg"].base.recognition.assets.embeddings.url;
+  const embeddingsUrl = feed.families.milo1.catalogs["scryfall/mtg"].base.assets.embeddings.url;
   fixture.replace(embeddingsUrl, new Uint8Array([1, 2, 3]));
   await assert.rejects(() => client(fixture).loadCatalog(key), /size mismatch/);
 });
@@ -1150,23 +1297,20 @@ await test("rejects an asset whose bytes do not match the declared size", async 
 await test("rejects an asset whose bytes do not match the declared sha256", async () => {
   const { fixture, key } = await buildFixture();
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  const idsRef = feed.families.milo1.catalogs["scryfall/mtg"].base.recognition.assets.identifiers;
-  const original = fixture.files.get(idsRef.url);
+  const recordsRef = feed.families.milo1.catalogs["scryfall/mtg"].base.assets.records;
+  const original = fixture.files.get(recordsRef.url);
   const tampered = new Uint8Array(original);
   tampered[tampered.length - 1] ^= 0xff; // flip a byte without changing length
-  assert.equal(tampered.byteLength, idsRef.size, "tamper fixture must preserve the declared size");
-  fixture.replace(idsRef.url, tampered);
+  assert.equal(tampered.byteLength, recordsRef.size, "tamper fixture must preserve the declared size");
+  fixture.replace(recordsRef.url, tampered);
   await assert.rejects(() => client(fixture).loadCatalog(key), /checksum mismatch/);
 });
 
 await test("rejects a non-HTTPS asset URL", async () => {
   const { fixture, key } = await buildFixture();
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  feed.families.milo1.catalogs["scryfall/mtg"].base.recognition.assets.identifiers.url =
-    feed.families.milo1.catalogs["scryfall/mtg"].base.recognition.assets.identifiers.url.replace(
-      "https://",
-      "http://",
-    );
+  feed.families.milo1.catalogs["scryfall/mtg"].base.assets.records.url =
+    feed.families.milo1.catalogs["scryfall/mtg"].base.assets.records.url.replace("https://", "http://");
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(() => client(fixture).loadCatalog(key), /https/);
 });
@@ -1177,16 +1321,15 @@ await test("rejects a non-HTTPS asset URL", async () => {
 
 console.log("\nMalformed identities");
 
-async function buildBrokenBaseFixture(rows, path = "g/version/0/base/identifiers.jsonl.gz") {
+async function buildBrokenBaseFixture(rows, path = "g/version/0/base/records.jsonl.gz") {
   const fixture = new FeedFixture();
-  const identifiers = await fixture.putRows(path, rows);
+  const records = await fixture.putRecords(
+    path,
+    rows.map((row) => ({ metadata: null, ...row })),
+  );
   const embeddings = await fixture.putEmbeddings(
     "g/version/0/base/embeddings.f16.gz",
     rows.flatMap(() => [1, 0]),
-  );
-  const metadata = await fixture.putRows(
-    "g/version/0/base/metadata.jsonl.gz",
-    rows.map(() => null),
   );
   fixture.setJson("catalog-feed-v2.json", {
     checked_at: "2026-07-26T12:00:00Z",
@@ -1204,8 +1347,7 @@ async function buildBrokenBaseFixture(rows, path = "g/version/0/base/identifiers
               version: 0,
               rows: rows.length,
               source_updated_at: "2026-07-24T00:00:00Z",
-              recognition: { assets: { embeddings, identifiers } },
-              metadata: { assets: { records: metadata } },
+              assets: { records, embeddings },
             },
             updates: {},
           },
@@ -1254,13 +1396,76 @@ await test("rejects a base row missing a non-empty id", async () => {
 });
 
 await test("rejects a base row missing a non-empty name", async () => {
-  const fixture = await buildBrokenBaseFixture(
-    [{ id: "card-a", identifiers: {} }],
-    "g/version/0/base/missing-name.jsonl.gz",
-  );
+  const fixture = new FeedFixture();
+  const records = await fixture.putRecordsRaw("g/version/0/base/missing-name.jsonl.gz", [
+    { id: "card-a", identifiers: {}, metadata: null },
+  ]);
+  const embeddings = await fixture.putEmbeddings("g/version/0/base/embeddings.f16.gz", [1, 0]);
+  fixture.setJson("catalog-feed-v2.json", {
+    checked_at: "2026-07-26T12:00:00Z",
+    families: {
+      milo1: {
+        embedding: EMBEDDING,
+        catalogs: {
+          "scryfall/mtg": {
+            public_name: "scryfall-mtg",
+            descriptor: descriptor(),
+            current_version: 0,
+            rows: 1,
+            source_updated_at: "2026-07-24T00:00:00Z",
+            base: {
+              version: 0,
+              rows: 1,
+              source_updated_at: "2026-07-24T00:00:00Z",
+              assets: { records, embeddings },
+            },
+            updates: {},
+          },
+        },
+      },
+    },
+  });
   await assert.rejects(
     () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /name must be a non-empty string/,
+  );
+});
+
+await test("rejects a base row missing its required metadata field", async () => {
+  const fixture = new FeedFixture();
+  // Deliberately bypass buildBrokenBaseFixture's auto-added `metadata: null`
+  // default so the row is genuinely missing the field.
+  const records = await fixture.putRecords("g/version/0/base/records.jsonl.gz", [
+    { id: "card-a", name: "card-a", identifiers: {} },
+  ]);
+  const embeddings = await fixture.putEmbeddings("g/version/0/base/embeddings.f16.gz", [1, 0]);
+  fixture.setJson("catalog-feed-v2.json", {
+    checked_at: "2026-07-26T12:00:00Z",
+    families: {
+      milo1: {
+        embedding: EMBEDDING,
+        catalogs: {
+          "scryfall/mtg": {
+            public_name: "scryfall-mtg",
+            descriptor: descriptor(),
+            current_version: 0,
+            rows: 1,
+            source_updated_at: "2026-07-24T00:00:00Z",
+            base: {
+              version: 0,
+              rows: 1,
+              source_updated_at: "2026-07-24T00:00:00Z",
+              assets: { records, embeddings },
+            },
+            updates: {},
+          },
+        },
+      },
+    },
+  });
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /missing its required metadata field/,
   );
 });
 
@@ -1278,9 +1483,11 @@ async function buildDeltaFailureFixture(mutateUpdate) {
   return fixture;
 }
 
-await test("rejects a recognition delta whose operation count does not match the feed", async () => {
+await test("rejects a records delta whose operation count does not match the feed", async () => {
   const fixture = await buildDeltaFailureFixture((update) => {
-    update.recognition.rows = 3;
+    // added-deleted stays +1 (matches the feed's overall row arithmetic), but
+    // added+updated+deleted (3) no longer matches the asset's 2 operations.
+    update.rows = { added: 1, updated: 2, deleted: 0 };
   });
   await assert.rejects(
     () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
@@ -1288,30 +1495,45 @@ await test("rejects a recognition delta whose operation count does not match the
   );
 });
 
-await test("rejects a recognition delta with an out-of-range embedding_index", async () => {
-  const { fixture, catalog } = await buildFixture({ withUpdates: true });
-  const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  const badIdentifiers = await fixture.putRows("scryfall-mtg/version/1/delta-from-0/bad-identifiers.jsonl.gz", [
-    { op: "upsert", record: { id: "card-a", identifiers: {} }, embedding_index: 5 },
-    { op: "upsert", record: { id: "card-c", identifiers: {} }, embedding_index: 1 },
-  ]);
-  feed.families.milo1.catalogs["scryfall/mtg"].updates["1"].recognition.assets.identifiers = badIdentifiers;
-  fixture.setJson("catalog-feed-v2.json", feed);
-  void catalog;
-  await assert.rejects(
-    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
-    /invalid embedding_index/,
-  );
-});
-
-await test("rejects a recognition delta with duplicate embedding_index assignments", async () => {
+await test("rejects a records delta with an out-of-range embedding_index", async () => {
   const { fixture } = await buildFixture({ withUpdates: true });
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  const badIdentifiers = await fixture.putRows("scryfall-mtg/version/1/delta-from-0/dup-identifiers.jsonl.gz", [
-    { op: "upsert", record: { id: "card-a", identifiers: {} }, embedding_index: 0 },
-    { op: "upsert", record: { id: "card-c", identifiers: {} }, embedding_index: 0 },
-  ]);
-  feed.families.milo1.catalogs["scryfall/mtg"].updates["1"].recognition.assets.identifiers = badIdentifiers;
+  const badRecords = await fixture.putRecords(
+    "scryfall-mtg/version/1/delta-from-0/bad-records.jsonl.gz",
+    [
+      {
+        op: "upsert",
+        record: { id: "card-a", identifiers: {} },
+        metadata: { name: "Alpha II" },
+        embedding_index: 5,
+      },
+      { op: "upsert", record: { id: "card-c", identifiers: {} }, metadata: { name: "Gamma" }, embedding_index: 1 },
+    ],
+  );
+  feed.families.milo1.catalogs["scryfall/mtg"].updates["1"].assets.records = badRecords;
+  fixture.setJson("catalog-feed-v2.json", feed);
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /indexes must be contiguous/,
+  );
+});
+
+await test("rejects a records delta with duplicate embedding_index assignments", async () => {
+  const { fixture } = await buildFixture({ withUpdates: true });
+  const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
+  const badRecords = await fixture.putRecords(
+    "scryfall-mtg/version/1/delta-from-0/dup-records.jsonl.gz",
+    [
+      {
+        op: "upsert",
+        record: { id: "card-a", identifiers: {} },
+        metadata: { name: "Alpha II" },
+        embedding_index: 0,
+      },
+      { op: "upsert", record: { id: "card-c", identifiers: {} }, metadata: { name: "Gamma" }, embedding_index: 0 },
+    ],
+  );
+  feed.families.milo1.catalogs["scryfall/mtg"].updates["1"].assets.records = badRecords;
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(
     () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
@@ -1319,14 +1541,14 @@ await test("rejects a recognition delta with duplicate embedding_index assignmen
   );
 });
 
-await test("rejects a recognition delta that deletes a row not present in the previous snapshot", async () => {
+await test("rejects a records delta that deletes a row not present in the previous snapshot", async () => {
   const fixture = await buildDeltaFailureFixture(() => {});
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  const badIdentifiers = await fixture.putRows(
+  const badRecords = await fixture.putRecords(
     "scryfall-mtg/version/1/delta-from-0/missing-delete.jsonl.gz",
     [
       { op: "delete", id: "card-does-not-exist" },
-      { op: "upsert", record: { id: "card-c", identifiers: {} }, embedding_index: 0 },
+      { op: "upsert", record: { id: "card-c", identifiers: {} }, metadata: { name: "Gamma" }, embedding_index: 0 },
     ],
   );
   const embeddings = await fixture.putEmbeddings(
@@ -1334,24 +1556,68 @@ await test("rejects a recognition delta that deletes a row not present in the pr
     [1, 0],
   );
   const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
-  entry.recognition.assets.identifiers = badIdentifiers;
-  entry.recognition.assets.embeddings = embeddings;
-  // Keep added - deleted == 1 so the feed's row arithmetic still checks out;
-  // the malformed delete must fail during operation processing, not during
-  // the earlier row-arithmetic check.
-  entry.rows = { added: 1, updated: 0, deleted: 0 };
+  entry.assets = { records: badRecords, embeddings };
+  // Keep added - deleted == 1 and total ops == 2 (matching the asset's two
+  // operations) so both the feed's row arithmetic and operation-count checks
+  // still pass; the malformed delete must fail during operation processing.
+  entry.rows = { added: 1, updated: 1, deleted: 0 };
+  entry.recognition_rows = 1;
+  entry.metadata_rows = 1;
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(
     () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
-    /deletes a row that is not present/,
+    /missing or duplicated/,
   );
 });
 
-await test("rejects a recognition delta whose row classification disagrees with the feed", async () => {
-  const fixture = await buildDeltaFailureFixture((update) => {
-    // Only "updated" is wrong; added/deleted stay consistent with the feed's
-    // row arithmetic so this exercises the classification check specifically.
-    update.rows = { added: 1, updated: 0, deleted: 0 };
+await test("rejects a records delta whose row classification disagrees with the feed", async () => {
+  const fixture = new FeedFixture();
+  const baseRecords = await fixture.putRecords("g/version/0/base/records.jsonl.gz", [
+    { id: "card-a", identifiers: {}, metadata: null },
+  ]);
+  const baseEmbeddings = await fixture.putEmbeddings("g/version/0/base/embeddings.f16.gz", [1, 0]);
+  const v1Records = await fixture.putRecords("g/version/1/delta-from-0/records.jsonl.gz", [
+    { op: "upsert", record: { id: "card-b", identifiers: {} }, embedding_index: 0 },
+  ]);
+  const v1Embeddings = await fixture.putEmbeddings("g/version/1/delta-from-0/embeddings.f16.gz", [0, 1]);
+  fixture.setJson("catalog-feed-v2.json", {
+    checked_at: "2026-08-01T00:00:00Z",
+    families: {
+      milo1: {
+        embedding: EMBEDDING,
+        catalogs: {
+          "scryfall/mtg": {
+            public_name: "scryfall-mtg",
+            descriptor: descriptor(),
+            current_version: 1,
+            // Declared to match the (wrong) rows.added == 0 below, so the
+            // arithmetic check passes and only the classification check can
+            // catch the actually-new "card-b" row being mislabeled.
+            rows: 1,
+            source_updated_at: "2026-08-01T00:00:00Z",
+            base: {
+              version: 0,
+              rows: 1,
+              source_updated_at: "2026-07-31T00:00:00Z",
+              assets: { records: baseRecords, embeddings: baseEmbeddings },
+            },
+            updates: {
+              1: {
+                from_version: 0,
+                to_version: 1,
+                // "card-b" does not exist in the predecessor and must be
+                // classified as added, but this declares added: 0.
+                rows: { added: 0, updated: 1, deleted: 0 },
+                source_updated_at: "2026-08-01T00:00:00Z",
+                recognition_rows: 1,
+                metadata_rows: 0,
+                assets: { records: v1Records, embeddings: v1Embeddings },
+              },
+            },
+          },
+        },
+      },
+    },
   });
   await assert.rejects(
     () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
@@ -1359,14 +1625,14 @@ await test("rejects a recognition delta whose row classification disagrees with 
   );
 });
 
-await test("rejects an unsupported recognition delta operation", async () => {
+await test("rejects an unsupported records delta operation", async () => {
   const { fixture } = await buildFixture({ withUpdates: true });
   const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  const badIdentifiers = await fixture.putRows(
+  const badRecords = await fixture.putRecords(
     "scryfall-mtg/version/1/delta-from-0/bad-op.jsonl.gz",
     [
       { op: "replace", id: "card-a" },
-      { op: "upsert", record: { id: "card-c", identifiers: {} }, embedding_index: 0 },
+      { op: "upsert", record: { id: "card-c", identifiers: {} }, metadata: { name: "Gamma" }, embedding_index: 0 },
     ],
   );
   const badEmbeddings = await fixture.putEmbeddings(
@@ -1374,29 +1640,11 @@ await test("rejects an unsupported recognition delta operation", async () => {
     [0.5, 0.5],
   );
   const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
-  entry.recognition.assets.identifiers = badIdentifiers;
-  entry.recognition.assets.embeddings = badEmbeddings;
+  entry.assets = { records: badRecords, embeddings: badEmbeddings };
   fixture.setJson("catalog-feed-v2.json", feed);
   await assert.rejects(
     () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
-    /unsupported recognition delta operation/,
-  );
-});
-
-await test("rejects a metadata delta upsert that targets a row absent from recognition", async () => {
-  const { fixture } = await buildFixture({ withUpdates: true, withMetadata: true });
-  const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
-  const badMetadata = await fixture.putRows(
-    "scryfall-mtg/version/1/delta-from-0/bad-metadata.jsonl.gz",
-    [{ op: "upsert", id: "card-does-not-exist", metadata: { name: "Ghost" } }],
-  );
-  const entry = feed.families.milo1.catalogs["scryfall/mtg"].updates["1"];
-  entry.metadata.assets.records = badMetadata;
-  entry.metadata.rows = 1;
-  fixture.setJson("catalog-feed-v2.json", feed);
-  await assert.rejects(
-    () => client(fixture).loadCatalog("milo1/scryfall/mtg", { includeMetadata: true }),
-    /metadata delta upserts a row that is not present/,
+    /unsupported records delta operation/,
   );
 });
 
@@ -1431,11 +1679,10 @@ console.log("\nDescriptor discovery");
 async function buildMultiCatalogFixture() {
   const fixture = new FeedFixture();
   async function simpleCatalog(path, publicName, descriptorOverrides) {
-    const identifiers = await fixture.putRows(`${path}/version/0/base/identifiers.jsonl.gz`, [
-      { id: "x" },
+    const records = await fixture.putRecords(`${path}/version/0/base/records.jsonl.gz`, [
+      { id: "x", metadata: null },
     ]);
     const embeddings = await fixture.putEmbeddings(`${path}/version/0/base/embeddings.f16.gz`, [1, 0]);
-    const metadata = await fixture.putRows(`${path}/version/0/base/metadata.jsonl.gz`, [null]);
     return {
       public_name: publicName,
       descriptor: descriptor(descriptorOverrides),
@@ -1446,8 +1693,7 @@ async function buildMultiCatalogFixture() {
         version: 0,
         rows: 1,
         source_updated_at: "2026-07-24T00:00:00Z",
-        recognition: { assets: { embeddings, identifiers } },
-        metadata: { assets: { records: metadata } },
+        assets: { records, embeddings },
       },
       updates: {},
     };

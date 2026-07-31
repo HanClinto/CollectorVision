@@ -21,6 +21,13 @@ FEED_URL = "https://catalog.test/catalog-feed-v2.json"
 
 
 class PublishedCatalog:
+    """A synthetic feed publisher for the combined-record Catalog v2 contract.
+
+    Every base and update carries exactly one `records` JSONL asset (plus an
+    optional `embeddings` asset), matching the live
+    `catalog-feed-v2.json` contract: no separate recognition/metadata layers.
+    """
+
     def __init__(self) -> None:
         self.payloads: dict[str, bytes] = {}
         self.calls: list[str] = []
@@ -38,8 +45,7 @@ class PublishedCatalog:
         }
 
     def jsonl(self, path: str, values: list[object]) -> dict[str, object]:
-        if "identifiers" in path:
-            values = [_with_test_name(value) for value in values]
+        values = [_with_test_name(value) for value in values]
         return self.asset(
             path,
             b"".join(
@@ -59,23 +65,25 @@ class PublishedCatalog:
             raise AssertionError(f"unexpected request {url}") from None
 
     def _build_feed(self) -> dict:
-        base_identifiers = [
+        # Base rows are the combined public shape: core recognition fields
+        # plus a REQUIRED metadata field (object or null).
+        base_records = [
             {
                 "id": "a",
                 "identifiers": {"scryfall_oracle": "oracle-a"},
                 "finishes": ["foil", "nonfoil"],
+                "metadata": {"layout": "normal", "name": "Alpha", "promo": False},
             },
             {
                 "id": "b",
                 "identifiers": {"scryfall_oracle": "oracle-b"},
                 "face_index": 1,
+                "metadata": {"layout": "transform", "name": "Beta", "promo": False},
             },
         ]
-        base_metadata = [
-            {"layout": "normal", "name": "Alpha", "promo": False},
-            {"layout": "transform", "name": "Beta", "promo": False},
-        ]
-        update_one_identifiers = [
+        # v0 -> v1: delete "a" (had metadata), fully update "b" (recognition +
+        # metadata), and add "c" with an initial metadata value.
+        update_one_records = [
             {"op": "delete", "id": "a"},
             {
                 "op": "upsert",
@@ -85,6 +93,7 @@ class PublishedCatalog:
                     "face_index": 1,
                     "finishes": ["foil"],
                 },
+                "metadata": {"layout": "transform", "name": "Beta 2", "promo": False},
                 "embedding_index": 0,
             },
             {
@@ -93,27 +102,19 @@ class PublishedCatalog:
                     "id": "c",
                     "identifiers": {"scryfall_oracle": "oracle-c"},
                 },
+                "metadata": {"layout": "normal", "name": "Gamma", "promo": False},
                 "embedding_index": 1,
             },
         ]
-        update_one_metadata = [
-            {"op": "delete", "id": "a"},
+        # v1 -> v2: a metadata-only upsert for "c" that repeats its unchanged
+        # core record and omits embedding_index entirely.
+        update_two_records = [
             {
                 "op": "upsert",
-                "id": "b",
-                "face_index": 1,
-                "metadata": {"layout": "transform", "name": "Beta 2", "promo": False},
-            },
-            {
-                "op": "upsert",
-                "id": "c",
-                "metadata": {"layout": "normal", "name": "Gamma", "promo": False},
-            },
-        ]
-        update_two_metadata = [
-            {
-                "op": "upsert",
-                "id": "c",
+                "record": {
+                    "id": "c",
+                    "identifiers": {"scryfall_oracle": "oracle-c"},
+                },
                 "metadata": {"layout": "art_series", "name": "Gamma", "promo": True},
             }
         ]
@@ -121,24 +122,12 @@ class PublishedCatalog:
             "version": 0,
             "rows": 2,
             "source_updated_at": "2026-07-24T00:00:00Z",
-            "recognition": {
-                "assets": {
-                    "identifiers": self.jsonl(
-                        "demo/version/0/base/identifiers.jsonl.gz", base_identifiers
-                    ),
-                    "embeddings": self.asset(
-                        "demo/version/0/base/embeddings.f16.gz",
-                        np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype="<f2").tobytes(),
-                    ),
-                }
-            },
-            "metadata": {
-                "assets": {
-                    "records": self.jsonl(
-                        "demo/version/0/base/metadata.jsonl.gz",
-                        base_metadata,
-                    )
-                }
+            "assets": {
+                "records": self.jsonl("demo/version/0/base/records.jsonl.gz", base_records),
+                "embeddings": self.asset(
+                    "demo/version/0/base/embeddings.f16.gz",
+                    np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype="<f2").tobytes(),
+                ),
             },
         }
         updates = {
@@ -147,27 +136,17 @@ class PublishedCatalog:
                 "to_version": 1,
                 "rows": {"added": 1, "updated": 1, "deleted": 1},
                 "source_updated_at": "2026-07-25T00:00:00Z",
-                "recognition": {
-                    "rows": 3,
-                    "assets": {
-                        "identifiers": self.jsonl(
-                            "demo/version/1/delta-from-0/identifiers.jsonl.gz",
-                            update_one_identifiers,
-                        ),
-                        "embeddings": self.asset(
-                            "demo/version/1/delta-from-0/embeddings.f16.gz",
-                            np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype="<f2").tobytes(),
-                        ),
-                    },
-                },
-                "metadata": {
-                    "rows": 3,
-                    "assets": {
-                        "records": self.jsonl(
-                            "demo/version/1/delta-from-0/metadata.jsonl.gz",
-                            update_one_metadata,
-                        )
-                    },
+                "recognition_rows": 3,
+                "metadata_rows": 3,
+                "assets": {
+                    "records": self.jsonl(
+                        "demo/version/1/delta-from-0/records.jsonl.gz",
+                        update_one_records,
+                    ),
+                    "embeddings": self.asset(
+                        "demo/version/1/delta-from-0/embeddings.f16.gz",
+                        np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype="<f2").tobytes(),
+                    ),
                 },
             },
             "2": {
@@ -175,15 +154,13 @@ class PublishedCatalog:
                 "to_version": 2,
                 "rows": {"added": 0, "updated": 1, "deleted": 0},
                 "source_updated_at": "2026-07-26T00:00:00Z",
-                "recognition": {"rows": 0, "assets": {}},
-                "metadata": {
-                    "rows": 1,
-                    "assets": {
-                        "records": self.jsonl(
-                            "demo/version/2/delta-from-1/metadata.jsonl.gz",
-                            update_two_metadata,
-                        )
-                    },
+                "recognition_rows": 0,
+                "metadata_rows": 1,
+                "assets": {
+                    "records": self.jsonl(
+                        "demo/version/2/delta-from-1/records.jsonl.gz",
+                        update_two_records,
+                    ),
                 },
             },
         }
@@ -275,7 +252,7 @@ def test_installs_current_catalog_from_feed(
     assert catalog.search(np.asarray([1.0, 0.0], dtype=np.float32), top_k=1) == [(1.0, "c")]
 
 
-def test_recognition_only_never_downloads_metadata(
+def test_recognition_only_discards_metadata_after_parsing(
     tmp_path: Path,
     publication: PublishedCatalog,
 ) -> None:
@@ -288,8 +265,181 @@ def test_recognition_only_never_downloads_metadata(
 
     assert not catalog.metadata_loaded
     assert all(record.metadata is None for record in catalog.records)
-    assert not any("metadata" in url for url in publication.calls)
+    # The client still downloads the single combined records asset (there is
+    # no separate metadata-only asset to skip); it simply discards the parsed
+    # metadata content immediately.
+    assert any(url.endswith("records.jsonl.gz") for url in publication.calls)
     assert catalog.records[0].finishes == ("foil",)
+
+
+def test_metadata_only_upsert_without_embedding_index_changes_only_metadata(
+    tmp_path: Path,
+    publication: PublishedCatalog,
+) -> None:
+    catalog = CatalogV2Downloader.install(
+        "pokemon",
+        source="test",
+        include_metadata=True,
+        cache_dir=tmp_path,
+        version=1,
+        feed_url=FEED_URL,
+    ).load()
+    embeddings_before = catalog.embeddings.copy()
+
+    upgraded = CatalogV2Downloader.install(
+        "pokemon",
+        source="test",
+        include_metadata=True,
+        cache_dir=tmp_path,
+        version=2,
+        feed_url=FEED_URL,
+    ).load()
+
+    assert np.array_equal(upgraded.embeddings, embeddings_before)
+    assert upgraded.records[1].metadata == {
+        "layout": "art_series",
+        "name": "Gamma",
+        "promo": True,
+    }
+
+
+def test_rejects_no_embedding_upsert_with_changed_core(
+    tmp_path: Path,
+    publication: PublishedCatalog,
+) -> None:
+    update = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["updates"]["2"]
+    update["assets"]["records"] = publication.jsonl(
+        "demo/version/2/delta-from-1/tampered-records.jsonl.gz",
+        [
+            {
+                "op": "upsert",
+                "record": {
+                    "id": "c",
+                    "identifiers": {"scryfall_oracle": "oracle-c-changed"},
+                },
+                "metadata": {"layout": "art_series", "name": "Gamma", "promo": True},
+            }
+        ],
+    )
+    publication.publish_feed()
+
+    with pytest.raises(CatalogV2Error, match="unchanged core record"):
+        CatalogV2Downloader.install(
+            "pokemon",
+            source="test",
+            include_metadata=True,
+            cache_dir=tmp_path,
+            version=2,
+            feed_url=FEED_URL,
+        )
+
+
+def test_explicit_null_metadata_removes_metadata(
+    tmp_path: Path,
+    publication: PublishedCatalog,
+) -> None:
+    update = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["updates"]["2"]
+    update["assets"]["records"] = publication.jsonl(
+        "demo/version/2/delta-from-1/null-metadata-records.jsonl.gz",
+        [
+            {
+                "op": "upsert",
+                "record": {
+                    "id": "c",
+                    "identifiers": {"scryfall_oracle": "oracle-c"},
+                },
+                "metadata": None,
+            }
+        ],
+    )
+    publication.publish_feed()
+
+    catalog = CatalogV2Downloader.install(
+        "pokemon",
+        source="test",
+        include_metadata=True,
+        cache_dir=tmp_path,
+        version=2,
+        feed_url=FEED_URL,
+    ).load()
+
+    assert catalog.records[1].metadata is None
+    assert catalog.record_for_index(1)["metadata"] is None
+
+
+def test_rejects_added_row_without_embedding_index(
+    tmp_path: Path,
+    publication: PublishedCatalog,
+) -> None:
+    update = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["updates"]["1"]
+    update["assets"]["records"] = publication.jsonl(
+        "demo/version/1/delta-from-0/no-index-add-records.jsonl.gz",
+        [
+            {"op": "delete", "id": "a"},
+            {
+                "op": "upsert",
+                "record": {
+                    "id": "b",
+                    "identifiers": {"scryfall_oracle": "oracle-b2"},
+                    "face_index": 1,
+                    "finishes": ["foil"],
+                },
+                "metadata": {"layout": "transform", "name": "Beta 2", "promo": False},
+                "embedding_index": 0,
+            },
+            {
+                "op": "upsert",
+                "record": {
+                    "id": "c",
+                    "identifiers": {"scryfall_oracle": "oracle-c"},
+                },
+                "metadata": {"layout": "normal", "name": "Gamma", "promo": False},
+            },
+        ],
+    )
+    update["assets"]["embeddings"] = publication.asset(
+        "demo/version/1/delta-from-0/no-index-add-embeddings.f16.gz",
+        np.asarray([[0.5, 0.5]], dtype="<f2").tobytes(),
+    )
+    publication.publish_feed()
+
+    with pytest.raises(CatalogV2Error, match="added .* row must include embedding_index"):
+        CatalogV2Downloader.install(
+            "pokemon",
+            source="test",
+            cache_dir=tmp_path,
+            version=1,
+            feed_url=FEED_URL,
+        )
+
+
+def test_rejects_upsert_with_neither_metadata_nor_embedding_index(
+    tmp_path: Path,
+    publication: PublishedCatalog,
+) -> None:
+    update = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["updates"]["2"]
+    update["assets"]["records"] = publication.jsonl(
+        "demo/version/2/delta-from-1/noop-records.jsonl.gz",
+        [
+            {
+                "op": "upsert",
+                "record": {
+                    "id": "c",
+                    "identifiers": {"scryfall_oracle": "oracle-c"},
+                },
+            }
+        ],
+    )
+    publication.publish_feed()
+
+    with pytest.raises(CatalogV2Error, match="must change recognition or metadata"):
+        CatalogV2Downloader.install(
+            "pokemon",
+            source="test",
+            cache_dir=tmp_path,
+            version=2,
+            feed_url=FEED_URL,
+        )
 
 
 def test_cached_current_snapshot_uses_only_feed_request(
@@ -363,9 +513,9 @@ def test_incremental_install_reuses_cached_snapshot(
     assert current.version == 2
     assert publication.calls == [
         FEED_URL,
-        publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["updates"]["2"]["metadata"][
-            "assets"
-        ]["records"]["url"],
+        publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["updates"]["2"]["assets"][
+            "records"
+        ]["url"],
     ]
     recognition_root = tmp_path / "catalog-v2" / "snapshots" / "milo1--test--demo" / "metadata"
     assert [path.name for path in recognition_root.iterdir()] == ["version-2"]
@@ -425,9 +575,9 @@ def test_catalog_constructor_uses_descriptor_discovery(
 
 
 def test_rejects_tampered_asset(tmp_path: Path, publication: PublishedCatalog) -> None:
-    reference = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["base"][
-        "recognition"
-    ]["assets"]["identifiers"]
+    reference = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["base"]["assets"][
+        "records"
+    ]
     publication.payloads[reference["url"]] += b"tampered"
 
     with pytest.raises(CatalogV2Error, match="compressed size mismatch"):
@@ -445,11 +595,11 @@ def test_rejects_noncanonical_identity(
     publication: PublishedCatalog,
 ) -> None:
     base = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["base"]
-    base["recognition"]["assets"]["identifiers"] = publication.jsonl(
-        "invalid-identifiers.jsonl.gz",
+    base["assets"]["records"] = publication.jsonl(
+        "invalid-records.jsonl.gz",
         [
-            {"id": "a", "identifiers": {}, "face_index": 0},
-            {"id": "b", "identifiers": {}, "face_index": 1},
+            {"id": "a", "identifiers": {}, "face_index": 0, "metadata": None},
+            {"id": "b", "identifiers": {}, "face_index": 1, "metadata": None},
         ],
     )
     publication.publish_feed()
@@ -469,16 +619,43 @@ def test_rejects_recognition_row_without_name(
     publication: PublishedCatalog,
 ) -> None:
     base = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["base"]
-    base["recognition"]["assets"]["identifiers"] = publication.jsonl(
+    base["assets"]["records"] = publication.asset(
         "missing-name.jsonl.gz",
-        [
-            {"id": "a", "identifiers": {}},
-            {"id": "b", "identifiers": {}, "face_index": 1},
-        ],
+        b"".join(
+            json.dumps(value, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+            for value in [
+                {"id": "a", "identifiers": {}, "metadata": None},
+                {"id": "b", "identifiers": {}, "face_index": 1, "name": "b", "metadata": None},
+            ]
+        ),
     )
     publication.publish_feed()
 
     with pytest.raises(CatalogV2Error, match="invalid fields"):
+        CatalogV2Downloader.install(
+            "pokemon",
+            source="test",
+            cache_dir=tmp_path,
+            version=0,
+            feed_url=FEED_URL,
+        )
+
+
+def test_rejects_base_row_missing_metadata_field(
+    tmp_path: Path,
+    publication: PublishedCatalog,
+) -> None:
+    base = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["base"]
+    base["assets"]["records"] = publication.jsonl(
+        "missing-metadata.jsonl.gz",
+        [
+            {"id": "a", "identifiers": {}},
+            {"id": "b", "identifiers": {}, "face_index": 1, "metadata": None},
+        ],
+    )
+    publication.publish_feed()
+
+    with pytest.raises(CatalogV2Error, match="metadata field is required"):
         CatalogV2Downloader.install(
             "pokemon",
             source="test",
@@ -493,7 +670,7 @@ def test_rejects_invalid_delta_embedding_indexes(
     publication: PublishedCatalog,
 ) -> None:
     update = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["updates"]["1"]
-    operations_url = update["recognition"]["assets"]["identifiers"]["url"]
+    operations_url = update["assets"]["records"]["url"]
     operations = [
         {"op": "delete", "id": "a"},
         {
@@ -507,7 +684,7 @@ def test_rejects_invalid_delta_embedding_indexes(
             "embedding_index": 2,
         },
     ]
-    update["recognition"]["assets"]["identifiers"] = publication.jsonl(
+    update["assets"]["records"] = publication.jsonl(
         operations_url.removeprefix("https://catalog.test/"),
         operations,
     )
@@ -570,7 +747,7 @@ def test_offline_open_rejects_corrupt_snapshot(
         cache_dir=tmp_path,
         feed_url=FEED_URL,
     )
-    (installed.snapshot_path / "identifiers.jsonl.gz").write_bytes(b"corrupt")
+    (installed.snapshot_path / "records.jsonl.gz").write_bytes(b"corrupt")
 
     with pytest.raises(CatalogV2Error, match="corrupt"):
         CatalogV2Downloader.open(
@@ -590,7 +767,7 @@ def test_online_install_recovers_corrupt_snapshot(
         cache_dir=tmp_path,
         feed_url=FEED_URL,
     )
-    (installed.snapshot_path / "identifiers.jsonl.gz").write_bytes(b"corrupt")
+    (installed.snapshot_path / "records.jsonl.gz").write_bytes(b"corrupt")
     publication.calls.clear()
 
     recovered = CatalogV2Downloader.install(
@@ -657,9 +834,18 @@ def test_loaded_null_metadata_is_explicit(
     publication: PublishedCatalog,
 ) -> None:
     base = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]["base"]
-    base["metadata"]["assets"]["records"] = publication.jsonl(
+    base_records = [
+        {"id": "a", "identifiers": {"scryfall_oracle": "oracle-a"}, "metadata": None},
+        {
+            "id": "b",
+            "identifiers": {"scryfall_oracle": "oracle-b"},
+            "face_index": 1,
+            "metadata": {"name": "Beta"},
+        },
+    ]
+    base["assets"]["records"] = publication.jsonl(
         "demo/version/0/base/null-metadata.jsonl.gz",
-        [None, {"name": "Beta"}],
+        base_records,
     )
     publication.publish_feed()
 

@@ -396,22 +396,21 @@ export class CatalogV2FeedClient {
     const base = catalog.base;
     const dimension = family.embedding.dimensions;
 
-    const identifierRows = parseJsonLines(
-      await this.#fetchGzipAsset(base.recognition.assets.identifiers, "base identifiers"),
-      "base identifiers",
+    // The feed always ships combined records; metadata is only discarded
+    // in-memory afterwards when the caller does not want it.
+    const rows = parseJsonLines(
+      await this.#fetchGzipAsset(base.assets.records, "base records"),
+      "base records",
     );
-    if (identifierRows.length !== base.rows) {
-      throw new CatalogV2Error("base identifier row count does not match the feed");
+    if (rows.length !== base.rows) {
+      throw new CatalogV2Error("base record row count does not match the feed");
     }
-    const embeddingBytes = await this.#fetchGzipAsset(
-      base.recognition.assets.embeddings,
-      "base embeddings",
-    );
+    const embeddingBytes = await this.#fetchGzipAsset(base.assets.embeddings, "base embeddings");
     const matrix = parseFloat16Matrix(embeddingBytes, base.rows, dimension);
 
     const seen = new Map();
-    const staged = identifierRows.map((value, row) => {
-      const record = parseIdentityRecord(value, catalog.descriptor, "base identifier row");
+    const staged = rows.map((value, row) => {
+      const record = parseBaseRecord(value, catalog.descriptor, "base record row");
       let faces = seen.get(record.id);
       if (!faces) {
         faces = new Set();
@@ -423,23 +422,9 @@ export class CatalogV2FeedClient {
         );
       }
       faces.add(record.faceIndex);
+      if (!includeMetadata) delete record.metadata;
       return { record, embedding: matrix.slice(row * dimension, (row + 1) * dimension) };
     });
-
-    if (includeMetadata) {
-      const metadataRows = parseJsonLinesAllowNull(
-        await this.#fetchGzipAsset(base.metadata.assets.records, "base metadata"),
-        "base metadata",
-      );
-      if (metadataRows.length !== base.rows) {
-        throw new CatalogV2Error("base metadata row count does not match the feed");
-      }
-      metadataRows.forEach((value, row) => {
-        if (value === null) return;
-        if (!isObject(value)) throw new CatalogV2Error("base metadata rows must be objects or null");
-        staged[row].record.metadata = value;
-      });
-    }
 
     staged.sort((left, right) => compareIdentity(left.record, right.record));
     const records = staged.map(({ record }) => record);
@@ -467,32 +452,17 @@ export class CatalogV2FeedClient {
       throw new CatalogV2Error("update does not extend the loaded snapshot's exact base version");
     }
 
-    const recognitionRows = updateEntry.recognition.rows;
+    const totalOps = updateEntry.rows.added + updateEntry.rows.updated + updateEntry.rows.deleted;
     const operations =
-      recognitionRows === 0
+      totalOps === 0
         ? []
         : parseJsonLines(
-            await this.#fetchGzipAsset(
-              updateEntry.recognition.assets.identifiers,
-              "recognition delta",
-            ),
-            "recognition delta",
+            await this.#fetchGzipAsset(updateEntry.assets.records, "records delta"),
+            "records delta",
           );
-    if (operations.length !== recognitionRows) {
-      throw new CatalogV2Error("recognition delta operation count does not match the feed");
+    if (operations.length !== totalOps) {
+      throw new CatalogV2Error("records delta operation count does not match the feed");
     }
-    const upserts = operations.filter((operation) => operation.op === "upsert");
-    const deltaEmbeddings =
-      upserts.length === 0
-        ? new Uint16Array()
-        : parseFloat16Matrix(
-            await this.#fetchGzipAsset(
-              updateEntry.recognition.assets.embeddings,
-              "recognition delta embeddings",
-            ),
-            upserts.length,
-            dimension,
-          );
 
     const byId = new Map();
     snapshot.records.forEach((record, row) => {
@@ -507,131 +477,181 @@ export class CatalogV2FeedClient {
       });
     });
 
-    let added = 0;
-    let deleted = 0;
-    const recognitionAddedIds = new Set();
-    const recognitionDeletedIds = new Set();
-    const recognitionUpdatedIds = new Set();
+    // First pass: parse and validate every operation against the
+    // *unmutated* predecessor state (needed so a no-embedding upsert can be
+    // checked against the row it is meant to leave untouched).
+    const parsedOperations = [];
+    const operatedKeys = new Set();
     const usedEmbeddingIndexes = new Set();
+    const addedKeys = new Set();
+    const changedKeys = new Set();
+    const deletedKeys = new Set();
     for (const operation of operations) {
       if (operation.op === "delete") {
-        const target = parseIdentityTarget(operation, "recognition delta delete");
-        const faces = byId.get(target.id);
-        if (!faces || !faces.has(target.faceIndex)) {
-          throw new CatalogV2Error(
-            `recognition delta deletes a row that is not present: ${JSON.stringify(target)}`,
-          );
-        }
-        faces.delete(target.faceIndex);
-        if (faces.size === 0) byId.delete(target.id);
-        deleted += 1;
-        recognitionDeletedIds.add(identityKey(target.id, target.faceIndex));
-      } else if (operation.op === "upsert") {
-        const record = parseIdentityRecord(
-          operation.record,
-          catalog.descriptor,
-          "recognition delta upsert",
-        );
-        const embeddingIndex = operation.embedding_index;
-        if (
-          !Number.isInteger(embeddingIndex) ||
-          embeddingIndex < 0 ||
-          embeddingIndex >= upserts.length ||
-          usedEmbeddingIndexes.has(embeddingIndex)
-        ) {
-          throw new CatalogV2Error(
-            `recognition delta upsert has an invalid embedding_index for id ${JSON.stringify(record.id)}`,
-          );
-        }
-        usedEmbeddingIndexes.add(embeddingIndex);
-        let faces = byId.get(record.id);
-        if (!faces) {
-          faces = new Map();
-          byId.set(record.id, faces);
-        }
-        const existing = faces.get(record.faceIndex);
-        faces.set(record.faceIndex, {
-          record: { ...record, metadata: existing?.record.metadata },
-          embedding: deltaEmbeddings.slice(
-            embeddingIndex * dimension,
-            (embeddingIndex + 1) * dimension,
-          ),
-        });
-        const key = identityKey(record.id, record.faceIndex);
-        if (existing) {
-          recognitionUpdatedIds.add(key);
-        } else {
-          added += 1;
-          recognitionAddedIds.add(key);
-        }
-      } else {
-        throw new CatalogV2Error(`unsupported recognition delta operation ${JSON.stringify(operation.op)}`);
-      }
-    }
-    if (usedEmbeddingIndexes.size !== upserts.length) {
-      throw new CatalogV2Error("recognition delta embedding indexes must be contiguous and unique");
-    }
-    if (added !== updateEntry.rows.added || deleted !== updateEntry.rows.deleted) {
-      throw new CatalogV2Error("recognition delta row classification does not match the feed");
-    }
-
-    // `rows.updated` is a *global* classification: it also counts rows whose
-    // metadata changed with no corresponding recognition operation at all.
-    // Rows that were added or deleted this stage are never also "updated".
-    const metadataTouchedIds = new Set();
-    if (includeMetadata) {
-      const metadataRows = updateEntry.metadata.rows;
-      const metadataOperations =
-        metadataRows === 0
-          ? []
-          : parseJsonLines(
-              await this.#fetchGzipAsset(updateEntry.metadata.assets.records, "metadata delta"),
-              "metadata delta",
-            );
-      if (metadataOperations.length !== metadataRows) {
-        throw new CatalogV2Error("metadata delta operation count does not match the feed");
-      }
-      for (const operation of metadataOperations) {
-        const target = parseIdentityTarget(operation, "metadata delta");
+        const target = parseIdentityTarget(operation, "records delta delete");
         const key = identityKey(target.id, target.faceIndex);
         const faces = byId.get(target.id);
-        const entry = faces?.get(target.faceIndex);
-        const touchesSurvivingRow = !recognitionAddedIds.has(key) && !recognitionDeletedIds.has(key);
-        if (operation.op === "delete") {
-          if (entry) {
-            delete entry.record.metadata;
-            if (touchesSurvivingRow) metadataTouchedIds.add(key);
-          }
-        } else if (operation.op === "upsert") {
-          if (!entry) {
+        if (operatedKeys.has(key) || !faces || !faces.has(target.faceIndex)) {
+          throw new CatalogV2Error(
+            `records delta deletes a row that is missing or duplicated: ${JSON.stringify(target)}`,
+          );
+        }
+        operatedKeys.add(key);
+        deletedKeys.add(key);
+        parsedOperations.push({ kind: "delete", id: target.id, faceIndex: target.faceIndex });
+      } else if (operation.op === "upsert") {
+        const record = parseIdentityRecord(operation.record, catalog.descriptor, "records delta upsert");
+        const key = identityKey(record.id, record.faceIndex);
+        if (operatedKeys.has(key)) {
+          throw new CatalogV2Error(
+            `records delta upsert is duplicated for id ${JSON.stringify(record.id)}`,
+          );
+        }
+        const hasIndex = Object.hasOwn(operation, "embedding_index");
+        const hasMetadata = Object.hasOwn(operation, "metadata");
+        if (!hasIndex && !hasMetadata) {
+          throw new CatalogV2Error(
+            `records delta upsert for id ${JSON.stringify(record.id)} must change recognition or metadata`,
+          );
+        }
+        let embeddingIndex = null;
+        if (hasIndex) {
+          embeddingIndex = operation.embedding_index;
+          if (
+            !Number.isInteger(embeddingIndex) ||
+            embeddingIndex < 0 ||
+            usedEmbeddingIndexes.has(embeddingIndex)
+          ) {
             throw new CatalogV2Error(
-              `metadata delta upserts a row that is not present: ${JSON.stringify(target)}`,
+              `records delta upsert has an invalid embedding_index for id ${JSON.stringify(record.id)}`,
             );
           }
-          if (!isObject(operation.metadata)) {
-            throw new CatalogV2Error("metadata delta upsert requires a metadata object");
-          }
-          entry.record.metadata = structuredClone(operation.metadata);
-          if (touchesSurvivingRow) metadataTouchedIds.add(key);
-        } else {
-          throw new CatalogV2Error(`unsupported metadata delta operation ${JSON.stringify(operation.op)}`);
+          usedEmbeddingIndexes.add(embeddingIndex);
         }
-      }
-    } else {
-      for (const faces of byId.values()) {
-        for (const entry of faces.values()) delete entry.record.metadata;
+        let metadataValue;
+        if (hasMetadata) {
+          metadataValue = operation.metadata;
+          if (metadataValue !== null && !isObject(metadataValue)) {
+            throw new CatalogV2Error(
+              `records delta metadata must be an object or null for id ${JSON.stringify(record.id)}`,
+            );
+          }
+        }
+        operatedKeys.add(key);
+        const faces = byId.get(record.id);
+        const existing = faces?.get(record.faceIndex);
+        if (!existing) {
+          if (!hasIndex) {
+            throw new CatalogV2Error(
+              `an added records delta row must include embedding_index for id ${JSON.stringify(record.id)}`,
+            );
+          }
+          addedKeys.add(key);
+        } else {
+          if (!hasIndex && !coreRecordsEqual(existing.record, record)) {
+            throw new CatalogV2Error(
+              `records delta upsert without embedding_index must repeat the unchanged core record for id ${JSON.stringify(record.id)}`,
+            );
+          }
+          changedKeys.add(key);
+        }
+        parsedOperations.push({
+          kind: "upsert",
+          record,
+          hasMetadata,
+          metadataValue,
+          embeddingIndex,
+        });
+      } else {
+        throw new CatalogV2Error(`unsupported records delta operation ${JSON.stringify(operation.op)}`);
       }
     }
 
-    const updatedUnion = new Set([...recognitionUpdatedIds, ...metadataTouchedIds]);
-    if (includeMetadata) {
-      if (updatedUnion.size !== updateEntry.rows.updated) {
-        throw new CatalogV2Error("recognition delta row classification does not match the feed");
+    const sortedIndexes = [...usedEmbeddingIndexes].sort((left, right) => left - right);
+    if (!sortedIndexes.every((value, index) => value === index)) {
+      throw new CatalogV2Error("records delta embedding indexes must be contiguous and unique");
+    }
+
+    let deltaEmbeddings;
+    if (usedEmbeddingIndexes.size > 0) {
+      const asset = updateEntry.assets.embeddings;
+      if (!asset) throw new CatalogV2Error("records delta embeddings asset is missing");
+      deltaEmbeddings = parseFloat16Matrix(
+        await this.#fetchGzipAsset(asset, "records delta embeddings"),
+        usedEmbeddingIndexes.size,
+        dimension,
+      );
+    } else {
+      if (updateEntry.assets.embeddings) {
+        throw new CatalogV2Error(
+          "records delta without recognition changes must not declare an embeddings asset",
+        );
       }
-    } else if (recognitionUpdatedIds.size > updateEntry.rows.updated) {
-      // Recognition-only mode never fetches metadata deltas, so a metadata-only
-      // touched row is invisible here; only a loose subset bound is checkable.
-      throw new CatalogV2Error("recognition delta row classification does not match the feed");
+      deltaEmbeddings = new Uint16Array();
+    }
+
+    const recognitionChangedCount =
+      deletedKeys.size +
+      parsedOperations.filter((op) => op.kind === "upsert" && op.embeddingIndex !== null).length;
+    if (recognitionChangedCount !== updateEntry.recognition_rows) {
+      throw new CatalogV2Error("records delta recognition_rows does not match its operations");
+    }
+
+    const metadataFieldCount = parsedOperations.filter(
+      (op) => op.kind === "upsert" && op.hasMetadata,
+    ).length;
+
+    // Second pass: apply the parsed operations to the mutable state.
+    let deleteWithMetadataCount = 0;
+    for (const op of parsedOperations) {
+      if (op.kind === "delete") {
+        const faces = byId.get(op.id);
+        const prior = faces.get(op.faceIndex);
+        if (includeMetadata && prior.record.metadata !== undefined && prior.record.metadata !== null) {
+          deleteWithMetadataCount += 1;
+        }
+        faces.delete(op.faceIndex);
+        if (faces.size === 0) byId.delete(op.id);
+        continue;
+      }
+      const { record, hasMetadata, metadataValue, embeddingIndex } = op;
+      let faces = byId.get(record.id);
+      if (!faces) {
+        faces = new Map();
+        byId.set(record.id, faces);
+      }
+      const existing = faces.get(record.faceIndex);
+      const existingMetadata = existing?.record.metadata;
+      const newMetadata = hasMetadata ? metadataValue : existingMetadata;
+      const embedding =
+        embeddingIndex !== null
+          ? deltaEmbeddings.slice(embeddingIndex * dimension, (embeddingIndex + 1) * dimension)
+          : existing.embedding;
+      const nextRecord = { ...record };
+      if (includeMetadata) {
+        if (newMetadata !== undefined) nextRecord.metadata = newMetadata;
+      } else {
+        delete nextRecord.metadata;
+      }
+      faces.set(record.faceIndex, { record: nextRecord, embedding });
+    }
+
+    if (includeMetadata) {
+      if (metadataFieldCount + deleteWithMetadataCount !== updateEntry.metadata_rows) {
+        throw new CatalogV2Error("records delta metadata_rows does not match its operations");
+      }
+    } else if (metadataFieldCount > updateEntry.metadata_rows) {
+      // Recognition-only mode cannot see prior metadata state on deletes, so
+      // only a loose subset bound is checkable, per the feed contract.
+      throw new CatalogV2Error("records delta metadata_rows does not match its operations");
+    }
+
+    if (
+      addedKeys.size !== updateEntry.rows.added ||
+      deletedKeys.size !== updateEntry.rows.deleted ||
+      changedKeys.size !== updateEntry.rows.updated
+    ) {
+      throw new CatalogV2Error("records delta row classification does not match the feed");
     }
 
     const flattened = [];
@@ -642,7 +662,7 @@ export class CatalogV2FeedClient {
 
     const expectedTotal = snapshot.records.length + updateEntry.rows.added - updateEntry.rows.deleted;
     if (flattened.length !== expectedTotal) {
-      throw new CatalogV2Error("recognition delta reconstructed an unexpected row total");
+      throw new CatalogV2Error("records delta reconstructed an unexpected row total");
     }
 
     const records = flattened.map(({ record }) => record);
@@ -864,6 +884,39 @@ function parseIdentityRecord(value, descriptor, label) {
   return { id, name, faceIndex, identifiers, finishes };
 }
 
+// A combined base row is a core identity record plus a *required* metadata
+// field (an object, or null when the row has no metadata).
+function parseBaseRecord(value, descriptor, label) {
+  if (!isObject(value)) throw new CatalogV2Error(`${label} must be a JSON object`);
+  if (!Object.hasOwn(value, "metadata")) {
+    throw new CatalogV2Error(
+      `${label} for id ${JSON.stringify(value.id)} is missing its required metadata field`,
+    );
+  }
+  const metadata = value.metadata;
+  if (metadata !== null && !isObject(metadata)) {
+    throw new CatalogV2Error(
+      `${label} for id ${JSON.stringify(value.id)} metadata must be an object or null`,
+    );
+  }
+  const { metadata: _metadata, ...core } = value;
+  const record = parseIdentityRecord(core, descriptor, label);
+  record.metadata = metadata;
+  return record;
+}
+
+// Compares two identity records ignoring metadata, used to validate that a
+// no-embedding-index upsert repeats its predecessor's unchanged core record.
+function coreRecordsEqual(left, right) {
+  return (
+    left.id === right.id &&
+    left.name === right.name &&
+    left.faceIndex === right.faceIndex &&
+    deepEqual(left.identifiers, right.identifiers) &&
+    deepEqual(left.finishes ?? [], right.finishes ?? [])
+  );
+}
+
 function parseIdentityTarget(value, label) {
   if (!isObject(value)) throw new CatalogV2Error(`${label} must be a JSON object`);
   const id = requiredString(value.id, `${label} id`);
@@ -914,21 +967,6 @@ function parseJsonLines(bytes, label) {
     .map((line) => {
       const value = JSON.parse(line);
       if (!isObject(value)) throw new CatalogV2Error(`${label} must contain JSON objects`);
-      return value;
-    });
-}
-
-function parseJsonLinesAllowNull(bytes, label) {
-  const text = new TextDecoder().decode(bytes);
-  if (!text) return [];
-  return text
-    .trimEnd()
-    .split("\n")
-    .map((line) => {
-      const value = JSON.parse(line);
-      if (value !== null && !isObject(value)) {
-        throw new CatalogV2Error(`${label} rows must be JSON objects or null`);
-      }
       return value;
     });
 }
@@ -1008,19 +1046,24 @@ function validateBaseEntry(base, fullCatalogKey) {
     !Number.isInteger(base.rows) ||
     base.rows < 0 ||
     typeof base.source_updated_at !== "string" ||
-    !isObject(base.recognition) ||
-    !isObject(base.metadata)
+    !isObject(base.assets)
   ) {
     throw new CatalogV2Error(`catalog ${JSON.stringify(fullCatalogKey)} has an invalid base`);
   }
-  validateLayerAssets(base.recognition, base.rows, {
-    required: ["embeddings", "identifiers"],
-    label: `catalog ${JSON.stringify(fullCatalogKey)} base recognition`,
-  });
-  validateLayerAssets(base.metadata, base.rows, {
-    required: ["records"],
-    label: `catalog ${JSON.stringify(fullCatalogKey)} base metadata`,
-  });
+  const assetKeys = new Set(Object.keys(base.assets));
+  if (assetKeys.size !== 2 || !assetKeys.has("records") || !assetKeys.has("embeddings")) {
+    throw new CatalogV2Error(
+      `catalog ${JSON.stringify(fullCatalogKey)} base assets must contain records and embeddings`,
+    );
+  }
+  validateAssetReference(
+    base.assets.records,
+    `catalog ${JSON.stringify(fullCatalogKey)} base records asset`,
+  );
+  validateAssetReference(
+    base.assets.embeddings,
+    `catalog ${JSON.stringify(fullCatalogKey)} base embeddings asset`,
+  );
 }
 
 function validateUpdateEntry(update, toVersion) {
@@ -1033,51 +1076,47 @@ function validateUpdateEntry(update, toVersion) {
     !Number.isInteger(update.rows.deleted) ||
     update.rows.deleted < 0 ||
     typeof update.source_updated_at !== "string" ||
-    !isObject(update.recognition) ||
-    !Number.isInteger(update.recognition.rows) ||
-    update.recognition.rows < 0 ||
-    !isObject(update.metadata) ||
-    !Number.isInteger(update.metadata.rows) ||
-    update.metadata.rows < 0
+    !Number.isInteger(update.recognition_rows) ||
+    update.recognition_rows < 0 ||
+    !Number.isInteger(update.metadata_rows) ||
+    update.metadata_rows < 0
   ) {
     throw new CatalogV2Error(`update to version ${toVersion} has an invalid shape`);
   }
-  validateLayerAssets(update.recognition, update.recognition.rows, {
-    required: ["identifiers"],
-    optional: ["embeddings"],
-    label: `update ${toVersion} recognition`,
-  });
-  validateLayerAssets(update.metadata, update.metadata.rows, {
-    required: ["records"],
-    label: `update ${toVersion} metadata`,
-  });
+  const totalOps = update.rows.added + update.rows.updated + update.rows.deleted;
+  if (update.recognition_rows > totalOps || update.metadata_rows > totalOps) {
+    throw new CatalogV2Error(
+      `update to version ${toVersion} recognition_rows and metadata_rows cannot exceed total operations`,
+    );
+  }
+  validateUpdateAssets(update.assets, totalOps, `update ${toVersion}`);
 }
 
-// A layer with zero rows carries no assets at all (e.g. a metadata-only
-// update stage has `recognition.rows === 0` and an empty `recognition.assets`
-// object); a layer with rows > 0 must declare every required asset and no
-// asset names beyond `required`/`optional`.
-function validateLayerAssets(layer, rows, { required = [], optional = [], label }) {
-  if (!isObject(layer.assets)) {
+// A combined update carries no assets at all when it has zero total
+// operations; otherwise it must declare a `records` asset (and, only when
+// any operation touches recognition, an `embeddings` asset).
+function validateUpdateAssets(assets, totalOps, label) {
+  if (!isObject(assets)) {
     throw new CatalogV2Error(`${label} assets must be an object`);
   }
-  const allowed = new Set([...required, ...optional]);
-  for (const key of Object.keys(layer.assets)) {
+  const allowed = new Set(["records", "embeddings"]);
+  for (const key of Object.keys(assets)) {
     if (!allowed.has(key)) {
       throw new CatalogV2Error(`${label} has an unexpected asset ${JSON.stringify(key)}`);
     }
   }
-  if (rows === 0) {
-    if (Object.keys(layer.assets).length > 0) {
-      throw new CatalogV2Error(`${label} must not declare assets when rows is 0`);
+  if (totalOps === 0) {
+    if (Object.keys(assets).length > 0) {
+      throw new CatalogV2Error(`${label} must not declare assets when it has no operations`);
     }
     return;
   }
-  for (const name of required) {
-    validateAssetReference(layer.assets[name], `${label} ${name} asset`);
+  if (!("records" in assets)) {
+    throw new CatalogV2Error(`${label} records asset is missing`);
   }
-  for (const name of optional) {
-    if (name in layer.assets) validateAssetReference(layer.assets[name], `${label} ${name} asset`);
+  validateAssetReference(assets.records, `${label} records asset`);
+  if ("embeddings" in assets) {
+    validateAssetReference(assets.embeddings, `${label} embeddings asset`);
   }
 }
 

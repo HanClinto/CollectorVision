@@ -23,8 +23,9 @@ contract: it includes immutable family embedding details, catalog descriptors,
 integer versions, absolute asset URLs, compressed sizes, and checksums. Clients
 do not fetch release indexes or per-version manifests.
 
-Names, finishes, and peer IDs are part of the lightweight recognition layer.
-Load sets, languages, rarity, and other display/filter metadata only when needed:
+Names, finishes, and peer IDs are always downloaded as part of the catalog's
+combined records. Load sets, languages, rarity, and other display/filter
+metadata only when needed:
 
 ```python
 catalog = cv.CatalogV2("mtg", include_metadata=True)
@@ -53,8 +54,8 @@ Catalog keys, checksums, cache layout, and exact-predecessor updates are managed
 internally. Cached snapshots are materialized atomically so subsequent updates
 start from the newest compatible local integer version. Only the latest snapshot
 per catalog and metadata mode is retained. Adding metadata to an installed
-recognition snapshot reuses its embeddings and reconstructs only the metadata
-layer.
+recognition-only snapshot replays the base and update combined records to
+extract metadata, without redownloading embeddings.
 
 `CatalogV2Downloader` remains available for explicit catalog keys or versions:
 

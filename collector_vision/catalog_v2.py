@@ -299,8 +299,13 @@ def _parse_record(
     value: object,
     *,
     descriptor: CatalogV2Descriptor,
-    metadata: Mapping[str, Any] | None = None,
 ) -> CatalogV2Record:
+    """Parse the core recognition fields of a record, without metadata.
+
+    Used both for base rows (after their required ``metadata`` field is
+    stripped off) and for the ``record`` payload embedded in update upsert
+    operations, which never carries a ``metadata`` key of its own.
+    """
     if not isinstance(value, dict):
         raise CatalogV2Error("recognition record must be an object")
     allowed = {"id", "name", "identifiers", "face_index", "finishes"}
@@ -343,7 +348,31 @@ def _parse_record(
         identifiers=parsed_identifiers,
         face_index=face_index,
         finishes=finishes,
-        metadata=metadata,
+        metadata=None,
+    )
+
+
+def _parse_base_row(value: object, *, descriptor: CatalogV2Descriptor) -> CatalogV2Record:
+    """Parse one combined base/cache record row, with its required metadata field."""
+    if not isinstance(value, dict):
+        raise CatalogV2Error("catalog record must be an object")
+    if "metadata" not in value:
+        raise CatalogV2Error("catalog record metadata field is required")
+    metadata = value["metadata"]
+    if metadata is not None and not isinstance(metadata, dict):
+        raise CatalogV2Error("catalog record metadata must be an object or null")
+    core = {key: item for key, item in value.items() if key != "metadata"}
+    return _with_metadata(_parse_record(core, descriptor=descriptor), metadata)
+
+
+def _core_equal(left: CatalogV2Record, right: CatalogV2Record) -> bool:
+    """Compare two records ignoring metadata, used to validate no-op recognition upserts."""
+    return (
+        left.id == right.id
+        and left.name == right.name
+        and left.identifiers == right.identifiers
+        and left.face_index == right.face_index
+        and left.finishes == right.finishes
     )
 
 
