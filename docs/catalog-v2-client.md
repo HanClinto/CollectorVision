@@ -3,6 +3,9 @@
 Catalog v2 keeps the parts that work well in Catalog v1: choose a game, receive
 a ready-to-search catalog, and use the catalog's matching embedder.
 
+Existing Catalog v1 applications should start with the
+[v1 to v2 migration guide](catalog-v2-migration.md).
+
 ```python
 from PIL import Image
 import collector_vision as cv
@@ -92,3 +95,9 @@ the newest compatible snapshot in IndexedDB by default. Pass `cache: null` to
 disable persistent caching. Advanced applications can use `CatalogV2FeedClient`
 and `CatalogV2IndexedDbCache` directly for explicit catalog keys,
 family/profile selection, mirrors, and custom cache management.
+
+A runnable browser loading example is published at
+<https://hanclinto.github.io/CollectorVision/catalog_v2_example.html>. The main
+camera scanner currently remains the Catalog v1 compatibility demonstration;
+the standalone page exercises the finalized v2 feed, combined records,
+metadata-retention option, and IndexedDB cache directly.
