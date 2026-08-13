@@ -507,6 +507,20 @@ function client(fixture, extra = {}) {
 
 console.log("Base snapshot loading");
 
+await test("binds fetch to the active browser or worker global scope", async () => {
+  const { fixture } = await buildFixture();
+  const fixtureFetch = fixture.fetchImpl();
+  async function scopeCheckedFetch(url) {
+    assert.equal(this, globalThis);
+    return fixtureFetch(url);
+  }
+  const catalog = await new CatalogV2FeedClient({
+    fetchImpl: scopeCheckedFetch,
+    feedUrl: FEED_URL,
+  }).loadGame("mtg");
+  assert.equal(catalog.rows, 2);
+});
+
 await test("loads a base-only catalog via BrowserCatalogV2.forGame", async () => {
   const { fixture, key } = await buildFixture();
   const catalog = await BrowserCatalogV2.forGame("mtg", {

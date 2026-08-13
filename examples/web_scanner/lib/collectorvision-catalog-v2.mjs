@@ -292,7 +292,7 @@ export class CatalogV2FeedClient {
     cache = defaultCatalogV2Cache(),
   } = {}) {
     if (typeof fetchImpl !== "function") throw new TypeError("fetch implementation is required");
-    this.fetchImpl = fetchImpl;
+    this.fetchImpl = fetchImpl.bind(globalThis);
     this.feedUrl = feedUrl;
     this.cache = cache;
     if (
