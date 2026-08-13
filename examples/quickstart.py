@@ -44,9 +44,8 @@ match = hits[0]
 print(f"Top match {match['card_id']}  score={match['score']:.4f}")
 print(f"Name      {match['name']}")
 if match["metadata"]:
-    print(f"Set       {match['metadata'].get('set_name', 'n/a')}")
+    set_name = match["metadata"].get("set_name", "n/a")
+    set_code = match["metadata"].get("set")
+    print(f"Set       {set_name}{f' ({set_code.upper()})' if set_code else ''}")
 for candidate in hits[1:]:
-    print(
-        f"          {candidate['card_id']}  "
-        f"{candidate['name']}  score={candidate['score']:.4f}"
-    )
+    print(f"          {candidate['card_id']}  {candidate['name']}  score={candidate['score']:.4f}")
