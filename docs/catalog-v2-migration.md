@@ -39,12 +39,12 @@ Use `search_records()` for v2 data:
 catalog = cv.CatalogV2("mtg", include_metadata=True)
 match = catalog.search_records(embedding, top_k=1)[0]
 
-print(match["id"])                    # selected source's primary result ID
-print(match["name"])                  # always available
-print(match["identifiers"])           # primary and peer source IDs
-print(match["face_index"])            # 0 for the front face
-print(match["finishes"])              # recognition-time physical finishes
-print(match["metadata"])              # present when include_metadata=True
+print(match["id"])  # selected source's primary result ID
+print(match["name"])  # always available
+print(match["identifiers"])  # primary and peer source IDs
+print(match["face_index"])  # 0 for the front face
+print(match["finishes"])  # recognition-time physical finishes
+print(match["metadata"])  # present when include_metadata=True
 ```
 
 `card_id` remains an alias for `id` in search results. Catalog v1 fields such as
