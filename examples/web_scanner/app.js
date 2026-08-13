@@ -2046,6 +2046,14 @@ function resolveAssetChannel() {
   return Object.hasOwn(ASSET_CHANNELS, requested) ? requested : "stable";
 }
 
+function resolveCatalogMode() {
+  const requested = new URLSearchParams(location.search).get("catalog") ?? "v1";
+  if (requested !== "v1" && requested !== "v2") {
+    throw new Error(`Unsupported catalog mode: ${requested}`);
+  }
+  return requested;
+}
+
 async function loadManifest(channel) {
   const assetBasePath = ASSET_CHANNELS[channel];
   const cached = await readCachedAsset(`manifest:${channel}`);
@@ -2144,6 +2152,7 @@ async function boot() {
   // Load the manifest on the main thread first — it drives both the loading
   // screen text and the worker init message.
   const channel = resolveAssetChannel();
+  const catalogMode = resolveCatalogMode();
   const { assetBasePath, manifest } = await loadManifest(channel);
   const catalogLimit = getCatalogLimitFromQuery();
   recordBootTrace("boot:manifest", {
@@ -2152,6 +2161,7 @@ async function boot() {
     dims: manifest.catalog?.dims,
     catalogLimit,
     channel,
+    catalogMode,
   });
   renderManifestContract(manifest);
   loadingScreen.step("manifest", "done", `v${manifest.version}`);
@@ -2211,6 +2221,9 @@ async function boot() {
           catalogRows: data.catalogRows,
           catalogTotalRows: data.catalogTotalRows,
           catalogLimit: data.catalogLimit,
+          catalogMode: data.catalogMode,
+          catalogVersion: data.catalogVersion,
+          catalogKey: data.catalogKey,
         });
         scannerWorker.removeEventListener("message", onInitMessage);
         resolve({
@@ -2219,6 +2232,9 @@ async function boot() {
           catalogRows: data.catalogRows ?? manifest.catalog.rows,
           catalogTotalRows: data.catalogTotalRows ?? manifest.catalog.rows,
           catalogLimit: data.catalogLimit ?? null,
+          catalogMode: data.catalogMode ?? catalogMode,
+          catalogVersion: data.catalogVersion ?? manifest.version,
+          catalogKey: data.catalogKey ?? "bundled",
         });
       } else if (data.type === "error") {
         recordBootTrace("worker:error", { message: data.message });
@@ -2244,6 +2260,7 @@ async function boot() {
     catalogLimit,
     rotationInvariant: isRotationInvariantEnabled(),
     minCornerConfidence: getMinCornerConfidence(),
+    catalogMode,
   });
   setupCornerConfidenceSlider(scannerWorker);
   recordBootTrace("worker:init-posted", {
@@ -2251,8 +2268,18 @@ async function boot() {
     catalogLimit,
     rotationInvariant: isRotationInvariantEnabled(),
     minCornerConfidence: getMinCornerConfidence(),
+    catalogMode,
   });
-  const { inferenceMode, numThreads, catalogRows, catalogTotalRows, catalogLimit: activeCatalogLimit } = await scannerReady;
+  const {
+    inferenceMode,
+    numThreads,
+    catalogRows,
+    catalogTotalRows,
+    catalogLimit: activeCatalogLimit,
+    catalogMode: activeCatalogMode,
+    catalogVersion,
+    catalogKey,
+  } = await scannerReady;
 
   const threadLabel = self.crossOriginIsolated
     ? `${numThreads} (cross-origin isolated)`
@@ -2260,9 +2287,12 @@ async function boot() {
   setText("settings-threads", threadLabel);
 
   setText("models-status", "Models ready");
+  const catalogLabel = activeCatalogMode === "v2"
+    ? `Catalog v2 ${catalogKey} v${catalogVersion}`
+    : `Catalog v1 ${catalogVersion}`;
   const catalogStatus = activeCatalogLimit && catalogRows < catalogTotalRows
-    ? `${catalogRows} of ${catalogTotalRows} cards ready (debug limit)`
-    : `${manifest.catalog.rows} cards ready`;
+    ? `${catalogRows} of ${catalogTotalRows} cards ready (${catalogLabel}, debug limit)`
+    : `${catalogRows} cards ready (${catalogLabel})`;
   setText("catalog-status", catalogStatus);
   loadingScreen.progress(100, "Scanner ready");
   debugLog.info("models and catalog ready", `${manifest.catalog.rows} rows`);

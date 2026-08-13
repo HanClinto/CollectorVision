@@ -18,6 +18,7 @@
 //   { type: 'error',    message }
 
 import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs";
+import { BrowserCatalogV2 } from "./lib/collectorvision-catalog-v2.mjs";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -551,6 +552,7 @@ class WorkerRuntime {
     catalogLimit = null,
     rotationInvariant = true,
     minCornerConfidence = DEFAULT_MIN_CORNER_CONFIDENCE,
+    catalogMode = "v1",
   ) {
     this.manifest = manifest;
     this.assetBasePath = assetBasePath ?? "./assets";
@@ -558,6 +560,9 @@ class WorkerRuntime {
     this.useWebGpu = useWebGpu;
     this.rotationInvariant = rotationInvariant;
     this.minCornerConfidence = clamp01(minCornerConfidence);
+    this.catalogMode = catalogMode;
+    this.catalogVersion = manifest.version;
+    this.catalogKey = "bundled";
     this.catalogLimit = Number.isFinite(catalogLimit) && catalogLimit > 0
       ? Math.floor(catalogLimit)
       : null;
@@ -642,6 +647,11 @@ class WorkerRuntime {
     this.inputNames.detector = this.detector.inputNames[0];
     this.inputNames.embedder = this.embedder.inputNames[0];
 
+    if (this.catalogMode === "v2") {
+      await this.loadCatalogV2(onStage);
+      return;
+    }
+
     const catalogAssetSizes = this.manifest.catalog.asset_sizes ?? {};
     const secondarySource = resolveSecondaryIdSource(this.manifest.catalog);
     const catalogParts = [
@@ -715,6 +725,37 @@ class WorkerRuntime {
       Math.floor(this.embeddings.length / dims),
     );
     this.catalogTotalRows = declaredRows;
+  }
+
+  async loadCatalogV2(onStage) {
+    onStage?.("catalog", 0, 0, 0, false);
+    const catalog = await BrowserCatalogV2.forGame("mtg", { includeMetadata: false });
+    const expectedDimensions = this.manifest.catalog.dims;
+    if (catalog.dimension !== expectedDimensions) {
+      throw new Error(
+        `Catalog v2 dimensions (${catalog.dimension}) do not match the scanner embedder (${expectedDimensions})`,
+      );
+    }
+
+    const requestedRows = this.catalogLimit
+      ? Math.min(this.catalogLimit, catalog.rows)
+      : catalog.rows;
+    const records = requestedRows < catalog.rows
+      ? catalog.records.slice(0, requestedRows)
+      : catalog.records;
+
+    this.embeddings = requestedRows < catalog.rows
+      ? catalog.embeddings.slice(0, requestedRows * catalog.dimension)
+      : catalog.embeddings;
+    this.cardIds = records.map((record) => record.id);
+    this.secondaryIdField = "scryfallOracleId";
+    this.secondaryIds = records.map((record) => record.identifiers.scryfall_oracle ?? null);
+    this.catalogRows = requestedRows;
+    this.catalogTotalRows = catalog.rows;
+    this.catalogVersion = catalog.version;
+    this.catalogKey = catalog.catalogKey;
+    this.catalogDims = catalog.dimension;
+    onStage?.("catalog", 1, 0, 0, false);
   }
 
   async detect(frameCanvas) {
@@ -888,7 +929,7 @@ class WorkerRuntime {
   }
 
   search(query) {
-    const dims = this.manifest.catalog.dims;
+    const dims = this.catalogDims ?? this.manifest.catalog.dims;
     const rows = this.catalogRows ?? this.manifest.catalog.rows;
     let bestScore = -Infinity;
     let bestIndex = -1;
@@ -1095,6 +1136,7 @@ self.onmessage = async ({ data }) => {
         catalogLimit,
         data.rotationInvariant !== false,
         data.minCornerConfidence,
+        data.catalogMode,
       );
       await runtime.load((stage, ratio, loaded, total, cached) => {
         self.postMessage({ type: "progress", stage, ratio, loaded, total, cached });
@@ -1107,6 +1149,9 @@ self.onmessage = async ({ data }) => {
         catalogRows: runtime.catalogRows,
         catalogTotalRows: runtime.catalogTotalRows,
         catalogLimit: runtime.catalogLimit,
+        catalogMode: runtime.catalogMode,
+        catalogVersion: runtime.catalogVersion,
+        catalogKey: runtime.catalogKey,
       });
 
     } else if (data.type === "frame") {
