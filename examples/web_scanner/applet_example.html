@@ -29,7 +29,7 @@
 
         if (self.crossOriginIsolated) return;
 
-        navigator.serviceWorker.register("./coi-serviceworker.js", { scope: "./" })
+        navigator.serviceWorker.register("./coi-serviceworker.js?v=__BUILD_ID__", { scope: "./" })
           .then(function (reg) {
             if (reg.active && !navigator.serviceWorker.controller) {
               location.reload();

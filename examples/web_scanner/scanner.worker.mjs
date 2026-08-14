@@ -17,7 +17,7 @@
 //                       detectorBitmap?, cropBitmap? }
 //   { type: 'error',    message }
 
-import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs";
+import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs?v=__BUILD_ID__";
 
 // ---------------------------------------------------------------------------
 // Constants

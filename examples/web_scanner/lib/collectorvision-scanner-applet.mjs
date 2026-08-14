@@ -1,7 +1,13 @@
+function versionedUrl(path) {
+  const url = new URL(path, import.meta.url);
+  url.search = new URL(import.meta.url).search;
+  return url.href;
+}
+
 const DEFAULT_CONFIG = {
   manifestUrl: new URL("../assets/manifest.json", import.meta.url).href,
   assetBasePath: new URL("../assets", import.meta.url).href,
-  workerUrl: new URL("../scanner.worker.mjs", import.meta.url).href,
+  workerUrl: versionedUrl("../scanner.worker.mjs"),
   enableWebGpu: false,
   autoStart: true,
   scanIntervalMs: 900,

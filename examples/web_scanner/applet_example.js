@@ -1,5 +1,7 @@
 import { CodeJar } from "https://cdn.jsdelivr.net/npm/codejar@4.3.0/dist/codejar.js";
-import { createCollectorVisionScannerApplet } from "./lib/collectorvision-scanner-applet.mjs";
+import {
+  createCollectorVisionScannerApplet,
+} from "./lib/collectorvision-scanner-applet.mjs?v=__BUILD_ID__";
 
 const CODE_KEY = "collectorvision_applet_example_code";
 const PRESET_KEY = "collectorvision_applet_example_preset";

@@ -60,7 +60,7 @@
         // server-side.  Don't register again.
         if (self.crossOriginIsolated) return;
 
-        navigator.serviceWorker.register("./coi-serviceworker.js", { scope: "./" })
+        navigator.serviceWorker.register("./coi-serviceworker.js?v=__BUILD_ID__", { scope: "./" })
           .then(function (reg) {
             // If the SW is newly installed (first visit) it will claim the
             // page and we need one reload to pick up the headers it injects.

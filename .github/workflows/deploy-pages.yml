@@ -75,13 +75,16 @@ jobs:
       - name: Stamp build ID
         run: |
           SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
-          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/app.js
-          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/index.html
-          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/applet_example.html
-          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/screen_capture_monitor.html
-          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/screen_capture_monitor.js
-          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/screen_capture_overlay.html
-          sed -i "s/__BUILD_ID__/${SHORT_SHA}/g" examples/web_scanner/build.json
+          git ls-files -z \
+            "examples/web_scanner/*.html" \
+            "examples/web_scanner/*.js" \
+            "examples/web_scanner/*.mjs" \
+            "examples/web_scanner/*.json" \
+            | xargs -0 sed -i "s/__BUILD_ID__/${SHORT_SHA}/g"
+          if git grep -n "__BUILD_ID__" -- examples/web_scanner; then
+            echo "Unstamped web scanner build ID placeholder remains."
+            exit 1
+          fi
           echo "Stamped build ID: ${SHORT_SHA}"
 
       - name: Upload Pages artifact
