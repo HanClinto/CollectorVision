@@ -4,6 +4,11 @@ Card identification library for collectible card games. Feed it a photo, get bac
 
 Magic: The Gathering is the primary supported catalog today. Additional non-MTG catalogs are available as highly experimental previews, and user feedback is welcome.
 
+> **Catalog v2 is recommended for hosted catalogs.** See the
+> [Catalog v1 to v2 migration guide](docs/catalog-v2-migration.md) for complete
+> Python and JavaScript before/after examples. Catalog v1 remains available for
+> custom NPZ catalogs.
+
 ## Try online
 
 Experimental javascript port version hosted here: https://hanclinto.github.io/CollectorVision/

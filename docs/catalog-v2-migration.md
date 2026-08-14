@@ -1,39 +1,88 @@
 # Migrating from Catalog v1 to Catalog v2
 
-Catalog v2 is a parallel beta API. Catalog v1 remains supported, uses its
-existing cache, and does not need to be removed before adopting v2.
+Catalog v2 is the recommended API for hosted catalogs. It adds game-first
+discovery, incremental updates, browser-native FP16 storage, required names and
+peer identifiers, optional retained metadata, and catalogs for more games.
 
-## Choose the migration boundary
+Catalog v1 remains supported for custom NPZ files. Its cache is separate from
+v2, so both APIs can run in one application during rollout.
 
-Use Catalog v2 when an application benefits from hosted multi-game discovery,
-always-available card names and peer identifiers, optional retained metadata,
-browser-friendly FP16 storage, or incremental updates.
+## Choose a migration path
 
-Keep Catalog v1 for custom NPZ catalogs or applications that do not need those
-features yet. One process can load both versions.
+| Current use | Recommendation |
+|---|---|
+| Hosted Hugging Face NPZ catalog in Python | Replace `Catalog.load("hf://...")` with `CatalogV2(game)` |
+| Custom/local NPZ catalog in Python | Keep `Catalog.load(path)` unless the catalog is published as a v2 feed |
+| Browser with bundled FP16, IDs, and a manifest | Replace the catalog loader and search helper with `BrowserCatalogV2` |
+| Browser needing a gradual rollout | Make v2 the default and retain v1 behind a temporary feature flag |
 
-## Python
+## Python: hosted catalog
 
-Replace the hosted Catalog v1 source:
+### Before: Catalog v1
 
 ```python
+from PIL import Image
+import collector_vision as cv
+
 catalog = cv.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
-```
 
-with game-first Catalog v2 discovery:
+with Image.open("card.jpg") as image:
+    embedding = catalog.embedder.embed(image.convert("RGB"))
 
-```python
-catalog = cv.CatalogV2("mtg")
-```
-
-The common search path is intentionally compatible:
-
-```python
-embedding = catalog.embedder.embed(crop)
 score, card_id = catalog.search(embedding, top_k=1)[0]
 ```
 
-Use `search_records()` for v2 data:
+### After: Catalog v2
+
+```python
+from PIL import Image
+import collector_vision as cv
+
+catalog = cv.CatalogV2("mtg")
+
+with Image.open("card.jpg") as image:
+    embedding = catalog.embedder.embed(image.convert("RGB"))
+
+score, card_id = catalog.search(embedding, top_k=1)[0]
+```
+
+The embedding and tuple-based `search()` path is intentionally compatible. The
+constructor now discovers the recommended source and newest catalog-local
+version, installs a base or exact-predecessor deltas, and reuses a separate v2
+cache afterward.
+
+Common hosted source migrations are:
+
+| Catalog v1 source | Catalog v2 |
+|---|---|
+| `hf://HanClinto/milo/scryfall-mtg` | `cv.CatalogV2("mtg")` |
+| `hf://HanClinto/milo/tcgplayer-mtg` | `cv.CatalogV2("mtg", source="tcgplayer")` |
+| `hf://HanClinto/milo/tcgplayer-pokemon` | `cv.CatalogV2("pokemon")` |
+| `hf://HanClinto/milo/tcgplayer-swu` | `cv.CatalogV2("swu")` |
+
+The default source is Scryfall for MTG and TCGplayer for other games. Pass
+`source="scryfall"` or `source="tcgplayer"` when source identity matters.
+
+## Python: rich results and metadata
+
+Catalog v1 commonly required aligned side arrays or a provider API request
+after recognition. Catalog v2 can return the complete local recognition record.
+
+### Before: Catalog v1 plus provider lookup
+
+```python
+import json
+import urllib.request
+
+score, card_id = catalog.search(embedding, top_k=1)[0]
+
+with urllib.request.urlopen(f"https://api.scryfall.com/cards/{card_id}") as response:
+    card = json.load(response)
+
+print(card["name"], card["set_name"])
+```
+
+### After: Catalog v2 local record
 
 ```python
 catalog = cv.CatalogV2("mtg", include_metadata=True)
@@ -44,49 +93,83 @@ print(match["name"])  # always available
 print(match["identifiers"])  # primary and peer source IDs
 print(match["face_index"])  # 0 for the front face
 print(match["finishes"])  # recognition-time physical finishes
-print(match["metadata"])  # present when include_metadata=True
+print(match["metadata"]["set_name"])
 ```
 
-`card_id` remains an alias for `id` in search results. Catalog v1 fields such as
-`primary_key`, `secondary_key`, and `matched_face` do not define the v2 record
-contract. Use `result_identifier`, `identifiers`, and `face_index` instead.
+Names, identifiers, faces, and finishes are core recognition fields. Extended
+metadata includes fields such as set, collector number, language, rarity,
+colors, promo, and layout. Provider data that changes frequently, such as live
+market prices, should still be fetched from its authoritative API.
 
-The default source is Scryfall for MTG and TCGplayer for other games. Select a
-source explicitly when needed:
-
-```python
-scryfall = cv.CatalogV2("mtg", source="scryfall")
-tcgplayer = cv.CatalogV2("mtg", source="tcgplayer")
-```
-
-## Metadata behavior
-
-Names, peer identifiers, faces, and finishes are core recognition fields.
-Extended metadata includes fields such as set, collector number, language,
-rarity, colors, promo, and layout.
-
-Base and delta records combine core fields and metadata in one compressed
-JSONL stream. `include_metadata=False` still downloads and validates that
+`include_metadata=False` still downloads and validates the combined records
 stream, then discards metadata. It reduces steady-state memory and persistent
 cache use, not network transfer.
 
-Changing an existing installation from recognition-only to
-`include_metadata=True` replays cached/downloaded record assets without
-redownloading embeddings.
+### Result-field mapping
 
-## Equivalence and repeated-scan grouping
+| Catalog v1 concept | Catalog v2 |
+|---|---|
+| `card_id` or `primary_key` value | `match["id"]` or compatibility alias `match["card_id"]` |
+| `primary_key_name` | `match["result_identifier"]` |
+| `secondary_key` or named peer IDs | `match["identifiers"]` |
+| `matched_face` string | `match["face_index"]` (`0` is front) |
+| provider lookup for card name | `match["name"]` |
+| custom metadata sidecar | `match["metadata"]` |
 
-For Scryfall, prefer `match["identifiers"]["scryfall_oracle"]` when grouping
-printings of the same underlying card. For TCGplayer catalogs, no equivalent
-cross-printing ID is currently available; use the required exact `name` as a
-practical fallback when edition-level differences do not matter.
+For Scryfall, use `match["identifiers"]["scryfall_oracle"]` to group printings
+of the same underlying card. TCGplayer does not currently provide a comparable
+cross-printing ID; use exact `match["name"]` as the practical fallback when
+edition differences do not matter. A TCGplayer product ID identifies a specific
+marketplace product and is not an equivalence ID.
 
-Do not treat a TCGplayer product ID as a card-equivalence ID. It identifies the
-specific marketplace product returned by the catalog.
+## Python: custom NPZ catalogs
 
-## Browser
+Do not migrate a local/custom NPZ merely to rename the constructor:
 
-Replace custom Catalog v1 manifest/asset loading with the feed client:
+```python
+catalog = cv.Catalog.load("./my-custom-catalog.npz")
+```
+
+Catalog v2 is feed-driven and does not reinterpret arbitrary NPZ files. Keep
+Catalog v1 for custom NPZ catalogs, or publish the catalog through the v2
+producer contract before changing clients.
+
+## JavaScript: bundled browser catalog
+
+There was no standalone Catalog v1 browser client. Browser integrations
+typically loaded the scanner manifest, packed FP16 matrix, and aligned IDs
+themselves.
+
+### Before: Catalog v1 application-owned loading
+
+```javascript
+const manifest = await fetch("./assets/manifest.json").then((response) =>
+  response.json(),
+);
+
+const [embeddingBuffer, cardIds] = await Promise.all([
+  fetch(`./assets/${manifest.catalog.embeddings}`).then((response) =>
+    response.arrayBuffer(),
+  ),
+  fetch(`./assets/${manifest.catalog.card_ids}`).then((response) =>
+    response.json(),
+  ),
+]);
+
+const embeddings = new Uint16Array(embeddingBuffer);
+const { score, index } = searchPackedFp16(
+  queryEmbedding,
+  embeddings,
+  manifest.catalog.rows,
+  manifest.catalog.dims,
+);
+const cardId = cardIds[index];
+```
+
+`searchPackedFp16` represents the application-specific search loop required by
+the v1 bundle. Existing applications may use different helper names.
+
+### After: Catalog v2 managed loading and search
 
 ```javascript
 import {
@@ -98,39 +181,69 @@ const catalog = await BrowserCatalogV2.forGame("mtg", {
 });
 
 const [match] = catalog.searchRecords(queryEmbedding, 1);
-console.log(match.card_id, match.name, match.identifiers, match.metadata);
+console.log(match.score, match.card_id, match.name);
+console.log(match.identifiers, match.face_index, match.metadata);
 ```
 
-The browser client stores the newest compatible materialized snapshot in
-IndexedDB and applies exact-predecessor deltas automatically. Pass `cache: null`
-only when persistent caching is undesirable.
+Keep the existing Milo inference pipeline: `queryEmbedding` remains a
+normalized `Float32Array`. The v2 client discovers the catalog, verifies sizes
+and checksums, reconstructs updates, keeps embeddings packed as FP16, and
+persists the newest compatible snapshot in IndexedDB.
 
-## Caches and beta schema changes
+If only `(score, cardId)` is needed, use the compact compatibility shape:
 
-Catalog v2 uses a cache separate from v1. Current clients version their v2 cache
-schema and ignore incompatible beta snapshots, so normal users do not need a
-manual cache migration.
-
-Applications that directly consumed an earlier Catalog v2 beta prototype must
-switch to the moving feed and combined assets:
-
-```text
-base/records.jsonl.gz
-base/embeddings.f16.gz
-delta-from-N/records.jsonl.gz
-delta-from-N/embeddings.f16.gz   # only when recognition changed
+```javascript
+const [[score, cardId]] = catalog.search(queryEmbedding, 1);
 ```
 
-There is no compatibility parser for discarded beta shapes such as separate
-`identifiers.jsonl.gz` and `metadata.jsonl.gz` files.
+Pass `cache: null` only when persistent caching is undesirable. Advanced
+applications can use `CatalogV2FeedClient` and `CatalogV2IndexedDbCache` for
+explicit catalog keys, family/profile selection, mirrors, or custom cache
+management.
+
+## JavaScript: staged rollout
+
+Run both paths against the same detector, dewarp, embedder, thresholds, and
+confirmation logic. Change only the catalog loader/search backend:
+
+```javascript
+const catalogMode =
+  new URLSearchParams(location.search).get("catalog") ?? "v2";
+
+if (catalogMode === "v1") {
+  // Load the existing bundled manifest, FP16 matrix, and aligned IDs.
+} else if (catalogMode === "v2") {
+  // Load BrowserCatalogV2.forGame(...).
+} else {
+  throw new Error(`Unsupported catalog mode: ${catalogMode}`);
+}
+```
+
+The live CollectorVision scanner follows this pattern: Catalog v2 is the
+default, while `?catalog=v1` exercises the bundled compatibility path.
+
+## Caches and updates
+
+- V1 and v2 use separate caches; do not copy or rename v1 cache files.
+- Python `offline=True` opens the newest compatible installed v2 snapshot.
+- Browser v2 snapshots use a separate IndexedDB database.
+- Clients apply exact-predecessor deltas automatically and fall back to the
+  advertised base when a compatible predecessor is unavailable.
+- Current clients ignore incompatible beta cache schemas automatically.
+- Applications that consumed discarded beta files such as separate
+  `identifiers.jsonl.gz` and `metadata.jsonl.gz` must move to combined
+  `records.jsonl.gz`; there is no compatibility parser for those prototypes.
 
 ## Rollout checklist
 
-1. Change one catalog construction path to `CatalogV2`.
-2. Keep tuple-based `search()` calls unchanged.
-3. Update rich-result code to the v2 record fields.
-4. Decide whether each application surface should retain metadata.
-5. Update repeated-scan grouping to Oracle ID or the TCGplayer name fallback.
-6. Exercise first install, cached startup, incremental update, and offline mode.
-7. Remove the v1 path only after the application no longer needs NPZ/custom
-   catalog behavior.
+1. Replace one hosted v1 catalog construction/loading path with v2.
+2. Keep Milo embedding generation and tuple-based searches unchanged.
+3. Migrate rich results to `name`, `identifiers`, `face_index`, and `metadata`.
+4. Choose Oracle ID or exact TCGplayer name for repeated-scan grouping.
+5. Exercise first install, cached startup, incremental update, and offline mode.
+6. Compare match quality and search latency against v1 using the same inputs.
+7. Retain v1 only where custom NPZ compatibility or rollback is still needed.
+
+See the [Catalog v2 client reference](catalog-v2-client.md) and
+[live browser example](https://hanclinto.github.io/CollectorVision/catalog_v2_example.html)
+for the complete API and a runnable integration.
