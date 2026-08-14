@@ -98,6 +98,7 @@ family/profile selection, mirrors, and custom cache management.
 
 A runnable browser loading example is published at
 <https://hanclinto.github.io/CollectorVision/catalog_v2_example.html>. The main
-camera scanner currently remains the Catalog v1 compatibility demonstration;
-the standalone page exercises the finalized v2 feed, combined records,
-metadata-retention option, and IndexedDB cache directly.
+camera scanner also uses Catalog v2 by default; append `?catalog=v1` to its URL
+to exercise the bundled Catalog v1 compatibility path. The standalone page
+exercises the finalized v2 feed, combined records, metadata-retention option,
+and IndexedDB cache directly.

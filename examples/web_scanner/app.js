@@ -2047,7 +2047,7 @@ function resolveAssetChannel() {
 }
 
 function resolveCatalogMode() {
-  const requested = new URLSearchParams(location.search).get("catalog") ?? "v1";
+  const requested = new URLSearchParams(location.search).get("catalog") ?? "v2";
   if (requested !== "v1" && requested !== "v2") {
     throw new Error(`Unsupported catalog mode: ${requested}`);
   }
