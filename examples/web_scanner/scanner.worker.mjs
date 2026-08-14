@@ -18,7 +18,6 @@
 //   { type: 'error',    message }
 
 import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs";
-import { BrowserCatalogV2 } from "./lib/collectorvision-catalog-v2.mjs";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -729,7 +728,13 @@ class WorkerRuntime {
 
   async loadCatalogV2(onStage) {
     onStage?.("catalog", 0, 0, 0, false);
-    const catalog = await BrowserCatalogV2.forGame("mtg", { includeMetadata: false });
+    const moduleUrl = new URL("./lib/collectorvision-catalog-v2.mjs", import.meta.url);
+    moduleUrl.search = new URL(import.meta.url).search;
+    const { BrowserCatalogV2 } = await import(moduleUrl.href);
+    const catalog = await BrowserCatalogV2.forGame("mtg", {
+      includeMetadata: false,
+      fetchImpl: (...args) => globalThis.fetch(...args),
+    });
     const expectedDimensions = this.manifest.catalog.dims;
     if (catalog.dimension !== expectedDimensions) {
       throw new Error(
