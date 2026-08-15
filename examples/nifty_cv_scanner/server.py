@@ -160,13 +160,13 @@ def _card_image_src(card_id: str) -> str:
     return f"/cards/{card_id}.jpg"
 
 
-def _oracle_id_for(catalog: cvg.Catalog, card_id: str) -> str | None:
+def _oracle_id_for(catalog: cvg.CatalogLike, card_id: str) -> str | None:
     return catalog.card_to_oracle.get(card_id) or None
 
 
 def _identify(
     bgr: np.ndarray,
-    catalog: cvg.Catalog,
+    catalog: cvg.CatalogLike,
     detector: cvg.NeuralCornerDetector | None,
     top_k: int,
     prior_embeddings: list[list[float]] | None = None,
@@ -492,7 +492,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="CollectorVision-backed Nifty Scanner overlay")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--catalog", type=Path, help="Path to a local CollectorVision .npz catalog")
+    group.add_argument("--catalog", help="Game name (for v2) or local CollectorVision .npz path")
     group.add_argument(
         "--hfd",
         nargs=2,

@@ -39,7 +39,7 @@ uv pip install -r requirements.txt
 
 ```bash
 cd examples/nifty_cv_scanner
-python server.py --hfd HanClinto/milo scryfall-mtg --host 127.0.0.1 --port 8000
+python server.py --catalog mtg --host 127.0.0.1 --port 8000
 ```
 
 Startup logs show progress while CollectorVision loads the catalog, corner
@@ -53,7 +53,9 @@ Then open:
 - Overlay: <http://127.0.0.1:8000/card-view.html>
 - Controller: <http://127.0.0.1:8000/card-controller.html>
 
-Use `--catalog ./catalog.npz` instead of `--hfd` to run from a local catalog.
+Use `--catalog ./catalog.npz` for a local v1 catalog. The legacy
+`--hfd HanClinto/milo scryfall-mtg` form remains available for hosted v1
+catalogs.
 
 ## Camera Scanner
 

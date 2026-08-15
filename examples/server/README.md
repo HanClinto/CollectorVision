@@ -12,10 +12,13 @@ pip install collectorvision fastapi "uvicorn[standard]"
 ## Run
 
 ```bash
+# Recommended hosted catalog
+python server.py --catalog mtg
+
 # Local catalog file
 python server.py --catalog ./milo1-scryfall-mtg-2026-04.npz
 
-# Auto-download from HuggingFace (cached in ~/.cache/collectorvision/)
+# Legacy hosted v1 catalog
 python server.py --hfd HanClinto/milo scryfall-mtg
 
 # Pre-cropped images (skip corner detection)
@@ -90,4 +93,3 @@ curl -X POST http://localhost:8000/identify/upload \
   automatically skip these frames.
 - For multi-card identification in one request, send separate records in the
   `POST /identify` body (one record per card, not per frame).
-- For iOS/Android examples, see `examples/ios/` and `examples/android/` (coming soon).

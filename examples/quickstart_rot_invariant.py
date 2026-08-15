@@ -37,7 +37,7 @@ class OrientationResult(NamedTuple):
 
 
 def search_best_orientation(
-    catalog: cvg.Catalog, crop: Image.Image, top_k: int = 5
+    catalog: cvg.CatalogLike, crop: Image.Image, top_k: int = 5
 ) -> OrientationResult:
     """Search upright and 180-degree orientations, returning the stronger result."""
     candidates = [("upright", crop), ("rotated_180", cvg.rotate_card_180(crop))]
@@ -51,30 +51,22 @@ def search_best_orientation(
 
 
 def main() -> None:
-    # 1. Download and load catalog of reference image embeddings (29mb, cached after first download)
+    # Catalog assets are downloaded once and then updated from the local cache.
     catalog = cvg.Catalog.load("mtg")
 
-    # 2. Load the image you want to identify. Can be a photo from your phone, or a scan from a webcam feed.
     image = cv2.imread(str(IMAGE))
     if image is None:
         raise FileNotFoundError(f"Could not read image: {IMAGE}")
 
-    # 3. Detect card corners within image, and get a sharpness score (0-1) indicating confidence in the detection.
-    #    If sharpness is low, try retaking the photo with better lighting, less blur, or a clearer view of the card.
     detector = cvg.NeuralCornerDetector()
     detection = detector.detect(image)
     print(f"Detected corner sharpness={detection.sharpness:.3f}")
 
-    # 4. Dewarp to aligned crop using detected corners and perspective transform.
-    #    This gives us a clean, squared-up, card-only image to feed into the embedding model.
     crop = detection.dewarp(image)
 
-    # 5. Embed both the original crop and a 180-degree rotated copy.
-    #    Search both embeddings and keep the orientation with the strongest top match.
     result = search_best_orientation(catalog, crop, top_k=5)
     score, card_id = result.hits[0]
 
-    # 6. Print results
     print(f"Best orientation {result.label}")
     print(f"Top match {card_id}  score={score:.4f}")
     for s, cid in result.hits[1:]:

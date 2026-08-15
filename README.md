@@ -118,14 +118,13 @@ print(card_id, score)   # "abc123-...", 0.94
 
 ## Available catalogs
 
-Catalogs are simple databases that include card embeddings (fingerprints) with keys (such as Scryfall IDs or TCGplayer IDs). Load the recommended current catalog by game:
+Load the current recommended catalog by game:
 
 ```python
 catalog = cvg.Catalog.load("mtg")
 ```
 
-The default source is Scryfall for MTG and TCGplayer for other games. The rest
-of the pipeline stays the same:
+The default source is Scryfall for MTG and TCGplayer for other games:
 
 ```python
 # Pokemon TCG
@@ -138,28 +137,16 @@ catalog = cvg.Catalog.load("swu")
 catalog = cvg.Catalog.load("mtg", source="tcgplayer")
 ```
 
-Returned `card_id` values come from the selected catalog's source. For example, TCGplayer catalogs return TCGplayer-style IDs rather than Scryfall UUIDs.
+Catalog v2 currently publishes `mtg`, `pokemon`, `pokemon-japan`, `yugioh`,
+`fab`, `lorcana`, `digimon`, `onepiece`, `swu`, `union-arena`, `gundam`, and
+`riftbound`. MTG is the primary supported catalog; the others are previews.
 
-Catalog files are cached locally after the first download, and update automatically when a new version is released. Default cache directory is `~/.cache/collectorvision/` but can be overridden with the `COLLECTORVISION_CACHE_DIR` environment variable.
+Results use the selected source's identifier. TCGplayer catalogs therefore
+return TCGplayer product IDs rather than Scryfall UUIDs. Use
+`search_records()` for names, peer identifiers, finishes, and metadata.
 
-All catalogs below are official snapshots from the CollectorVision Hugging Face repository. Magic: The Gathering catalogs are the primary supported path; all non-MTG catalogs are highly experimental and need user feedback from real-world scans.
-
-| Game | Source | Catalog key | Description | Size |
-|---|---|---|---|---|
-| Magic: The Gathering | Scryfall | `scryfall-mtg` | Primary MTG catalog from Scryfall reference images and card IDs. | ~53 MB |
-| Magic: The Gathering | Scryfall | `scryfall-mtg-es` | Experimental Spanish-language MTG catalog from Scryfall; Milo has not been trained to distinguish English vs. Spanish printings. | ~21 MB |
-| Magic: The Gathering | TCGplayer | `tcgplayer-mtg` | MTG catalog built from TCGplayer product/reference images. | ~50 MB |
-| Digimon Card Game | TCGplayer | `tcgplayer-digimon` | Highly experimental Digimon catalog; feedback wanted. | ~3.9 MB |
-| Flesh and Blood | TCGplayer | `tcgplayer-fab` | Highly experimental Flesh and Blood catalog; feedback wanted. | ~4.3 MB |
-| Disney Lorcana | TCGplayer | `tcgplayer-lorcana` | Highly experimental Lorcana catalog; feedback wanted. | ~1.3 MB |
-| One Piece Card Game | TCGplayer | `tcgplayer-onepiece` | Highly experimental One Piece catalog; feedback wanted. | ~3.0 MB |
-| Pokémon TCG | TCGplayer | `tcgplayer-pokemon` | Highly experimental Pokémon catalog; feedback wanted. | ~13 MB |
-| Star Wars: Unlimited | TCGplayer | `tcgplayer-swu` | Highly experimental Star Wars: Unlimited catalog; feedback wanted. | ~3.2 MB |
-| Yu-Gi-Oh! | TCGplayer | `tcgplayer-yugioh` | Highly experimental Yu-Gi-Oh! catalog; feedback wanted. | ~21 MB |
-
-Browse at **https://huggingface.co/HanClinto/milo/tree/main/catalogs**
-
-Catalogs are published as dated snapshots. Filename format: `{algo}-{source}-{game}-{YYYY-MM-DD}.npz`
+Catalogs are cached after the first download. The moving v2 feed applies
+incremental updates and keeps the newest compatible local snapshot.
 
 To share results, request a specific game/source, or report a catalog issue, open an issue or reach out [on Discord](https://discord.gg/ds8SMCRFZp) or [Twitter @HanClinto](https://x.com/HanClinto).
 
@@ -167,9 +154,8 @@ To share results, request a specific game/source, or report a catalog issue, ope
 
 ## Local catalog file
 
-Catalog files are simple NumPy archives containing card IDs and their corresponding reference embeddings (image "fingerprints").
-
-[Build your own catalog](catalog) of IDs + reference images, or use our pre-built catalog files available at [Hugging Face](https://huggingface.co/HanClinto/milo/tree/main/catalogs).
+Catalog v1 remains available for custom NumPy archives containing aligned card
+IDs and reference embeddings. See [Build your own catalog](catalog).
 
 Pass a local path and `Catalog.load()` selects the v1 NPZ loader without
 touching the network:
@@ -186,7 +172,8 @@ constructor.
 
 ## Multiple frames, one card
 
-Useful when scanning from live video feeds, pass in the last N frames to get a democratic vote across multiple images. Embed each frame separately, then sum scores before ranking:
+For live video, combine evidence from several recent frames. Embed each frame
+separately, then sum scores before ranking:
 
 ```python
 embeddings = catalog.embedder.embed([crop1, crop2, crop3])  # (3, 128)
@@ -202,7 +189,10 @@ best_id = max(score_map, key=score_map.get)
 
 ## Upside-down cards
 
-Current embeddings can be sensitive to 180-degree rotation. For a temporary rotation-invariant workaround, see [examples/quickstart_rot_invariant.py](examples/quickstart_rot_invariant.py). [examples/eval_accuracy.py](examples/eval_accuracy.py) uses this workaround by default; pass `--no-rot-invariant` to measure upright-only accuracy, `--verbose` to print the expected and matched card name / set for each image, or `--debug` to save aligned crops and corner-detector overlays. The web scanner also enables this by default with the "Scan upside-down cards" setting. These rotation-invariant paths dewarp the card once, embed the crop and a 180-degree rotated copy, search both, and keep the orientation with the strongest top match.
+Current embeddings can be sensitive to 180-degree rotation. The
+[rotation-invariant example](examples/quickstart_rot_invariant.py) embeds the
+upright and rotated crop, then keeps the stronger result. The evaluation script
+and web scanner use the same approach by default.
 
 ---
 
@@ -225,13 +215,8 @@ AGPL-3.0. Commercial licenses available — see [COMMERCIAL_LICENSE.md](COMMERCI
 
 ## Integrations
 
-If you build something with CollectorVision, an announcement is welcome.
-
-- Open an issue if you want to say that your project uses CollectorVision.
-- Open a PR if you want to add your project to a future integrations list.
-
-For hobby and noncommercial projects, this request is appreciated but not a
-condition of the license.
+Using CollectorVision in another project? Open an issue or PR if you want it
+listed here.
 
 ## Development
 
@@ -243,12 +228,8 @@ uv pip install -e '.[dev]'
 
 ## Web Scanner
 
-The mobile-first browser scanner lives in `examples/web_scanner`.
-
-GitHub Pages deployment is wired to publish that folder directly from `main`.
-Once Pages is enabled for the repo, the scanner should be available at:
-
-`https://hanclinto.github.io/CollectorVision/`
+The browser scanner lives in `examples/web_scanner` and is deployed at
+<https://hanclinto.github.io/CollectorVision/>.
 
 ## Playground
 

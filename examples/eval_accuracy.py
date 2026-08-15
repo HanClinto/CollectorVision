@@ -10,11 +10,10 @@ Reports:
 
 Usage
 -----
-    python examples/eval_accuracy.py image.jpg --catalog hf://HanClinto/milo/scryfall-mtg
-    python examples/eval_accuracy.py images/   --catalog hf://HanClinto/milo/scryfall-mtg
-    python examples/eval_accuracy.py images/   --catalog hf://HanClinto/milo/scryfall-mtg --no-rot-invariant
-    python examples/eval_accuracy.py images/   --catalog hf://HanClinto/milo/scryfall-mtg --verbose
-    python examples/eval_accuracy.py images/   --catalog hf://HanClinto/milo/scryfall-mtg --debug
+    python examples/eval_accuracy.py image.jpg --catalog mtg
+    python examples/eval_accuracy.py images/ --catalog mtg --no-rot-invariant
+    python examples/eval_accuracy.py images/ --catalog mtg --verbose
+    python examples/eval_accuracy.py images/ --catalog mtg --debug
 """
 
 import argparse
@@ -47,7 +46,7 @@ def uuid_from_filename(path: Path) -> str | None:
     return match.group(0).lower() if match else None
 
 
-def search_hits(catalog: cvg.Catalog, crop, top_k: int, rot_invariant: bool) -> list[str]:
+def search_hits(catalog: cvg.CatalogLike, crop, top_k: int, rot_invariant: bool) -> list[str]:
     """Return top card IDs, optionally trying upright and upside-down crops."""
     crops = [crop]
     if rot_invariant:
@@ -153,7 +152,11 @@ def build_parser() -> argparse.ArgumentParser:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("input", type=Path, help="Image file or directory")
-    parser.add_argument("--catalog", required=True, help="hf://user/repo/key or .npz path")
+    parser.add_argument(
+        "--catalog",
+        required=True,
+        help="Game name (for v2), hf:// reference, or local .npz path",
+    )
     parser.add_argument(
         "--top-k",
         type=int,

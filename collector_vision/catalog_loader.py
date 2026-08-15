@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, TypeAlias
 
 from collector_vision.catalog import Catalog as CatalogV1
 from collector_vision.catalog_v2 import CatalogV2
 from collector_vision.hfd import HFD
+
+CatalogLike: TypeAlias = CatalogV1 | CatalogV2
 
 
 class Catalog:

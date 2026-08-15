@@ -15,9 +15,9 @@ Then reports:
 
 Usage
 -----
-    python scripts/eval_pipeline_accuracy.py <image_dir> --catalog hf://HanClinto/milo/scryfall-mtg
+    python scripts/eval_pipeline_accuracy.py <image_dir> --catalog mtg
     python scripts/eval_pipeline_accuracy.py <image_dir> --catalog ./my_catalog.npz
-    python scripts/eval_pipeline_accuracy.py <image_dir> --catalog hf://... --min-sharpness 0.01
+    python scripts/eval_pipeline_accuracy.py <image_dir> --catalog mtg --min-sharpness 0.01
 """
 
 import argparse
@@ -172,7 +172,11 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("image_dir", type=Path)
-    parser.add_argument("--catalog", required=True, help="hf://user/repo/key or path to .npz")
+    parser.add_argument(
+        "--catalog",
+        required=True,
+        help="Game name (for v2), hf:// reference, or local .npz path",
+    )
     parser.add_argument("--min-sharpness", type=float, default=0.02)
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument(

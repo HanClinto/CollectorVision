@@ -14,15 +14,15 @@ This file shows both swaps:
   --embedder phash   replaces Milo with a perceptual hash (requires: pip install imagehash)
                      (no ONNX runtime; faster but weaker on edition identification)
 
-Building a hash catalog is left as an exercise — the NPZ structure is:
+A pHash catalog uses this NPZ structure:
     embeddings: (N, 32) uint8   packed 256-bit phash vectors
     card_ids:   (N,)    str
 
 Usage
 -----
-    python examples/advanced/custom_pipeline.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg --catalog hf://HanClinto/milo/scryfall-mtg
-    python examples/advanced/custom_pipeline.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg --catalog hf://HanClinto/milo/scryfall-mtg --detector canny
-    python examples/advanced/custom_pipeline.py examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg --catalog hf://HanClinto/milo/scryfall-mtg --embedder phash
+    python examples/advanced/custom_pipeline.py card.jpg --catalog mtg
+    python examples/advanced/custom_pipeline.py card.jpg --catalog mtg --detector canny
+    python examples/advanced/custom_pipeline.py card.jpg --catalog ./phash-catalog.npz --embedder phash
 """
 
 import argparse
@@ -129,12 +129,10 @@ def identify(
     crop = detection.dewarp(bgr)
 
     # Step 3 — embed
-    data = np.load(catalog_path, allow_pickle=False)
-    card_ids = data["card_ids"].tolist()
-
     if use_phash:
-        query = phash_embed(crop)
-        hits = hamming_search(query, data["embeddings"], top_k)
+        with np.load(catalog_path, allow_pickle=False) as data:
+            card_ids = data["card_ids"].tolist()
+            hits = hamming_search(phash_embed(crop), data["embeddings"], top_k)
     else:
         catalog = cvg.Catalog.load(catalog_path)
         query = catalog.embedder.embed([crop])[0]
@@ -156,7 +154,11 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("images", nargs="+", help="Image files to identify")
-    parser.add_argument("--catalog", required=True, help="Path to NPZ catalog file")
+    parser.add_argument(
+        "--catalog",
+        required=True,
+        help="Game name or catalog path; pHash mode requires a local NPZ file",
+    )
     parser.add_argument("--detector", choices=["cornelius", "canny"], default="cornelius")
     parser.add_argument("--embedder", choices=["milo", "phash"], default="milo")
     parser.add_argument("--top-k", type=int, default=5)

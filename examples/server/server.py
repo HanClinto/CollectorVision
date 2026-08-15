@@ -8,6 +8,7 @@ Usage
 -----
     pip install "collector-vision[server]"
 
+    python server.py --catalog mtg
     python server.py --catalog ./milo1-scryfall-mtg-2026-04.npz
     python server.py --hfd HanClinto/milo scryfall-mtg
     python server.py --catalog ./catalog.npz --ssl
@@ -116,7 +117,7 @@ def _decode_bgr(data: bytes) -> np.ndarray:
 
 def _identify(
     bgr: np.ndarray,
-    catalog: cvg.Catalog,
+    catalog: cvg.CatalogLike,
     detector: cvg.NeuralCornerDetector | None,
     top_k: int,
     prior_embeddings: list[list[float]] | None = None,
@@ -276,7 +277,7 @@ if __name__ == "__main__":
 
     p = argparse.ArgumentParser(description="CollectorVision identification server")
     g = p.add_mutually_exclusive_group(required=True)
-    g.add_argument("--catalog", type=Path, help="Path to a local .npz catalog file")
+    g.add_argument("--catalog", help="Game name (for v2) or local .npz catalog path")
     g.add_argument(
         "--hfd",
         nargs=2,

@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
     "Pillow>=9.0",
     "numpy>=1.24",
+    "onnxruntime>=1.24.3",
     "opencv-python-headless>=4.7",
 ]
 
@@ -60,7 +61,6 @@ exclude = [
   "docs/animation",
   "experiments",
   "README.md",
-  "TODO.md",
 ]
 
 [tool.ruff.lint]

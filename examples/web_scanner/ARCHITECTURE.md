@@ -1,204 +1,74 @@
 # Web Scanner Architecture
 
-## Goal
+The scanner is a static application. Camera capture and UI run on the main
+thread; detection, dewarping, embedding, and catalog search run in
+`scanner.worker.mjs`.
 
-Ship a static scanner demo that runs fully in the browser and can be hosted on
-GitHub Pages.
+## Recognition pipeline
 
-Primary path only:
-- camera -> Cornelius -> JS dewarp -> Milo -> local cosine search
-- mobile-first UI -> running scan list -> exportable results
+1. `getUserMedia()` captures the back camera when available.
+2. The manifest-selected detector (`assets/models/detector.onnx`) predicts four
+   normalized corners.
+3. JavaScript perspective warp produces a `448x448` Milo crop.
+4. Milo emits a normalized 128-dimensional embedding.
+5. Search compares the query with the packed float16 catalog matrix without
+   expanding the full matrix to float32.
+6. Confirmed matches are shown immediately using the catalog record name.
+   Scryfall enrichment supplies current set and price data asynchronously.
 
-## Browser Pipeline
+The worker can also embed a 180-degree rotation and keep the stronger match.
 
-### 1. Capture
+## Catalog modes
 
-- Use `navigator.mediaDevices.getUserMedia`.
-- Prefer `facingMode: "environment"`.
-- Draw the visible video region into an offscreen canvas.
-- Design around portrait mode first.
+### Catalog v2 (default)
 
-### 2. Detection
+`BrowserCatalogV2.forGame("mtg")` reads the moving feed from
+`hanclinto.github.io/CollectorVisionCatalog`. The feed identifies immutable
+base and delta assets with sizes and checksums. Reconstructed snapshots are
+cached in IndexedDB.
 
-- Load `cornelius.onnx` with `onnxruntime-web`.
-- **Always run on WASM** (WebGPU EP wrong on Android ARM) — see Lessons Learned below.
-- Match Python preprocessing:
-  - BGR/RGB handling
-  - resize to model input
-  - ImageNet mean/std normalization
-- Output:
-  - `corners`
-  - `sharpness`
-  - `card_present`
+The scanner passes `includeMetadata: false`: it retains names, identifiers,
+faces, and finishes but discards extended metadata after parsing. This saves
+steady-state memory without changing record-download bandwidth.
 
-### 3. Dewarp
+### Catalog v1 (compatibility)
 
-- Convert normalized corners to pixel coordinates.
-- Solve the perspective transform in JS.
-- Warp the crop in JS into the canonical output.
-- Emit the embedder-ready `448x448` crop directly so the browser path avoids
-  an extra dewarp-to-rectangle then resize-to-square interpolation step.
+`?catalog=v1` loads the prepared static bundle from `./assets/catalog/`.
+Embeddings, card IDs, optional secondary IDs, and face data are aligned by row.
+This path remains available for rollback and local bundle testing.
 
-### 4. Embedding
+## Models and generated assets
 
-- Load `milo.onnx` with `onnxruntime-web`.
-- **Always run on WASM** (WebGPU EP wrong on Android ARM) — see Lessons Learned below.
-- Match Python preprocessing.
-- Emit `128`-d float32 embedding.
-- L2-normalize in JS even if the model already does so.
+The runtime manifest describes model files, dimensions, checksums, and the v1
+catalog assets. `scripts/export_web_scanner_assets.py` generates `assets/` and
+vendors the required ONNX Runtime files. Generated directories are ignored by
+Git.
 
-### 5. Search
+Heavy stable and testing bundles are published as GitHub release assets. The
+Pages workflow downloads a prepared bundle, stamps `__BUILD_ID__` placeholders
+throughout web sources, and deploys static files. The model/catalog refresh and
+Pages deployment workflows are independent.
 
-- Load embeddings into a `Float32Array`.
-- Compute cosine similarity in a tight JS loop.
-- Track only the top `k` scores during the scan.
-- Return the aligned card ID and metadata row.
+## Caching
 
-### 6. Metadata Enrichment
+- Model and v1 bundle assets use the scanner asset IndexedDB store.
+- Catalog v2 snapshots use their own versioned IndexedDB store.
+- The service worker and build-ID query parameters prevent stale source modules
+  from mixing with a newer deployment.
 
-- Live metadata can be fetched from Scryfall after a card is confirmed.
-- Scryfall should enrich the UI, not block the recognition loop.
+## Inference backends
 
-### 7. Audio Hooks
+WASM is the default. WebGPU is opt-in because ONNX Runtime Web has produced
+valid-looking but incorrect output on Android ARM for both detector and
+embedder models (issues #9 and #12). Firefox WebGPU is disabled for the current
+runtime because it can generate invalid Metal shaders. Benchmark backend
+changes separately before enabling WebGPU on another platform.
 
-- play a confirmation sound as soon as a card is confirmed
-- later, after Scryfall returns price data:
-  - play `pickup_high.wav` for cards above `$5`
-  - play `pickup_mid.wav` for cards above `$0.25`
+The scanner uses `ort.webgpu.min.mjs`, not the legacy JSEP
+`ort.all.min.mjs` bundle.
 
-## UI Shape
+## Non-goals
 
-- top half: live camera with overlay
-- top app bar and camera block, with a toggle between compact and expanded camera
-- bottom half: running list of confirmed scans
-- sticky action row:
-  - copy text
-  - download CSV
-  - clear list
-- settings live in a bottom sheet, not in the main scanning surface
-
-Even on desktop, keep the mobile layout centered and narrow.
-
-## Asset Layout
-
-Use a manifest so the app can stay dumb and static:
-
-```json
-{
-  "version": "0.1.0",
-  "models": {
-    "cornelius": "models/cornelius.onnx",
-    "milo": "models/milo.onnx"
-  },
-  "catalog": {
-    "embeddings": "catalog/scryfall-mtg-embeddings.f16.bin",
-    "card_ids": "catalog/scryfall-mtg-card-ids.json",
-    "rows": 108354,
-    "dims": 128,
-    "dtype": "float16"
-  },
-  "sample_frame": "samples/mtg-sample.jpg"
-}
-```
-
-The browser app should fetch those files from local `./assets/...` URLs. Keep
-Hugging Face as the source used by the export step, not as a direct runtime
-dependency for GitHub Pages.
-
-Do the same for the browser runtimes:
-- `vendor/onnxruntime-web/ort.webgpu.min.mjs` — new WebGPU EP (not the legacy JSEP bundle)
-- `vendor/onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs` — asyncify WASM for WebGPU EP fallback
-- `vendor/onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm`
-
-> **Do NOT use** `ort.all.min.mjs` or `ort-wasm-simd-threaded.jsep.*` — see Lessons Learned.
-
-## Caching Strategy
-
-- First load fetches the manifest and large assets over HTTP.
-- Persist heavy assets in `IndexedDB`.
-- On later loads, revalidate with manifest version/hash and reuse the cache.
-
-This avoids paying the full gallery/model download cost on every visit.
-
-Suggested stores:
-- `assets`
-
-## Publish Shape
-
-- No framework required.
-- Static files only.
-- Host from `examples/web_scanner/` or a built `docs/` output later.
-- GitHub Pages serves:
-  - `index.html`
-  - `style.css`
-  - `app.js`
-  - asset files
-
-Long-term deploy model:
-
-- `main` holds app source
-- a separate asset refresh workflow builds the heavy generated bundle
-- that bundle is published as a GitHub release asset
-- Pages deploy fetches the prepared bundle from GitHub, not from HF
-
-See:
-
-- [ASSET_DEPLOY_PLAN.md](./ASSET_DEPLOY_PLAN.md)
-- [assets.bundle.json](./assets.bundle.json)
-
-## Non-Goals
-
-- no server lookup
-- no pHash
-- no Canny fallback
-- no desktop-first layout
-
----
-
-## Lessons Learned: onnxruntime-web Execution Providers
-
-### Do NOT use the legacy JSEP backend (`ort.all.min.mjs`)
-
-The legacy bundle (`ort.all.min.mjs` + `ort-wasm-simd-threaded.jsep.wasm`) uses
-the JSEP (JavaScript EP) backend for WebGPU.  It silently returns all-zeros for
-Conv operator outputs across **all ort-web versions 1.20–1.24.3** on Android
-(replicated on Chrome/Chromium on ARM, Adreno, and Mali GPUs).  The outputs look
-valid (non-NaN, non-Inf) so inference appears to succeed while producing completely
-wrong results.  Fixed by switching to the *new* WebGPU EP (see below).
-
-Commit: `aa0f88f fix(webgpu): switch to new WebGPU EP (ort.webgpu.min.mjs)`
-
-### Do NOT use `ort.webgpu.min.mjs` (new WebGPU EP) for either model on Android ARM
-
-The new EP (`ort.webgpu.min.mjs` + `ort-wasm-simd-threaded.asyncify.wasm`) fixes
-the JSEP Conv bug and works correctly for `milo.onnx` on desktop, but is numerically
-wrong for **both** models on Android ARM GPUs.
-
-`milo.onnx` WebGPU-on-Android-ARM failure was confirmed definitively by issue #12
-(build `f6f1c76`): sharp frame (Laplacian 162), WASM Python score 0.81 for Drey Keeper,
-WebGPU JS score 0.39 for a completely different card.  Corners were verified correct
-(WASM cornelius, max diff 0.0003), so the wrong result is solely from a bad embedding.
-This is the same failure mode as cornelius in issue #9: coherent non-zero outputs that
-are numerically incorrect on ARM GPUs with no error signal.
-
-Both models use `executionProviders: ["wasm"]` unconditionally.
-
-### Always run both models on WASM
-
-`cornelius.onnx` (corner detector) produces wrong-but-coherent corners on Android
-ARM with the new WebGPU EP (issue #9, build `7ed8f8f`).  `milo.onnx` (embedder)
-produces wrong-but-coherent embeddings on Android ARM with the new WebGPU EP
-(issue #12, build `f6f1c76`).  Both models are comfortably fast on WASM within the
-900 ms scan interval.
-
-Firefox on macOS can also fail hard under WebGPU when ORT compiles the `milo.onnx`
-Split shader through Metal (`set_output_*_by_indices` type mismatch).  The scanner
-therefore ignores WebGPU opt-in on Firefox and stays on WASM; use the standalone
-model benchmark page for WebGPU experiments.
-
-```
-executionProviders: ["wasm"]   ← use this for BOTH models
-```
-
-Commits: `c8defb1` (cornelius), `TODO` (milo revert)
-Diagnosed from: issue #9 (build 7ed8f8f), issue #12 (build f6f1c76)
+- server-side recognition
+- pHash or Canny fallback paths
+- a separate desktop UI
