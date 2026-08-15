@@ -85,7 +85,7 @@ print(card["name"], card["set_name"])
 ### After: Catalog v2 local record
 
 ```python
-catalog = cv.CatalogV2("mtg", include_metadata=True)
+catalog = cv.CatalogV2("mtg")
 match = catalog.search_records(embedding, top_k=1)[0]
 
 print(match["id"])  # selected source's primary result ID
@@ -101,9 +101,10 @@ metadata includes fields such as set, collector number, language, rarity,
 colors, promo, and layout. Provider data that changes frequently, such as live
 market prices, should still be fetched from its authoritative API.
 
-`include_metadata=False` still downloads and validates the combined records
-stream, then discards metadata. It reduces steady-state memory and persistent
-cache use, not network transfer.
+Metadata is retained by default. Pass `include_metadata=False` for a
+recognition-only in-memory snapshot; the client still downloads and validates
+the combined records stream, then discards metadata. This opt-out reduces
+steady-state memory and persistent cache use, not network transfer.
 
 ### Result-field mapping
 
@@ -176,9 +177,7 @@ import {
   BrowserCatalogV2,
 } from "https://hanclinto.github.io/CollectorVision/lib/collectorvision-catalog-v2.mjs";
 
-const catalog = await BrowserCatalogV2.forGame("mtg", {
-  includeMetadata: true,
-});
+const catalog = await BrowserCatalogV2.forGame("mtg");
 
 const [match] = catalog.searchRecords(queryEmbedding, 1);
 console.log(match.score, match.card_id, match.name);
@@ -199,7 +198,8 @@ const [[score, cardId]] = catalog.search(queryEmbedding, 1);
 Pass `cache: null` only when persistent caching is undesirable. Advanced
 applications can use `CatalogV2FeedClient` and `CatalogV2IndexedDbCache` for
 explicit catalog keys, family/profile selection, mirrors, or custom cache
-management.
+management. Metadata is retained by default; pass `includeMetadata: false` for
+a recognition-only in-memory snapshot.
 
 ## JavaScript: staged rollout
 

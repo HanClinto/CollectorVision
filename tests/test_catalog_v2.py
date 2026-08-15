@@ -220,6 +220,7 @@ def test_installs_current_catalog_from_feed(
 
     assert catalog.catalog_key == "milo1/test/demo"
     assert catalog.version == 2
+    assert catalog.metadata_loaded
     assert catalog.embedding.dimensions == 2
     assert catalog.embeddings.dtype == np.dtype("<f2")
     assert [record.key("test") for record in catalog.records] == [
@@ -259,6 +260,7 @@ def test_recognition_only_discards_metadata_after_parsing(
     catalog = CatalogV2Downloader.install(
         "pokemon",
         source="test",
+        include_metadata=False,
         cache_dir=tmp_path,
         feed_url=FEED_URL,
     ).load()

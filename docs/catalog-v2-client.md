@@ -26,19 +26,20 @@ contract: it includes immutable family embedding details, catalog descriptors,
 integer versions, absolute asset URLs, compressed sizes, and checksums. Clients
 do not fetch release indexes or per-version manifests.
 
-Names, finishes, and peer IDs are always downloaded as part of the catalog's
-combined records. Load sets, languages, rarity, and other display/filter
-metadata only when needed:
+Names, finishes, peer IDs, sets, languages, rarity, and other display/filter
+metadata are included by default:
 
 ```python
-catalog = cv.CatalogV2("mtg", include_metadata=True)
+catalog = cv.CatalogV2("mtg")
 match = catalog.search_records(embedding, top_k=1)[0]
 print(match["identifiers"])
 print(match["name"])
 print(match["metadata"])
 ```
 
-The primary result appears as `id` and under the descriptor's namespace in
+Pass `include_metadata=False` to discard extended metadata after download when
+only recognition fields are needed. The primary result appears as `id` and
+under the descriptor's namespace in
 `identifiers`. Recognition-level `name` and `finishes` are available without
 metadata.
 Current Scryfall metadata includes `promo` and canonical `layout`, including
@@ -50,7 +51,7 @@ compatible locally installed version from the separate v2 cache without network
 access:
 
 ```python
-catalog = cv.CatalogV2("mtg", include_metadata=True, offline=True)
+catalog = cv.CatalogV2("mtg", offline=True)
 ```
 
 Catalog keys, checksums, cache layout, and exact-predecessor updates are managed
@@ -65,7 +66,6 @@ extract metadata, without redownloading embeddings.
 ```python
 download = cv.CatalogV2Downloader.install_catalog(
     "milo1/scryfall/mtg",
-    include_metadata=True,
     version=2,
 )
 catalog = download.load()
@@ -82,19 +82,18 @@ import {
   BrowserCatalogV2,
 } from "https://hanclinto.github.io/CollectorVision/lib/collectorvision-catalog-v2.mjs";
 
-const catalog = await BrowserCatalogV2.forGame("mtg", {
-  includeMetadata: true,
-});
+const catalog = await BrowserCatalogV2.forGame("mtg");
 
 const [[score, cardId]] = catalog.search(queryEmbedding, 1);
 ```
 
 `queryEmbedding` is the normalized `Float32Array` from the existing Milo
 inference pipeline. The catalog keeps its matrix packed as FP16 and persists
-the newest compatible snapshot in IndexedDB by default. Pass `cache: null` to
-disable persistent caching. Advanced applications can use `CatalogV2FeedClient`
-and `CatalogV2IndexedDbCache` directly for explicit catalog keys,
-family/profile selection, mirrors, and custom cache management.
+the newest compatible snapshot in IndexedDB by default. Metadata is retained by
+default; pass `includeMetadata: false` for recognition-only state. Pass
+`cache: null` to disable persistent caching. Advanced applications can use
+`CatalogV2FeedClient` and `CatalogV2IndexedDbCache` directly for explicit
+catalog keys, family/profile selection, mirrors, and custom cache management.
 
 A runnable browser loading example is published at
 <https://hanclinto.github.io/CollectorVision/catalog_v2_example.html>. The main

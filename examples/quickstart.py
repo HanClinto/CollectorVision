@@ -15,7 +15,7 @@ IMAGE = Path("examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg")
 
 # 1. Discover and load the current Scryfall MTG catalog. Catalog v2 caches the
 #    materialized snapshot and applies incremental updates on later runs.
-catalog = cvg.CatalogV2("mtg", include_metadata=True)
+catalog = cvg.CatalogV2("mtg")
 
 # 2. Load the image you want to identify. Can be a photo from your phone, or a scan from a webcam feed.
 image = cv2.imread(str(IMAGE))

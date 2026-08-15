@@ -305,7 +305,7 @@ export class CatalogV2FeedClient {
 
   async loadGame(
     game,
-    { source = null, family = DEFAULT_FAMILY, profile = null, includeMetadata = false, previous = null } = {},
+    { source = null, family = DEFAULT_FAMILY, profile = null, includeMetadata = true, previous = null } = {},
   ) {
     const normalizedGame = normalizeGame(game);
     const selectedSource = source ?? DEFAULT_SOURCE_BY_GAME[normalizedGame] ?? FALLBACK_SOURCE;
@@ -314,7 +314,7 @@ export class CatalogV2FeedClient {
     return this.#loadResolvedCatalog(resolved, { includeMetadata, previous });
   }
 
-  async loadCatalog(fullCatalogKey, { includeMetadata = false, previous = null } = {}) {
+  async loadCatalog(fullCatalogKey, { includeMetadata = true, previous = null } = {}) {
     const feed = await this.#fetchFeed();
     const resolved = resolveCatalogByKey(feed, fullCatalogKey);
     return this.#loadResolvedCatalog(resolved, { includeMetadata, previous });

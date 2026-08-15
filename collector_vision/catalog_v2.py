@@ -75,7 +75,7 @@ class CatalogV2:
         source: str | None = None,
         profile: str | None = None,
         family: str = "milo1",
-        include_metadata: bool = False,
+        include_metadata: bool = True,
         cache_dir: str | Path | None = None,
         offline: bool = False,
         version: int | None = None,

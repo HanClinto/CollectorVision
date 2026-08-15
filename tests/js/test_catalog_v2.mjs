@@ -533,7 +533,8 @@ await test("loads a base-only catalog via BrowserCatalogV2.forGame", async () =>
   assert.equal(catalog.version, 0);
   assert.equal(catalog.rows, 2);
   assert.equal(catalog.dimension, 2);
-  assert.equal(catalog.metadataLoaded, false);
+  assert.equal(catalog.metadataLoaded, true);
+  assert.deepEqual(catalog.recordForIndex(0).metadata, { name: "Alpha" });
 });
 
 await test("orders rows deterministically and reports public identifiers/finishes", async () => {
@@ -1141,8 +1142,8 @@ await test("an incompatible cached snapshot is discarded and the feed is used in
 
     // Corrupt the cached v2 snapshot's dimension so it no longer matches the
     // family's embedding contract (as if the family contract changed).
-    const corrupted = cache.snapshots.get(`2\0${key}\0false`);
-    cache.snapshots.set(`2\0${key}\0false`, {
+    const corrupted = cache.snapshots.get(`2\0${key}\0true`);
+    cache.snapshots.set(`2\0${key}\0true`, {
       ...corrupted,
       embedding: { ...corrupted.embedding, dimensions: 999 },
     });
@@ -1163,10 +1164,10 @@ await test("a stale cached snapshot older than the feed base falls back to a ful
   // Seed the cache with a snapshot at a version that no longer exists on the
   // chain (e.g. a hard checkpoint moved the base forward).
   const stale = await client(fixture, { cache }).loadCatalog(key);
-  cache.snapshots.set(`-1\0${key}\0false`, stale);
-  cache.snapshots.delete(`0\0${key}\0false`);
-  cache.snapshots.delete(`1\0${key}\0false`);
-  cache.snapshots.delete(`2\0${key}\0false`);
+  cache.snapshots.set(`-1\0${key}\0true`, stale);
+  cache.snapshots.delete(`0\0${key}\0true`);
+  cache.snapshots.delete(`1\0${key}\0true`);
+  cache.snapshots.delete(`2\0${key}\0true`);
 
   fixture.calls.length = 0;
   const rebuilt = await client(fixture, { cache }).loadCatalog(key);
@@ -1224,15 +1225,15 @@ await test("advancing the feed prunes the now-stale cached version for the same 
   const v0 = await client(v0Fixture, { cache }).loadCatalog(key);
   assert.equal(v0.version, 0);
   assert.equal(cache.snapshots.size, 1);
-  assert(cache.snapshots.has(`0\0${key}\0false`));
+  assert(cache.snapshots.has(`0\0${key}\0true`));
 
   // Now the feed has advanced to current_version 2; loading again with the
   // same cache must land on v2 and must not leave the stale v0 entry behind.
   const v2 = await client(fixture, { cache }).loadCatalog(key);
   assert.equal(v2.version, 2);
   assert.equal(cache.snapshots.size, 1, "the stale v0 entry must be pruned, not accumulated alongside v2");
-  assert(cache.snapshots.has(`2\0${key}\0false`));
-  assert(!cache.snapshots.has(`0\0${key}\0false`));
+  assert(cache.snapshots.has(`2\0${key}\0true`));
+  assert(!cache.snapshots.has(`0\0${key}\0true`));
   assert(cache.deleteCalls > 0, "pruning must go through the cache's delete() method");
 });
 
@@ -1259,9 +1260,9 @@ await test("CatalogV2IndexedDbCache keeps only one row per catalog/mode after mu
   assert.equal(v2.version, 2);
 
   // Re-fetch straight from the cache to confirm exactly the final version survives.
-  const roundTripped = await cache.get(2, key, false);
+  const roundTripped = await cache.get(2, key, true);
   assert.equal(roundTripped.version, 2);
-  const stale = await cache.get(0, key, false);
+  const stale = await cache.get(0, key, true);
   assert.equal(stale, null, "the stale v0 row must have been pruned by put()'s index scan");
 });
 
@@ -1270,9 +1271,9 @@ await test("CatalogV2IndexedDbCache.delete() removes a specific version without 
   const cache = new CatalogV2IndexedDbCache({ indexedDb, databaseName: "test-db-2" });
   const { fixture, key } = await buildFixture();
   const snapshot = await client(fixture, { cache }).loadCatalog(key);
-  assert.equal((await cache.get(snapshot.version, key, false)).version, snapshot.version);
-  await cache.delete(snapshot.version, key, false);
-  assert.equal(await cache.get(snapshot.version, key, false), null);
+  assert.equal((await cache.get(snapshot.version, key, true)).version, snapshot.version);
+  await cache.delete(snapshot.version, key, true);
+  assert.equal(await cache.get(snapshot.version, key, true), null);
 });
 
 await test("pruning is scoped per catalog/mode and never deletes unrelated cache entries", async () => {
