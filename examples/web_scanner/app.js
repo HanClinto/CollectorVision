@@ -1971,6 +1971,7 @@ function createScannerLoop(
 
     const confirmed = bucket.push({
       cardId: data.cardId,
+      cardName: data.cardName ?? null,
       score: data.score,
       orientation: data.orientation,
     });
@@ -1979,6 +1980,9 @@ function createScannerLoop(
     }
 
     const scan = ensureScanRecord(scans, confirmed.cardId);
+    if (!scan.enriched && confirmed.cardName) {
+      scan.name = confirmed.cardName;
+    }
     scan.count += 1;
     renderScanList(scans);
     debugLog.info("confirmed scan", confirmed.cardId, `score=${confirmed.score.toFixed(4)}`);

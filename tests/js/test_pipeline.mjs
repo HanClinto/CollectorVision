@@ -401,6 +401,13 @@ await test('rolling scan buffer groups rotated and upright hits by card', () => 
   assert(confirmed?.orientation === 'rotated_180', `Expected rotated_180, got ${confirmed?.orientation}`);
 });
 
+await test('rolling scan buffer preserves the confirmed catalog name', () => {
+  const bucket = new ScanBucket(2, 5);
+  assert(bucket.push({ cardId: 'card-a', cardName: 'Alpha', score: 0.71 }, 3000) === null);
+  const confirmed = bucket.push({ cardId: 'card-a', cardName: 'Alpha', score: 0.88 }, 3100);
+  assert(confirmed?.cardName === 'Alpha', `Expected Alpha, got ${confirmed?.cardName}`);
+});
+
 // ---------------------------------------------------------------------------
 // isUsableQuad regression tests
 // ---------------------------------------------------------------------------

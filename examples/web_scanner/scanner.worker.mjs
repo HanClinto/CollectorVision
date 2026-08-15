@@ -572,6 +572,7 @@ class WorkerRuntime {
     this.inputNames = {};
     this.embeddings = null;
     this.cardIds = null;
+    this.cardNames = null;
     this.secondaryIds = null;
     this.secondaryIdField = null;
     this.dewarpCanvas = new OffscreenCanvas(DEWARP_W, DEWARP_H);
@@ -753,6 +754,7 @@ class WorkerRuntime {
       ? catalog.embeddings.slice(0, requestedRows * catalog.dimension)
       : catalog.embeddings;
     this.cardIds = records.map((record) => record.id);
+    this.cardNames = records.map((record) => record.name);
     this.secondaryIdField = "scryfallOracleId";
     this.secondaryIds = records.map((record) => record.identifiers.scryfall_oracle ?? null);
     this.catalogRows = requestedRows;
@@ -955,6 +957,7 @@ class WorkerRuntime {
     const best = {
       score: bestScore,
       cardId: this.cardIds[bestIndex],
+      cardName: this.cardNames?.[bestIndex] ?? null,
       secondaryId,
       secondaryIdField: this.secondaryIdField,
     };
@@ -1078,6 +1081,7 @@ async function processFrame(bitmap, captureRequested = false, includeDebugBitmap
     sharpness: detection.sharpness,
     confidence: detection.confidence,
     cardId: best.cardId,
+    cardName: best.cardName,
     secondaryId: best.secondaryId,
     secondaryIdField: best.secondaryIdField,
     score: best.score,
