@@ -10,7 +10,7 @@ Existing Catalog v1 applications should start with the
 from PIL import Image
 import collector_vision as cv
 
-catalog = cv.CatalogV2("mtg")
+catalog = cv.Catalog.load("mtg")
 
 with Image.open("card.jpg") as image:
     embedding = catalog.embedder.embed(image.convert("RGB"))
@@ -18,7 +18,7 @@ with Image.open("card.jpg") as image:
 score, card_id = catalog.search(embedding, top_k=1)[0]
 ```
 
-`Game.MTG` is accepted too. Construction downloads the catalog when needed and
+`Game.MTG` is accepted too. `Catalog.load()` downloads the catalog when needed and
 reuses its cache afterward. The default source is Scryfall for MTG and
 TCGplayer for the other supported games. A small discovery feed selects a
 bounded catalog-local base-plus-update route. The feed is the complete client
@@ -30,7 +30,7 @@ Names, finishes, peer IDs, sets, languages, rarity, and other display/filter
 metadata are included by default:
 
 ```python
-catalog = cv.CatalogV2("mtg")
+catalog = cv.Catalog.load("mtg")
 match = catalog.search_records(embedding, top_k=1)[0]
 print(match["identifiers"])
 print(match["name"])
@@ -51,7 +51,7 @@ compatible locally installed version from the separate v2 cache without network
 access:
 
 ```python
-catalog = cv.CatalogV2("mtg", offline=True)
+catalog = cv.Catalog.load("mtg", offline=True)
 ```
 
 Catalog keys, checksums, cache layout, and exact-predecessor updates are managed

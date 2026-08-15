@@ -561,11 +561,11 @@ def test_explicit_catalog_selection(tmp_path: Path, publication: PublishedCatalo
     assert installed.version == 0
 
 
-def test_catalog_constructor_uses_descriptor_discovery(
+def test_catalog_loader_uses_descriptor_discovery(
     tmp_path: Path,
     publication: PublishedCatalog,
 ) -> None:
-    catalog = CatalogV2(
+    catalog = CatalogV2.load(
         "pokemon",
         source="test",
         cache_dir=tmp_path,
@@ -892,9 +892,9 @@ def test_cold_offline_mode_explains_missing_feed(tmp_path: Path) -> None:
         CatalogV2Downloader.open("pokemon", cache_dir=tmp_path)
 
 
-def test_offline_constructor_rejects_feed_url(tmp_path: Path) -> None:
+def test_offline_loader_rejects_feed_url(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="feed_url"):
-        CatalogV2(
+        CatalogV2.load(
             "pokemon",
             offline=True,
             cache_dir=tmp_path,

@@ -95,8 +95,8 @@ The full pipeline runs end-to-end in under 100ms on a laptop CPU.
 import cv2
 import collector_vision as cvg
 
-# Load catalog (downloads ~53 MB on first run, cached locally after that)
-catalog = cvg.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
+# Load the recommended MTG catalog (downloaded once, then updated from cache)
+catalog = cvg.Catalog.load("mtg")
 
 # 1. Detect card corners
 image = cv2.imread("examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg")
@@ -118,20 +118,24 @@ print(card_id, score)   # "abc123-...", 0.94
 
 ## Available catalogs
 
-Catalogs are simple databases that include card embeddings (fingerprints) with keys (such as ScryFall IDs or TCGplayerIDs). You can [build your catalog yourself](catalog), or point at our HuggingFace repository and always download the official latest version: 
+Catalogs are simple databases that include card embeddings (fingerprints) with keys (such as Scryfall IDs or TCGplayer IDs). Load the recommended current catalog by game:
 
 ```python
-catalog = cvg.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
+catalog = cvg.Catalog.load("mtg")
 ```
 
-To use another published catalog, change only the catalog key at the end of the URI. The rest of the pipeline stays the same:
+The default source is Scryfall for MTG and TCGplayer for other games. The rest
+of the pipeline stays the same:
 
 ```python
 # Pokemon TCG
-catalog = cvg.Catalog.load("hf://HanClinto/milo/tcgplayer-pokemon")
+catalog = cvg.Catalog.load("pokemon")
 
 # Star Wars: Unlimited
-catalog = cvg.Catalog.load("hf://HanClinto/milo/tcgplayer-swu")
+catalog = cvg.Catalog.load("swu")
+
+# Explicit source override
+catalog = cvg.Catalog.load("mtg", source="tcgplayer")
 ```
 
 Returned `card_id` values come from the selected catalog's source. For example, TCGplayer catalogs return TCGplayer-style IDs rather than Scryfall UUIDs.
@@ -167,11 +171,16 @@ Catalog files are simple NumPy archives containing card IDs and their correspond
 
 [Build your own catalog](catalog) of IDs + reference images, or use our pre-built catalog files available at [Hugging Face](https://huggingface.co/HanClinto/milo/tree/main/catalogs).
 
-Pass a local path and nothing touches the network:
+Pass a local path and `Catalog.load()` selects the v1 NPZ loader without
+touching the network:
 
 ```python
 catalog = cvg.Catalog.load("./milo1-scryfall-mtg-2026-05-07.npz")
 ```
+
+Use `cvg.CatalogV1.load(path)` or `cvg.CatalogV2.load(game)` when you want to
+select a catalog generation explicitly. Neither API performs I/O in its
+constructor.
 
 ---
 

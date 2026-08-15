@@ -11,7 +11,7 @@ v2, so both APIs can run in one application during rollout.
 
 | Current use | Recommendation |
 |---|---|
-| Hosted Hugging Face NPZ catalog in Python | Replace `Catalog.load("hf://...")` with `CatalogV2(game)` |
+| Hosted Hugging Face NPZ catalog in Python | Replace `Catalog.load("hf://...")` with `Catalog.load(game)` |
 | Custom/local NPZ catalog in Python | Keep `Catalog.load(path)` unless the catalog is published as a v2 feed |
 | Browser with bundled FP16, IDs, and a manifest | Replace the catalog loader and search helper with `BrowserCatalogV2` |
 | Browser needing a gradual rollout | Make v2 the default and retain v1 behind a temporary feature flag |
@@ -38,7 +38,7 @@ score, card_id = catalog.search(embedding, top_k=1)[0]
 from PIL import Image
 import collector_vision as cv
 
-catalog = cv.CatalogV2("mtg")
+catalog = cv.Catalog.load("mtg")
 
 with Image.open("card.jpg") as image:
     embedding = catalog.embedder.embed(image.convert("RGB"))
@@ -47,7 +47,7 @@ score, card_id = catalog.search(embedding, top_k=1)[0]
 ```
 
 The embedding and tuple-based `search()` path is intentionally compatible. The
-constructor now discovers the recommended source and newest catalog-local
+loader now discovers the recommended source and newest catalog-local
 version, installs a base or exact-predecessor deltas, and reuses a separate v2
 cache afterward.
 
@@ -55,10 +55,10 @@ Common hosted source migrations are:
 
 | Catalog v1 source | Catalog v2 |
 |---|---|
-| `hf://HanClinto/milo/scryfall-mtg` | `cv.CatalogV2("mtg")` |
-| `hf://HanClinto/milo/tcgplayer-mtg` | `cv.CatalogV2("mtg", source="tcgplayer")` |
-| `hf://HanClinto/milo/tcgplayer-pokemon` | `cv.CatalogV2("pokemon")` |
-| `hf://HanClinto/milo/tcgplayer-swu` | `cv.CatalogV2("swu")` |
+| `hf://HanClinto/milo/scryfall-mtg` | `cv.Catalog.load("mtg")` |
+| `hf://HanClinto/milo/tcgplayer-mtg` | `cv.Catalog.load("mtg", source="tcgplayer")` |
+| `hf://HanClinto/milo/tcgplayer-pokemon` | `cv.Catalog.load("pokemon")` |
+| `hf://HanClinto/milo/tcgplayer-swu` | `cv.Catalog.load("swu")` |
 
 The default source is Scryfall for MTG and TCGplayer for other games. Pass
 `source="scryfall"` or `source="tcgplayer"` when source identity matters.
@@ -85,7 +85,7 @@ print(card["name"], card["set_name"])
 ### After: Catalog v2 local record
 
 ```python
-catalog = cv.CatalogV2("mtg")
+catalog = cv.Catalog.load("mtg")
 match = catalog.search_records(embedding, top_k=1)[0]
 
 print(match["id"])  # selected source's primary result ID
@@ -125,11 +125,17 @@ marketplace product and is not an equivalence ID.
 
 ## Python: custom NPZ catalogs
 
-Do not migrate a local/custom NPZ merely to rename the constructor:
+Do not migrate a local/custom NPZ merely to use the default loader:
 
 ```python
 catalog = cv.Catalog.load("./my-custom-catalog.npz")
 ```
+
+`Catalog.load()` dispatches deterministically: game names use v2, while local
+paths, `.npz` filenames, `hf://` references, and `HFD` objects use v1. It does
+not catch v2 download or validation failures and retry them as v1. Use
+`CatalogV1.load(path)` or `CatalogV2.load(game)` to select a generation
+explicitly.
 
 Catalog v2 is feed-driven and does not reinterpret arbitrary NPZ files. Keep
 Catalog v1 for custom NPZ catalogs, or publish the catalog through the v2

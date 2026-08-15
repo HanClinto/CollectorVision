@@ -52,7 +52,7 @@ def search_best_orientation(
 
 def main() -> None:
     # 1. Download and load catalog of reference image embeddings (29mb, cached after first download)
-    catalog = cvg.Catalog.load("hf://HanClinto/milo/scryfall-mtg")
+    catalog = cvg.Catalog.load("mtg")
 
     # 2. Load the image you want to identify. Can be a photo from your phone, or a scan from a webcam feed.
     image = cv2.imread(str(IMAGE))

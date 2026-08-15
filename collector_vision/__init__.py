@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-from collector_vision.catalog import Catalog
+from collector_vision.catalog import Catalog as CatalogV1
+from collector_vision.catalog_loader import Catalog
 from collector_vision.catalog_v2 import CatalogV2, CatalogV2Error, catalog_v2_row_key
 from collector_vision.catalog_v2_downloader import CatalogV2Downloader
 from collector_vision.detectors import NeuralCornerDetector
@@ -29,6 +30,7 @@ except PackageNotFoundError:
 
 __all__ = [
     "Catalog",
+    "CatalogV1",
     "CatalogV2",
     "CatalogV2Error",
     "CatalogV2Downloader",

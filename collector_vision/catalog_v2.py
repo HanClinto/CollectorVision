@@ -64,12 +64,16 @@ class CatalogV2Record:
 class CatalogV2:
     """A loaded, searchable Catalog v2 snapshot.
 
-    Constructing by game discovers the recommended matching catalog in the
-    moving feed. Catalog v1 remains independent.
+    Loading by game discovers the recommended matching catalog in the moving
+    feed. Catalog v1 remains independent.
     """
 
-    def __init__(
-        self,
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        raise TypeError("CatalogV2 performs I/O through CatalogV2.load(...), not its constructor")
+
+    @classmethod
+    def load(
+        cls,
         game: str | Game,
         *,
         source: str | None = None,
@@ -80,11 +84,15 @@ class CatalogV2:
         offline: bool = False,
         version: int | None = None,
         feed_url: str | None = None,
-    ) -> None:
+    ) -> CatalogV2:
         from collector_vision.catalog_v2_downloader import (
             DEFAULT_FEED_URL,
             CatalogV2Downloader,
         )
+        from collector_vision.games import Game as _Game
+        from collector_vision.games import parse_game
+
+        game = game if isinstance(game, _Game) else parse_game(str(game))
 
         if offline and feed_url is not None:
             raise ValueError("feed_url cannot be used when offline=True")
@@ -110,18 +118,7 @@ class CatalogV2:
                 feed_url=feed_url or DEFAULT_FEED_URL,
             )
         )
-        self._initialize_from(downloader.load())
-
-    def _initialize_from(self, loaded: CatalogV2) -> None:
-        self.embeddings = loaded.embeddings
-        self.records = loaded.records
-        self.catalog_key = loaded.catalog_key
-        self.family = loaded.family
-        self.version = loaded.version
-        self.embedding = loaded.embedding
-        self.descriptor = loaded.descriptor
-        self.metadata_loaded = loaded.metadata_loaded
-        self._embedder = None
+        return downloader.load()
 
     @classmethod
     def _from_data(
