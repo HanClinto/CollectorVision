@@ -45,7 +45,7 @@ vendors the required ONNX Runtime files. Generated directories are ignored by
 Git.
 
 Heavy stable and testing bundles are published as GitHub release assets. The
-Pages workflow downloads a prepared bundle, stamps `__BUILD_ID__` placeholders
+Pages workflow downloads a prepared bundle, stamps build-ID placeholders
 throughout web sources, and deploys static files. The model/catalog refresh and
 Pages deployment workflows are independent.
 
