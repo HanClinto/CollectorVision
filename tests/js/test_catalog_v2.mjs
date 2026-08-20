@@ -497,6 +497,53 @@ async function buildFixture({ withUpdates = false, withMetadata = false } = {}) 
   return { fixture, key, catalog };
 }
 
+async function promoteToRoutineCheckpoint(fixture, catalog) {
+  const bridge = catalog.updates["1"];
+  const following = catalog.updates["2"];
+  const baseRecords = await fixture.putRecords(
+    "scryfall-mtg/version/10/base/records.jsonl.gz",
+    [
+      {
+        id: "card-a",
+        identifiers: { scryfall_oracle: "oracle-a-2" },
+        metadata: { name: "Alpha II" },
+      },
+      {
+        id: "card-b",
+        identifiers: { scryfall_oracle: "oracle-b" },
+        face_index: 1,
+        finishes: ["foil", "nonfoil"],
+        metadata: { name: "Beta" },
+      },
+      { id: "card-c", identifiers: {}, metadata: { name: "Gamma" } },
+    ],
+  );
+  const baseEmbeddings = await fixture.putEmbeddings(
+    "scryfall-mtg/version/10/base/embeddings.f16.gz",
+    [-1, 0, 0, 1, 0.5, 0.5],
+  );
+  catalog.base = {
+    version: 10,
+    rows: 3,
+    source_updated_at: bridge.source_updated_at,
+    assets: { records: baseRecords, embeddings: baseEmbeddings },
+  };
+  catalog.updates = {
+    10: { ...bridge, from_version: 9, to_version: 10 },
+    11: { ...following, from_version: 10, to_version: 11 },
+  };
+  catalog.current_version = 11;
+  fixture.setJson("catalog-feed-v2.json", {
+    checked_at: "2026-07-26T12:00:00Z",
+    families: {
+      milo1: {
+        embedding: EMBEDDING,
+        catalogs: { "scryfall/mtg": catalog },
+      },
+    },
+  });
+}
+
 function client(fixture, extra = {}) {
   return new CatalogV2FeedClient({ fetchImpl: fixture.fetchImpl(), feedUrl: FEED_URL, ...extra });
 }
@@ -718,6 +765,49 @@ await test("continues from a mid-chain previous snapshot instead of restarting a
   assert(
     fixture.calls.every((url) => !url.includes("version/0/base") && !url.includes("version/1/delta-from-0")),
     "must not re-fetch the base or the v0->v1 delta when continuing from v1",
+  );
+});
+
+await test("loads a routine checkpoint base without replaying its bridge", async () => {
+  const { fixture, catalog } = await buildFixture({ withUpdates: true });
+  await promoteToRoutineCheckpoint(fixture, catalog);
+
+  const loaded = await client(fixture).loadCatalog("milo1/scryfall/mtg");
+
+  assert.equal(loaded.version, 11);
+  assert(fixture.calls.some((url) => url.includes("version/10/base")));
+  assert(
+    fixture.calls.every((url) => !url.includes("version/1/delta-from-0")),
+    "a fresh client must start at the checkpoint base rather than replaying its bridge",
+  );
+});
+
+await test("uses a routine checkpoint bridge from a cached predecessor", async () => {
+  const { fixture, key, catalog } = await buildFixture({ withUpdates: true });
+  const cache = new MemorySnapshotCache();
+  const versionNine = {
+    ...catalog,
+    current_version: 9,
+    base: { ...catalog.base, version: 9 },
+    updates: {},
+  };
+  fixture.setJson("catalog-feed-v2.json", {
+    checked_at: "2026-07-24T12:00:00Z",
+    families: { milo1: { embedding: EMBEDDING, catalogs: { "scryfall/mtg": versionNine } } },
+  });
+  const cached = await client(fixture, { cache }).loadCatalog(key);
+  assert.equal(cached.version, 9);
+
+  await promoteToRoutineCheckpoint(fixture, catalog);
+  fixture.calls.length = 0;
+  const upgraded = await client(fixture, { cache }).loadCatalog(key);
+
+  assert.equal(upgraded.version, 11);
+  assert(fixture.calls.some((url) => url.includes("version/1/delta-from-0")));
+  assert(fixture.calls.some((url) => url.includes("version/2/delta-from-1")));
+  assert(
+    fixture.calls.every((url) => !url.includes("version/10/base")),
+    "a cached predecessor must use the bridge instead of downloading the checkpoint base",
   );
 });
 
@@ -1682,6 +1772,18 @@ await test("rejects a catalog whose update declares the wrong exact-predecessor 
   await assert.rejects(
     () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
     /exact-predecessor delta/,
+  );
+});
+
+await test("rejects a malformed routine checkpoint bridge", async () => {
+  const { fixture, catalog } = await buildFixture({ withUpdates: true });
+  await promoteToRoutineCheckpoint(fixture, catalog);
+  const feed = JSON.parse(new TextDecoder().decode(fixture.files.get(FEED_URL)));
+  feed.families.milo1.catalogs["scryfall/mtg"].updates["10"].from_version = 8;
+  fixture.setJson("catalog-feed-v2.json", feed);
+  await assert.rejects(
+    () => client(fixture).loadCatalog("milo1/scryfall/mtg"),
+    /checkpoint bridge/,
   );
 });
 

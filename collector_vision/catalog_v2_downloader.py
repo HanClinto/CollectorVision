@@ -199,7 +199,9 @@ class CatalogV2Downloader:
                 f"catalog version {target} is outside the advertised "
                 f"{base_version}..{entry['current_version']} route"
             )
-        updates = _update_chain(entry, base_version, target)
+        route_start = _route_start_version(entry)
+        updates = _update_chain(entry, route_start, target)
+        base_updates = _update_chain(entry, base_version, target)
 
         exact = _load_cached(
             root,
@@ -229,7 +231,7 @@ class CatalogV2Downloader:
                 recover=True,
             )
             if recognition is not None:
-                catalog = _attach_metadata_route(recognition[0], selection, updates)
+                catalog = _attach_metadata_route(recognition[0], selection, base_updates)
                 path = _write_snapshot(root, catalog)
                 _prune_snapshots(
                     root,
@@ -242,7 +244,7 @@ class CatalogV2Downloader:
         candidate = _latest_reachable_cached(
             root,
             selection,
-            base_version=base_version,
+            base_version=route_start,
             target=target,
             include_metadata=include_metadata,
         )
@@ -444,6 +446,14 @@ def _parse_selection(
         "base": base,
         "updates": parsed_updates,
     }
+    route_start = _route_start_version(parsed_entry)
+    route = _update_chain(parsed_entry, route_start, current)
+    expected_keys = {str(update["to_version"]) for update in route}
+    unexpected_keys = parsed_updates.keys() - expected_keys
+    if unexpected_keys:
+        raise CatalogV2Error(
+            f"catalog has an unexpected update entry for version {min(unexpected_keys)!r}"
+        )
     chain = _update_chain(parsed_entry, base["version"], current)
     expected_rows = base["rows"]
     for update in chain:
@@ -565,6 +575,23 @@ def _update_chain(
         chain.append(update)
         current = update["to_version"]
     return chain
+
+
+def _route_start_version(entry: dict[str, Any]) -> int:
+    base_version = entry["base"]["version"]
+    bridge = entry["updates"].get(str(base_version))
+    if bridge is None:
+        return base_version
+    if (
+        base_version == 0
+        or bridge["from_version"] != base_version - 1
+        or bridge["to_version"] != base_version
+    ):
+        raise CatalogV2Error(
+            f"catalog update to version {base_version} is not an "
+            "exact-predecessor checkpoint bridge"
+        )
+    return base_version - 1
 
 
 def _download_base(selection: _Selection, *, include_metadata: bool) -> CatalogV2:

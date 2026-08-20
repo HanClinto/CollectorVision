@@ -355,7 +355,7 @@ export class CatalogV2FeedClient {
 
     if (snapshot === null) {
       snapshot = await this.#loadBase(resolved, includeMetadata);
-      startIndex = 0;
+      startIndex = versions.indexOf(catalog.base.version);
       mutated = true;
     }
 
@@ -813,6 +813,21 @@ function buildVersionChain(catalog) {
     }
     validateUpdateEntry(update, toVersion);
   }
+  const bridge = catalog.updates?.[String(catalog.base.version)];
+  if (bridge !== undefined) {
+    if (
+      catalog.base.version === 0 ||
+      !isObject(bridge) ||
+      bridge.from_version !== catalog.base.version - 1 ||
+      bridge.to_version !== catalog.base.version
+    ) {
+      throw new CatalogV2Error(
+        `catalog update to version ${catalog.base.version} is not an exact-predecessor checkpoint bridge`,
+      );
+    }
+    validateUpdateEntry(bridge, catalog.base.version);
+    versions.unshift(catalog.base.version - 1);
+  }
   const expectedKeys = new Set(versions.slice(1).map(String));
   for (const key of Object.keys(catalog.updates ?? {})) {
     if (!expectedKeys.has(key)) {
@@ -820,8 +835,8 @@ function buildVersionChain(catalog) {
     }
   }
   let runningRows = catalog.base.rows;
-  for (let index = 1; index < versions.length; index += 1) {
-    const update = catalog.updates[String(versions[index])];
+  for (let toVersion = catalog.base.version + 1; toVersion <= catalog.current_version; toVersion += 1) {
+    const update = catalog.updates[String(toVersion)];
     runningRows += update.rows.added - update.rows.deleted;
   }
   if (runningRows !== catalog.rows) {

@@ -523,6 +523,136 @@ def test_incremental_install_reuses_cached_snapshot(
     assert [path.name for path in recognition_root.iterdir()] == ["version-2"]
 
 
+def _publish_routine_checkpoint(publication: PublishedCatalog) -> None:
+    entry = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]
+    bridge = deepcopy(entry["updates"]["1"])
+    following = deepcopy(entry["updates"]["2"])
+    entry["base"] = {
+        "version": 10,
+        "rows": 2,
+        "source_updated_at": bridge["source_updated_at"],
+        "assets": {
+            "records": publication.jsonl(
+                "demo/version/10/base/records.jsonl.gz",
+                [
+                    {
+                        "id": "b",
+                        "identifiers": {"scryfall_oracle": "oracle-b2"},
+                        "face_index": 1,
+                        "finishes": ["foil"],
+                        "metadata": {
+                            "layout": "transform",
+                            "name": "Beta 2",
+                            "promo": False,
+                        },
+                    },
+                    {
+                        "id": "c",
+                        "identifiers": {"scryfall_oracle": "oracle-c"},
+                        "metadata": {"layout": "normal", "name": "Gamma", "promo": False},
+                    },
+                ],
+            ),
+            "embeddings": publication.asset(
+                "demo/version/10/base/embeddings.f16.gz",
+                np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype="<f2").tobytes(),
+            ),
+        },
+    }
+    entry["updates"] = {
+        "10": {**bridge, "from_version": 9, "to_version": 10},
+        "11": {**following, "from_version": 10, "to_version": 11},
+    }
+    entry["current_version"] = 11
+    publication.publish_feed()
+
+
+def test_fresh_install_starts_from_routine_checkpoint_base(
+    tmp_path: Path,
+    publication: PublishedCatalog,
+) -> None:
+    _publish_routine_checkpoint(publication)
+
+    catalog = CatalogV2Downloader.install(
+        "pokemon",
+        source="test",
+        include_metadata=True,
+        cache_dir=tmp_path,
+        feed_url=FEED_URL,
+    ).load()
+
+    assert catalog.version == 11
+    assert any("version/10/base" in url for url in publication.calls)
+    assert not any("version/1/delta-from-0" in url for url in publication.calls)
+
+
+def test_incremental_install_uses_routine_checkpoint_bridge(
+    tmp_path: Path,
+    publication: PublishedCatalog,
+) -> None:
+    entry = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]
+    entry["base"]["version"] = 9
+    entry["current_version"] = 9
+    entry["rows"] = entry["base"]["rows"]
+    entry["updates"] = {}
+    publication.publish_feed()
+    CatalogV2Downloader.install(
+        "pokemon",
+        source="test",
+        include_metadata=True,
+        cache_dir=tmp_path,
+        feed_url=FEED_URL,
+    )
+
+    publication.feed = publication._build_feed()
+    _publish_routine_checkpoint(publication)
+    publication.calls.clear()
+    catalog = CatalogV2Downloader.install(
+        "pokemon",
+        source="test",
+        include_metadata=True,
+        cache_dir=tmp_path,
+        feed_url=FEED_URL,
+    ).load()
+
+    assert catalog.version == 11
+    assert any("version/1/delta-from-0" in url for url in publication.calls)
+    assert any("version/2/delta-from-1" in url for url in publication.calls)
+    assert not any("version/10/base" in url for url in publication.calls)
+
+
+def test_metadata_upgrade_replays_from_checkpoint_base_not_bridge(
+    tmp_path: Path,
+    publication: PublishedCatalog,
+) -> None:
+    _publish_routine_checkpoint(publication)
+    CatalogV2Downloader.install(
+        "pokemon",
+        source="test",
+        include_metadata=False,
+        cache_dir=tmp_path,
+        feed_url=FEED_URL,
+    )
+    publication.calls.clear()
+
+    catalog = CatalogV2Downloader.install(
+        "pokemon",
+        source="test",
+        include_metadata=True,
+        cache_dir=tmp_path,
+        feed_url=FEED_URL,
+    ).load()
+
+    assert catalog.version == 11
+    assert catalog.records[1].metadata == {
+        "layout": "art_series",
+        "name": "Gamma",
+        "promo": True,
+    }
+    assert any("version/10/base/records" in url for url in publication.calls)
+    assert not any("version/1/delta-from-0" in url for url in publication.calls)
+
+
 def test_metadata_upgrade_reuses_current_embeddings(
     tmp_path: Path,
     publication: PublishedCatalog,
