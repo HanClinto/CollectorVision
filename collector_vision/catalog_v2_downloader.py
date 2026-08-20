@@ -579,19 +579,19 @@ def _update_chain(
 
 def _route_start_version(entry: dict[str, Any]) -> int:
     base_version = entry["base"]["version"]
-    bridge = entry["updates"].get(str(base_version))
-    if bridge is None:
+    current_version = entry["current_version"]
+    updates = entry["updates"]
+    if base_version > current_version:
+        raise CatalogV2Error("catalog current_version is not reachable from its base version")
+    if not updates:
+        if base_version != current_version:
+            raise CatalogV2Error("catalog feed is missing updates after its base version")
         return base_version
-    if (
-        base_version == 0
-        or bridge["from_version"] != base_version - 1
-        or bridge["to_version"] != base_version
-    ):
-        raise CatalogV2Error(
-            f"catalog update to version {base_version} is not an "
-            "exact-predecessor checkpoint bridge"
-        )
-    return base_version - 1
+    first_version = min(int(version) for version in updates)
+    route_start = updates[str(first_version)]["from_version"]
+    if route_start > base_version:
+        raise CatalogV2Error("catalog retained update route does not connect its base")
+    return route_start
 
 
 def _download_base(selection: _Selection, *, include_metadata: bool) -> CatalogV2:

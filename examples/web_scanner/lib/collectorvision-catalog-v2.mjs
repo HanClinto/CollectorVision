@@ -2,10 +2,10 @@
 //
 // The only document a normal client needs is the moving feed
 // (`catalog-feed-v2.json`). It nests catalogs under immutable embedding
-// families and advertises the newest usable base plus each subsequent
-// exact-predecessor update through `current_version`. There are no release
-// tags, manifests, or per-release indexes: every asset URL, size, and
-// SHA-256 in the feed is authoritative on its own.
+// families and advertises the newest usable base plus a retained route of
+// exact-predecessor updates ending at `current_version`. The route may begin
+// before the base so recent cached clients can cross a checkpoint without
+// downloading it. Every asset URL, size, and SHA-256 is authoritative.
 
 const DEFAULT_FEED_URL =
   "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-feed-v2.json";
@@ -795,44 +795,43 @@ function finalizeResolution({ familyKey, localKey, family, catalog }) {
 }
 
 function buildVersionChain(catalog) {
-  const versions = [];
-  for (let version = catalog.base.version; version <= catalog.current_version; version += 1) {
-    versions.push(version);
-  }
-  if (versions.length === 0 || versions.at(-1) !== catalog.current_version) {
+  if (catalog.base.version > catalog.current_version) {
     throw new CatalogV2Error("catalog current_version is not reachable from its base version");
   }
-  for (let index = 1; index < versions.length; index += 1) {
-    const toVersion = versions[index];
-    const update = catalog.updates?.[String(toVersion)];
-    if (!isObject(update)) {
-      throw new CatalogV2Error(`catalog is missing an update to version ${toVersion}`);
+  const updateEntries = Object.entries(catalog.updates ?? {})
+    .map(([key, update]) => {
+      if (!/^(0|[1-9]\d*)$/.test(key) || !isObject(update) || update.to_version !== Number(key)) {
+        throw new CatalogV2Error(`catalog has an invalid update entry for version ${JSON.stringify(key)}`);
+      }
+      if (
+        !Number.isInteger(update.from_version) ||
+        update.from_version < 0 ||
+        update.to_version !== update.from_version + 1
+      ) {
+        throw new CatalogV2Error(`catalog update to version ${key} is not an exact-predecessor delta`);
+      }
+      validateUpdateEntry(update, update.to_version);
+      return update;
+    })
+    .sort((left, right) => left.to_version - right.to_version);
+  if (updateEntries.length === 0) {
+    if (catalog.base.version !== catalog.current_version) {
+      throw new CatalogV2Error("catalog is missing updates after its base version");
     }
-    if (update.from_version !== versions[index - 1] || update.to_version !== toVersion) {
-      throw new CatalogV2Error(`catalog update to version ${toVersion} is not an exact-predecessor delta`);
-    }
-    validateUpdateEntry(update, toVersion);
+    return [catalog.base.version];
   }
-  const bridge = catalog.updates?.[String(catalog.base.version)];
-  if (bridge !== undefined) {
-    if (
-      catalog.base.version === 0 ||
-      !isObject(bridge) ||
-      bridge.from_version !== catalog.base.version - 1 ||
-      bridge.to_version !== catalog.base.version
-    ) {
-      throw new CatalogV2Error(
-        `catalog update to version ${catalog.base.version} is not an exact-predecessor checkpoint bridge`,
-      );
+  for (let index = 1; index < updateEntries.length; index += 1) {
+    if (updateEntries[index].from_version !== updateEntries[index - 1].to_version) {
+      throw new CatalogV2Error("catalog retained update route is not contiguous");
     }
-    validateUpdateEntry(bridge, catalog.base.version);
-    versions.unshift(catalog.base.version - 1);
   }
-  const expectedKeys = new Set(versions.slice(1).map(String));
-  for (const key of Object.keys(catalog.updates ?? {})) {
-    if (!expectedKeys.has(key)) {
-      throw new CatalogV2Error(`catalog has an unexpected update entry for version ${JSON.stringify(key)}`);
-    }
+  const routeStart = updateEntries[0].from_version;
+  if (routeStart > catalog.base.version || updateEntries.at(-1).to_version !== catalog.current_version) {
+    throw new CatalogV2Error("catalog retained update route does not connect its base to current_version");
+  }
+  const versions = [];
+  for (let version = routeStart; version <= catalog.current_version; version += 1) {
+    versions.push(version);
   }
   let runningRows = catalog.base.rows;
   for (let toVersion = catalog.base.version + 1; toVersion <= catalog.current_version; toVersion += 1) {

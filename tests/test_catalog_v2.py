@@ -567,6 +567,54 @@ def _publish_routine_checkpoint(publication: PublishedCatalog) -> None:
     publication.publish_feed()
 
 
+def _publish_retained_checkpoint_route(publication: PublishedCatalog) -> None:
+    entry = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]
+    first = deepcopy(entry["updates"]["1"])
+    second = deepcopy(entry["updates"]["2"])
+    entry["base"] = {
+        "version": 10,
+        "rows": 2,
+        "source_updated_at": second["source_updated_at"],
+        "assets": {
+            "records": publication.jsonl(
+                "demo/version/10/base/records.jsonl.gz",
+                [
+                    {
+                        "id": "b",
+                        "identifiers": {"scryfall_oracle": "oracle-b2"},
+                        "face_index": 1,
+                        "finishes": ["foil"],
+                        "metadata": {
+                            "layout": "transform",
+                            "name": "Beta 2",
+                            "promo": False,
+                        },
+                    },
+                    {
+                        "id": "c",
+                        "identifiers": {"scryfall_oracle": "oracle-c"},
+                        "metadata": {
+                            "layout": "art_series",
+                            "name": "Gamma",
+                            "promo": True,
+                        },
+                    },
+                ],
+            ),
+            "embeddings": publication.asset(
+                "demo/version/10/base/embeddings.f16.gz",
+                np.asarray([[0.5, 0.5], [1.0, 0.0]], dtype="<f2").tobytes(),
+            ),
+        },
+    }
+    entry["updates"] = {
+        "9": {**first, "from_version": 8, "to_version": 9},
+        "10": {**second, "from_version": 9, "to_version": 10},
+    }
+    entry["current_version"] = 10
+    publication.publish_feed()
+
+
 def test_fresh_install_starts_from_routine_checkpoint_base(
     tmp_path: Path,
     publication: PublishedCatalog,
@@ -616,6 +664,41 @@ def test_incremental_install_uses_routine_checkpoint_bridge(
     ).load()
 
     assert catalog.version == 11
+    assert any("version/1/delta-from-0" in url for url in publication.calls)
+    assert any("version/2/delta-from-1" in url for url in publication.calls)
+    assert not any("version/10/base" in url for url in publication.calls)
+
+
+def test_incremental_install_uses_multiple_retained_pre_base_deltas(
+    tmp_path: Path,
+    publication: PublishedCatalog,
+) -> None:
+    entry = publication.feed["families"]["milo1"]["catalogs"]["test/demo"]
+    entry["base"]["version"] = 8
+    entry["current_version"] = 8
+    entry["rows"] = entry["base"]["rows"]
+    entry["updates"] = {}
+    publication.publish_feed()
+    CatalogV2Downloader.install(
+        "pokemon",
+        source="test",
+        include_metadata=True,
+        cache_dir=tmp_path,
+        feed_url=FEED_URL,
+    )
+
+    publication.feed = publication._build_feed()
+    _publish_retained_checkpoint_route(publication)
+    publication.calls.clear()
+    catalog = CatalogV2Downloader.install(
+        "pokemon",
+        source="test",
+        include_metadata=True,
+        cache_dir=tmp_path,
+        feed_url=FEED_URL,
+    ).load()
+
+    assert catalog.version == 10
     assert any("version/1/delta-from-0" in url for url in publication.calls)
     assert any("version/2/delta-from-1" in url for url in publication.calls)
     assert not any("version/10/base" in url for url in publication.calls)
