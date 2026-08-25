@@ -425,8 +425,8 @@ async function fetchWithProgress(url, responseType, expectedTotal, onProgress) {
   return await blob.arrayBuffer();
 }
 
-async function fetchJsonCached(url, version, expectedTotal, onProgress) {
-  const key = `${version}:${url}:json`;
+async function fetchJsonCached(url, version, expectedTotal, onProgress, cacheIdentity = url) {
+  const key = `${version}:${cacheIdentity}:json`;
   const cached = await readCachedAsset(key);
   if (cached) {
     onProgress?.(1, 1, 1, true);
@@ -439,8 +439,8 @@ async function fetchJsonCached(url, version, expectedTotal, onProgress) {
   return json;
 }
 
-async function fetchBufferCached(url, version, expectedTotal, onProgress) {
-  const key = `${version}:${url}:buffer`;
+async function fetchBufferCached(url, version, expectedTotal, onProgress, cacheIdentity = url) {
+  const key = `${version}:${cacheIdentity}:buffer`;
   const cached = await readCachedAsset(key);
   if (cached) {
     onProgress?.(1, cached.byteLength ?? 1, cached.byteLength ?? 1, true);
@@ -613,12 +613,14 @@ class WorkerRuntime {
       detectorVersion,
       modelSizes[this.detectorConfig.modelKey],
       (ratio, loaded, total, cached) => onStage?.("detector", ratio, loaded, total, cached),
+      `model:${this.detectorConfig.modelKey}`,
     );
     const embedderBuffer = await fetchBufferCached(
       `${this.assetBasePath}/${this.manifest.models.milo}`,
       embedderVersion,
       modelSizes.milo,
       (ratio, loaded, total, cached) => onStage?.("embedder", ratio, loaded, total, cached),
+      "model:milo",
     );
 
     // Use as many threads as the device has cores, capped at 4.
@@ -659,42 +661,71 @@ class WorkerRuntime {
       { key: "card_ids", size: catalogAssetSizes.card_ids },
       ...(secondarySource ? [{ key: "oracle_ids", size: catalogAssetSizes.oracle_ids }] : []),
     ];
-    const catalogTotal = catalogParts.reduce(
+    const knownCatalogTotal = catalogParts.every(
+      (part) => Number.isSafeInteger(part.size) && part.size > 0,
+    );
+    const catalogTotal = knownCatalogTotal ? catalogParts.reduce(
       (total, part) => total + (Number.isSafeInteger(part.size) && part.size > 0 ? part.size : 0),
       0,
-    );
-    const reportCatalogProgress = (partIndex, loaded, total, cached) => {
-      const completed = catalogParts.slice(0, partIndex).reduce(
-        (sum, part) => sum + (Number.isSafeInteger(part.size) && part.size > 0 ? part.size : 0),
-        0,
-      );
+    ) : 0;
+    const observedPartSizes = new Map();
+    const partSize = (partIndex) => {
+      const declared = catalogParts[partIndex]?.size;
+      if (Number.isSafeInteger(declared) && declared > 0) return declared;
+      return observedPartSizes.get(partIndex) ?? 0;
+    };
+    const completedCatalogBytes = (partIndex) => {
+      let completed = 0;
+      for (let i = 0; i < partIndex; i += 1) {
+        completed += partSize(i);
+      }
+      return completed;
+    };
+    const reportCatalogProgress = (partIndex, ratio, loaded, total, cached) => {
+      const safeLoaded = Number.isFinite(loaded) && loaded > 0 ? loaded : 0;
+      const safeTotal = Number.isFinite(total) && total > 0 ? total : 0;
+      const completed = completedCatalogBytes(partIndex);
+      const observedTotal = Math.max(partSize(partIndex), safeTotal, safeLoaded);
+      if ((cached || ratio >= 1) && observedTotal > 0) {
+        observedPartSizes.set(partIndex, observedTotal);
+      }
       const expected = catalogParts[partIndex].size;
       if (catalogTotal > 0 && Number.isSafeInteger(expected) && expected > 0) {
-        const current = cached ? expected : Math.min(loaded, expected);
+        const current = cached ? expected : Math.min(safeLoaded, expected);
         const aggregate = completed + current;
         onStage?.("catalog", aggregate / catalogTotal, aggregate, catalogTotal, false);
         return;
       }
-      onStage?.("catalog", total > 0 ? loaded / total : 0, loaded, total, cached);
+      const partRatio = cached ? 1 : Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0));
+      onStage?.(
+        "catalog",
+        (partIndex + partRatio) / catalogParts.length,
+        completed + safeLoaded,
+        0,
+        cached,
+      );
     };
     const embeddingBuffer = await fetchBufferCached(
       `${this.assetBasePath}/${this.manifest.catalog.embeddings}`,
       version,
       catalogAssetSizes.embeddings,
-      (ratio, loaded, total, cached) => reportCatalogProgress(0, loaded, total, cached),
+      (ratio, loaded, total, cached) => reportCatalogProgress(0, ratio, loaded, total, cached),
+      `catalog:${this.manifest.catalog.embeddings}`,
     );
     const ids = await fetchJsonCached(
       `${this.assetBasePath}/${this.manifest.catalog.card_ids}`,
       version,
       catalogAssetSizes.card_ids,
-      (ratio, loaded, total, cached) => reportCatalogProgress(1, loaded, total, cached),
+      (ratio, loaded, total, cached) => reportCatalogProgress(1, ratio, loaded, total, cached),
+      `catalog:${this.manifest.catalog.card_ids}`,
     );
     const secondaryIds = secondarySource
       ? await fetchJsonCached(
         `${this.assetBasePath}/${secondarySource.assetPath}`,
         version,
         catalogAssetSizes.oracle_ids,
-        (ratio, loaded, total, cached) => reportCatalogProgress(2, loaded, total, cached),
+        (ratio, loaded, total, cached) => reportCatalogProgress(2, ratio, loaded, total, cached),
+        `catalog:${secondarySource.assetPath}`,
       )
       : null;
     // Keep the catalog in its packed float16 form.  Expanding the full MTG
