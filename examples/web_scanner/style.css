@@ -192,9 +192,11 @@ body[data-loading="true"] .loading-screen {
 }
 
 .icon-button--gear {
-  font-size: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   line-height: 1;
-  padding: 0.35rem 0.5rem;
+  padding: 0.5rem 0.65rem;
 }
 
 .camera-shell {

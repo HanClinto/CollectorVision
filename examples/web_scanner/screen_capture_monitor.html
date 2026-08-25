@@ -57,11 +57,12 @@
               <div><dt id="version-detector-label">Detector</dt><dd id="version-cornelius">loading…</dd></div>
               <div><dt>Milo</dt><dd id="version-milo">loading…</dd></div>
               <div><dt>Catalog</dt><dd id="version-catalog">loading…</dd></div>
+              <div><dt>Channel</dt><dd id="version-channel">stable</dd></div>
             </dl>
           </aside>
           <nav class="hero-links" aria-label="Related pages">
-            <a href="./">Scanner</a>
-            <a href="./applet_example.html">Playground</a>
+            <a data-preserve-channel href="./">Scanner</a>
+            <a data-preserve-channel href="./applet_example.html">Playground</a>
             <a href="./screen_capture_overlay.html" target="_blank" rel="noopener noreferrer">Overlay</a>
           </nav>
         </div>
@@ -150,7 +151,7 @@
               <input id="scan-interval" type="range" min="0" max="2500" step="50" value="500" />
             </label>
             <label>
-              Corner threshold
+              Minimum corner sharpness
               <input id="corner-threshold" type="number" min="0" max="0.2" step="0.01" value="0.02" />
               <span class="threshold-meter" aria-live="polite">
                 <span class="threshold-meter__fill" id="corner-signal-fill"></span>

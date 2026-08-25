@@ -30,6 +30,16 @@ function resolveAssetChannel() {
 
 const assetChannel = resolveAssetChannel();
 const assetBasePath = ASSET_CHANNELS[assetChannel];
+document.getElementById("asset-channel").textContent = `${assetChannel} assets`;
+for (const link of document.querySelectorAll("a[data-preserve-channel]")) {
+  const url = new URL(link.href, location.href);
+  if (assetChannel === "testing") {
+    url.searchParams.set("channel", assetChannel);
+  } else {
+    url.searchParams.delete("channel");
+  }
+  link.href = url.href;
+}
 
 const PRESETS = [
   {

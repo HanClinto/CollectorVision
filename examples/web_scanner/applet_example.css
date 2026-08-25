@@ -32,6 +32,24 @@ h2 {
 
 p { line-height: 1.55; }
 
+.playground-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.playground-heading nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.playground-heading nav a {
+  color: inherit;
+  font-weight: 700;
+}
+
 code {
   border-radius: 0.35rem;
   padding: 0.1rem 0.3rem;

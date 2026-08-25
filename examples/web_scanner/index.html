@@ -112,8 +112,8 @@
             <button class="icon-button icon-button--debug" id="debug-toggle" type="button" aria-label="Show debug panel" aria-expanded="false">
               Debug
             </button>
-            <button class="icon-button icon-button--gear" id="settings-toggle" type="button" aria-label="Toggle settings">
-              ⚙
+            <button class="icon-button icon-button--gear" id="settings-toggle" type="button" aria-label="Open scanner settings">
+              <span aria-hidden="true">⚙</span> Settings
             </button>
           </div>
         </header>
@@ -231,7 +231,8 @@
               </div>
             </header>
             <p class="capture-hint">Watch a shared tab, window, or screen, crop to a region of interest, and emit card events for overlays or CSV/JSONL export.</p>
-            <a class="action-button action-button--block" href="./screen_capture_monitor.html">▶ Open Screen Capture Monitor</a>
+            <a class="action-button action-button--block" data-preserve-channel href="./screen_capture_monitor.html">▶ Open Screen Capture Monitor</a>
+            <a class="action-button action-button--block" data-preserve-channel href="./applet_example.html">▶ Open Scanner Playground</a>
           </section>
 
           <section class="panel panel--nested">

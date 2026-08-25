@@ -39,6 +39,7 @@ const els = {
   versionCornelius: document.getElementById("version-cornelius"),
   versionMilo: document.getElementById("version-milo"),
   versionCatalog: document.getElementById("version-catalog"),
+  versionChannel: document.getElementById("version-channel"),
   roiBox: document.getElementById("roi-box"),
   stageStatus: document.getElementById("stage-status"),
   workerStatus: document.getElementById("worker-status"),
@@ -107,6 +108,17 @@ function resolveAssetChannel() {
 init();
 
 async function init() {
+  const assetChannel = resolveAssetChannel();
+  els.versionChannel.textContent = assetChannel;
+  for (const link of document.querySelectorAll("a[data-preserve-channel]")) {
+    const url = new URL(link.href, location.href);
+    if (assetChannel === "testing") {
+      url.searchParams.set("channel", assetChannel);
+    } else {
+      url.searchParams.delete("channel");
+    }
+    link.href = url.href;
+  }
   applySettingsToInputs();
   applyRoiToBox();
   bindUi();

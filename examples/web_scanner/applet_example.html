@@ -47,7 +47,13 @@
     <div id="effects-layer" aria-hidden="true"></div>
     <main>
       <header>
-        <p class="eyebrow">Candidate API</p>
+        <div class="playground-heading">
+          <p class="eyebrow">Candidate API · <span id="asset-channel">stable assets</span></p>
+          <nav aria-label="Related pages">
+            <a data-preserve-channel href="./">Scanner</a>
+            <a data-preserve-channel href="./screen_capture_monitor.html">Screen capture monitor</a>
+          </nav>
+        </div>
         <h1>Scanner Playground</h1>
         <p>Try preset card handlers, edit the JavaScript, and see how the applet can fit into your own page. This playground keeps everything local in your browser: apply a handler, then scan a card. Need to disable cross-origin isolation for debugging? Open with <code>?coi=0</code>.</p>
       </header>
@@ -59,7 +65,7 @@
             <summary>Scan settings</summary>
             <div class="scan-settings-grid">
               <label class="scan-settings-mic" for="scan-corner-threshold">
-                <span>Corner threshold <span id="scan-corner-threshold-label">0.02</span></span>
+                <span>Minimum corner sharpness <span id="scan-corner-threshold-label">0.02</span></span>
                 <input id="scan-corner-threshold" type="range" min="0" max="0.1" step="0.01" />
                 <span class="scan-settings-meter" aria-hidden="true">
                   <span id="scan-corner-signal-fill" class="scan-settings-meter__fill"></span>

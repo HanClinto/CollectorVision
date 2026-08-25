@@ -2050,6 +2050,18 @@ function resolveAssetChannel() {
   return Object.hasOwn(ASSET_CHANNELS, requested) ? requested : "stable";
 }
 
+function preserveAssetChannel(channel) {
+  for (const link of document.querySelectorAll("a[data-preserve-channel]")) {
+    const url = new URL(link.href, location.href);
+    if (channel === "testing") {
+      url.searchParams.set("channel", channel);
+    } else {
+      url.searchParams.delete("channel");
+    }
+    link.href = url.href;
+  }
+}
+
 function resolveCatalogMode() {
   const requested = new URLSearchParams(location.search).get("catalog") ?? "v2";
   if (requested !== "v1" && requested !== "v2") {
@@ -2156,6 +2168,7 @@ async function boot() {
   // Load the manifest on the main thread first — it drives both the loading
   // screen text and the worker init message.
   const channel = resolveAssetChannel();
+  preserveAssetChannel(channel);
   const catalogMode = resolveCatalogMode();
   const { assetBasePath, manifest } = await loadManifest(channel);
   const catalogLimit = getCatalogLimitFromQuery();
