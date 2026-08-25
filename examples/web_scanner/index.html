@@ -107,7 +107,10 @@
     <div class="app-shell">
       <main class="page">
         <header class="app-bar">
-          <h1 class="app-bar__title">CollectorVision</h1>
+          <div class="app-bar__identity">
+            <h1 class="app-bar__title">CollectorVision</h1>
+            <a class="channel-badge" id="channel-switch" href="./" aria-label="Switch asset channel">Stable</a>
+          </div>
           <div class="app-bar__actions">
             <button class="icon-button icon-button--debug" id="debug-toggle" type="button" aria-label="Show debug panel" aria-expanded="false">
               Debug
@@ -312,6 +315,10 @@
           </section>
 
           <dl class="settings-grid">
+            <div>
+              <dt>Asset channel</dt>
+              <dd id="settings-channel">—</dd>
+            </div>
             <div>
               <dt>Build</dt>
               <dd id="settings-build">—</dd>

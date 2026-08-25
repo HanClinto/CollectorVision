@@ -2046,8 +2046,38 @@ function createScannerLoop(
 }
 
 function resolveAssetChannel() {
-  const requested = new URLSearchParams(location.search).get("channel") ?? "stable";
-  return Object.hasOwn(ASSET_CHANNELS, requested) ? requested : "stable";
+  const requested = (
+    new URLSearchParams(location.search).get("channel") ?? "stable"
+  ).trim().toLowerCase();
+  if (!Object.hasOwn(ASSET_CHANNELS, requested)) {
+    throw new Error(
+      `Unknown asset channel ${requested}. Expected one of: ${Object.keys(ASSET_CHANNELS).join(", ")}.`,
+    );
+  }
+  return requested;
+}
+
+function channelUrl(channel) {
+  const params = new URLSearchParams(location.search);
+  params.delete("v");
+  if (channel === "stable") {
+    params.delete("channel");
+  } else {
+    params.set("channel", channel);
+  }
+  const query = params.toString();
+  return `${location.pathname}${query ? `?${query}` : ""}${location.hash}`;
+}
+
+function setupChannelSwitch(channel, detectorFamily) {
+  const nextChannel = channel === "stable" ? "testing" : "stable";
+  const switcher = document.getElementById("channel-switch");
+  switcher.textContent = channel;
+  switcher.href = channelUrl(nextChannel);
+  switcher.title = `Using ${detectorFamily}; switch to ${nextChannel} assets`;
+  switcher.setAttribute("aria-label", `Using ${channel} assets; switch to ${nextChannel}`);
+  switcher.classList.toggle("channel-badge--testing", channel === "testing");
+  setText("settings-channel", `${channel} · ${detectorFamily}`);
 }
 
 function resolveCatalogMode() {
@@ -2175,6 +2205,7 @@ async function boot() {
     debugLog.warn("debug catalog limit active", `${catalogLimit} rows`);
   }
   const detectorFamily = manifest.detector?.family ?? "cornelius";
+  setupChannelSwitch(channel, detectorFamily);
   setText("settings-detector-name", `Detector (${detectorFamily})`);
   setText("settings-detector-hash", modelVersionLabel(detectorModelKey(manifest), manifest));
   setText("settings-milo-hash", modelVersionLabel("milo", manifest));

@@ -169,6 +169,34 @@ body[data-loading="true"] .loading-screen {
   font-weight: 600;
 }
 
+.app-bar__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.channel-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  color: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.channel-badge--testing {
+  border-color: #ffd166;
+  background: #ffd166;
+  color: #332600;
+}
+
 .app-bar__actions {
   display: flex;
   gap: 0.55rem;

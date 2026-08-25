@@ -20,6 +20,9 @@ Append `?catalog=v1` to use the prepared static catalog bundle. This is the
 compatibility path, not the default. `?channel=testing` selects the separately
 published testing model bundle.
 
+The active channel is shown next to the app title and links to the other channel,
+making stable/testing detector comparisons explicit.
+
 The standalone [`catalog_v2_example.html`](./catalog_v2_example.html) loads any
 published game catalog and displays its first record.
 
