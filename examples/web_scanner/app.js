@@ -2253,7 +2253,11 @@ async function boot() {
   loadingScreen.step("dewarp", "active", "Queued");
   loadingScreen.step("detector", "active", "Queued");
   loadingScreen.step("embedder", "active", "Queued");
-  loadingScreen.step("catalog", "active", "Waiting for models");
+  loadingScreen.step(
+    "catalog",
+    "active",
+    catalogMode === "v2" ? "Downloading and indexing" : "Waiting for models",
+  );
   setText("models-status", "Loading models");
 
   scannerWorker.postMessage({
