@@ -244,6 +244,19 @@ tr:last-child td { border-bottom: 0; }
   transform: translateX(-1px);
 }
 
+.scan-settings-meter__peak {
+  position: absolute;
+  top: 0.05rem;
+  bottom: 0.05rem;
+  left: 0;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.7);
+  opacity: 0;
+  transform: translateX(-1px);
+  transition: left 80ms linear, opacity 80ms linear;
+}
+
 .scan-settings-meter-value {
   font-size: 0.76rem;
   color: #81796f;

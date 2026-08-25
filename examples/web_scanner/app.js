@@ -1583,20 +1583,41 @@ function setupCornerConfidenceSlider(scannerWorker = null) {
   slider.addEventListener("input", update);
 }
 
+const thresholdMeterPeaks = new Map();
+
 function updateThresholdMeter(name, threshold, current, maximum) {
   const fill = document.getElementById(`${name}-signal-fill`);
+  const peakMarker = document.getElementById(`${name}-signal-peak`);
   const marker = document.getElementById(`${name}-signal-threshold`);
   const value = document.getElementById(`${name}-signal-value`);
-  if (!fill || !marker || !value) return;
+  if (!fill || !peakMarker || !marker || !value) return;
 
   marker.style.left = `${(Math.min(1, Math.max(0, threshold / maximum)) * 100).toFixed(1)}%`;
-  if (!Number.isFinite(current)) {
-    fill.style.width = "0%";
-    value.textContent = "Current —";
-    return;
+  const now = performance.now();
+  const signal = Number.isFinite(current) ? Math.min(maximum, Math.max(0, current)) : 0;
+  const previous = thresholdMeterPeaks.get(name) ?? {
+    value: 0,
+    holdUntil: 0,
+    updatedAt: now,
+  };
+  let peak = previous.value;
+  let holdUntil = previous.holdUntil;
+  if (signal >= peak) {
+    peak = signal;
+    holdUntil = now + 1200;
+  } else if (now > holdUntil) {
+    peak = Math.max(signal, peak - maximum * ((now - previous.updatedAt) / 2200));
   }
-  fill.style.width = `${(Math.min(1, Math.max(0, current / maximum)) * 100).toFixed(1)}%`;
-  value.textContent = `Current ${current.toFixed(3)}`;
+  thresholdMeterPeaks.set(name, { value: peak, holdUntil, updatedAt: now });
+
+  fill.style.width = `${(signal / maximum * 100).toFixed(1)}%`;
+  peakMarker.style.left = `${(peak / maximum * 100).toFixed(1)}%`;
+  peakMarker.style.opacity = peak > 0 ? "1" : "0";
+  value.textContent = Number.isFinite(current)
+    ? `Current ${current.toFixed(3)} · peak ${peak.toFixed(3)}`
+    : peak > 0
+    ? `Current — · peak ${peak.toFixed(3)}`
+    : "Current —";
 }
 
 function setupMinMatchesSlider() {
