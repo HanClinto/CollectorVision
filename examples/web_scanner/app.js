@@ -31,6 +31,7 @@ const ROTATION_INVARIANT_KEY = "cv_rotation_invariant_enabled";
 const MIN_MATCHES_DEFAULT = 2;
 const MATCHES_KEY = "cv_min_matches";
 const MIN_CORNER_CONFIDENCE_DEFAULT = 0.02;
+const MAX_CORNER_CONFIDENCE = 0.20;
 const SCAN_BUFFER_SIZE = 5;
 const SCANS_KEY = "cv_scans";
 const PERF_OVERLAY_KEY = "cv_perf_overlay_enabled";
@@ -1516,7 +1517,9 @@ function getScanIntervalMs() {
 
 function getMinCornerConfidence() {
   const stored = Number.parseFloat(localStorage.getItem(CORNER_CONFIDENCE_KEY));
-  return Number.isFinite(stored) ? Math.min(0.1, Math.max(0, stored)) : MIN_CORNER_CONFIDENCE_DEFAULT;
+  return Number.isFinite(stored)
+    ? Math.min(MAX_CORNER_CONFIDENCE, Math.max(0, stored))
+    : MIN_CORNER_CONFIDENCE_DEFAULT;
 }
 
 function getMinMatches() {
@@ -1574,12 +1577,12 @@ function setupCornerConfidenceSlider(scannerWorker = null) {
     label.textContent = value.toFixed(2);
     localStorage.setItem(CORNER_CONFIDENCE_KEY, value);
     scannerWorker?.postMessage({ type: "config", minCornerConfidence: value });
-    updateThresholdMeter("corner-confidence", value, null, 0.1);
+    updateThresholdMeter("corner-confidence", value, null, MAX_CORNER_CONFIDENCE);
   };
 
   slider.value = getMinCornerConfidence();
   label.textContent = getMinCornerConfidence().toFixed(2);
-  updateThresholdMeter("corner-confidence", getMinCornerConfidence(), null, 0.1);
+  updateThresholdMeter("corner-confidence", getMinCornerConfidence(), null, MAX_CORNER_CONFIDENCE);
   slider.addEventListener("input", update);
 }
 
@@ -1935,7 +1938,7 @@ function createScannerLoop(
     diag.set("diag-detector-input", data.detectorInput ?? "—");
     diag.set("diag-raw-corners", data.rawCorners ?? "—");
     diag.set("diag-sharpness", `${data.sharpness?.toFixed(3) ?? "—"} (card ${data.cardPresent ? "yes" : "no"})`);
-    updateThresholdMeter("corner-confidence", getMinCornerConfidence(), data.sharpness, 0.1);
+    updateThresholdMeter("corner-confidence", getMinCornerConfidence(), data.sharpness, MAX_CORNER_CONFIDENCE);
     updateThresholdMeter("match-score", getMinMatchScore(), data.score, 1);
 
     if (data.timing) {
@@ -2050,6 +2053,35 @@ function resolveAssetChannel() {
   return Object.hasOwn(ASSET_CHANNELS, requested) ? requested : "stable";
 }
 
+function channelUrl(path, channel) {
+  const url = new URL(path, location.href);
+  if (channel === "stable") {
+    url.searchParams.delete("channel");
+  } else {
+    url.searchParams.set("channel", channel);
+  }
+  return url.href;
+}
+
+function setupAssetChannelUi(channel) {
+  const label = channel === "testing" ? "testing assets" : "stable assets";
+  setText("asset-channel-pill", label);
+  setText("asset-channel-current", channel);
+
+  const switchLink = document.getElementById("asset-channel-switch");
+  if (switchLink) {
+    const nextChannel = channel === "testing" ? "stable" : "testing";
+    switchLink.href = channelUrl(location.href, nextChannel);
+    switchLink.textContent = `Switch to ${nextChannel} assets`;
+  }
+
+  document.querySelectorAll("[data-preserve-channel]").forEach((link) => {
+    const rawHref = link.getAttribute("href");
+    if (!rawHref) return;
+    link.href = channelUrl(rawHref, channel);
+  });
+}
+
 function resolveCatalogMode() {
   const requested = new URLSearchParams(location.search).get("catalog") ?? "v2";
   if (requested !== "v1" && requested !== "v2") {
@@ -2156,6 +2188,7 @@ async function boot() {
   // Load the manifest on the main thread first — it drives both the loading
   // screen text and the worker init message.
   const channel = resolveAssetChannel();
+  setupAssetChannelUi(channel);
   const catalogMode = resolveCatalogMode();
   const { assetBasePath, manifest } = await loadManifest(channel);
   const catalogLimit = getCatalogLimitFromQuery();

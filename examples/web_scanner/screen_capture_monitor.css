@@ -39,6 +39,7 @@ button {
 
 button.secondary,
 .hero-links a,
+.channel-chip,
 .button-link {
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.08);
@@ -119,7 +120,8 @@ code {
   gap: 0.5rem;
 }
 
-.hero-links a {
+.hero-links a,
+.channel-chip {
   min-height: 2.55rem;
   display: inline-flex;
   align-items: center;

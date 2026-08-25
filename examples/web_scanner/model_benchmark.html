@@ -129,8 +129,19 @@
         }
       }
 
+      const ASSET_CHANNELS = {
+        stable: "./assets",
+        testing: "./testing/assets",
+      };
+
+      function resolveAssetChannel() {
+        const requested = new URLSearchParams(location.search).get("channel") ?? "stable";
+        return Object.hasOwn(ASSET_CHANNELS, requested) ? requested : "stable";
+      }
+
       async function loadModels() {
-        const response = await fetch("./assets/manifest.json", { cache: "no-store" });
+        const assetBasePath = ASSET_CHANNELS[resolveAssetChannel()];
+        const response = await fetch(`${assetBasePath}/manifest.json`, { cache: "no-store" });
         if (!response.ok) {
           throw new Error(`Failed to load asset manifest: ${response.status}`);
         }
@@ -146,13 +157,13 @@
           {
             name: detectorFamily,
             version: versions[detectorKey] ?? "unknown",
-            path: `./assets/${manifest.models[detectorKey]}`,
+            path: `${assetBasePath}/${manifest.models[detectorKey]}`,
             shape: [1, 3, detectorSize, detectorSize],
           },
           {
             name: "milo",
             version: versions.milo ?? "unknown",
-            path: `./assets/${manifest.models.milo}`,
+            path: `${assetBasePath}/${manifest.models.milo}`,
             shape: [1, 3, 448, 448],
           },
         ];

@@ -104,9 +104,36 @@ function resolveAssetChannel() {
   return Object.hasOwn(ASSET_CHANNELS, requested) ? requested : "stable";
 }
 
+function channelUrl(path, channel) {
+  const url = new URL(path, location.href);
+  if (channel === "stable") {
+    url.searchParams.delete("channel");
+  } else {
+    url.searchParams.set("channel", channel);
+  }
+  return url.href;
+}
+
+function setupAssetChannelUi(channel) {
+  const current = document.getElementById("asset-channel-current");
+  const switchLink = document.getElementById("asset-channel-switch");
+  if (current) current.textContent = channel;
+  if (switchLink) {
+    const nextChannel = channel === "testing" ? "stable" : "testing";
+    switchLink.href = channelUrl(location.href, nextChannel);
+    switchLink.textContent = `Switch to ${nextChannel}`;
+  }
+  document.querySelectorAll("[data-preserve-channel]").forEach((link) => {
+    const rawHref = link.getAttribute("href");
+    if (!rawHref) return;
+    link.href = channelUrl(rawHref, channel);
+  });
+}
+
 init();
 
 async function init() {
+  setupAssetChannelUi(resolveAssetChannel());
   applySettingsToInputs();
   applyRoiToBox();
   bindUi();

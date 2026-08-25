@@ -107,7 +107,10 @@
     <div class="app-shell">
       <main class="page">
         <header class="app-bar">
-          <h1 class="app-bar__title">CollectorVision</h1>
+          <div>
+            <h1 class="app-bar__title">CollectorVision</h1>
+            <p class="channel-pill" id="asset-channel-pill">stable assets</p>
+          </div>
           <div class="app-bar__actions">
             <button class="icon-button icon-button--debug" id="debug-toggle" type="button" aria-label="Show debug panel" aria-expanded="false">
               Debug
@@ -177,6 +180,21 @@
             </a>
           </section>
 
+          <section class="panel panel--nested">
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Assets</p>
+                <h2>Asset Channel</h2>
+              </div>
+            </header>
+            <p class="capture-hint">
+              Current channel: <strong id="asset-channel-current">stable</strong>.
+              Use testing to try the latest detector/catalog bundle without changing the scanner code.
+            </p>
+            <a class="action-button action-button--block" id="asset-channel-switch" href="./">Switch channel</a>
+            <a class="action-button action-button--block" data-preserve-channel href="./applet_example.html">▶ Open Scanner Playground</a>
+          </section>
+
           <section class="panel panel--nested" id="webgpu-toggle-section" hidden>
             <header class="panel-header">
               <div>
@@ -231,7 +249,7 @@
               </div>
             </header>
             <p class="capture-hint">Watch a shared tab, window, or screen, crop to a region of interest, and emit card events for overlays or CSV/JSONL export.</p>
-            <a class="action-button action-button--block" href="./screen_capture_monitor.html">▶ Open Screen Capture Monitor</a>
+            <a class="action-button action-button--block" data-preserve-channel href="./screen_capture_monitor.html">▶ Open Screen Capture Monitor</a>
           </section>
 
           <section class="panel panel--nested">
@@ -242,15 +260,15 @@
               </div>
             </header>
             <p class="capture-hint">Runs the model benchmark and downloads a GitHub-ready Markdown report. WASM is recommended; WebGPU is experimental.</p>
-            <a class="action-button action-button--block" href="./model_benchmark.html?backend=wasm&amp;download=md">▶ Run WASM Benchmark</a>
-            <a class="action-button action-button--block" href="./model_benchmark.html?backend=webgpu&amp;download=md">▶ Run WebGPU Benchmark</a>
+            <a class="action-button action-button--block" data-preserve-channel href="./model_benchmark.html?backend=wasm&amp;download=md">▶ Run WASM Benchmark</a>
+            <a class="action-button action-button--block" data-preserve-channel href="./model_benchmark.html?backend=webgpu&amp;download=md">▶ Run WebGPU Benchmark</a>
           </section>
 
           <section class="panel panel--nested">
             <header class="panel-header">
               <div>
                 <p class="section-kicker">Recognition</p>
-                <h2>Match Threshold</h2>
+                <h2>Match &amp; Sharpness Thresholds</h2>
               </div>
             </header>
             <label class="slider-row" for="match-score-slider">
@@ -267,12 +285,12 @@
             <p class="threshold-meter__value" id="match-score-signal-value">Current —</p>
             <p class="capture-hint">Lower values accept weaker matches (more false positives); higher values require a stronger match. Default 0.50.</p>
             <label class="slider-row" for="corner-confidence-slider">
-              <span class="slider-row__label">Minimum corner sharpness</span>
+              <span class="slider-row__label">Minimum corner sharpness threshold</span>
               <span class="slider-row__value" id="corner-confidence-value">0.02</span>
             </label>
             <input type="range" id="corner-confidence-slider"
               class="threshold-slider"
-              min="0" max="0.10" step="0.01" value="0.02" />
+              min="0" max="0.20" step="0.01" value="0.02" />
             <div class="threshold-meter" aria-live="polite">
               <span class="threshold-meter__fill" id="corner-confidence-signal-fill"></span>
               <span class="threshold-meter__threshold" id="corner-confidence-signal-threshold"></span>

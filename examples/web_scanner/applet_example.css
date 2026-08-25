@@ -118,6 +118,26 @@ tr:last-child td { border-bottom: 0; }
   text-transform: uppercase;
 }
 
+.channel-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.85rem;
+}
+
+.channel-nav span,
+.channel-nav a {
+  border: 1px solid rgba(36, 33, 31, 0.14);
+  border-radius: 999px;
+  padding: 0.45rem 0.7rem;
+  background: rgba(255, 255, 255, 0.58);
+  color: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .layout {
   display: grid;
   align-items: start;

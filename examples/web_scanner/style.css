@@ -169,6 +169,15 @@ body[data-loading="true"] .loading-screen {
   font-weight: 600;
 }
 
+.channel-pill {
+  margin: 0.25rem 0 0;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .app-bar__actions {
   display: flex;
   gap: 0.55rem;
