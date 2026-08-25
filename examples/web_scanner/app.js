@@ -3,8 +3,8 @@ const BUILD_ID = "__BUILD_ID__";
 
 const GITHUB_REPO = "HanClinto/CollectorVision";
 const ASSET_CHANNELS = {
-  stable: "./assets",
-  testing: "./testing/assets",
+  stable: new URL("./assets", import.meta.url).href,
+  testing: new URL("./testing/assets", import.meta.url).href,
 };
 
 // DETECTOR_SIZE is kept here for the capture-bundle debug export.
