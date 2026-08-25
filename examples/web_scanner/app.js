@@ -1,3 +1,5 @@
+import { createProgressTracker } from "./lib/progress.mjs";
+
 // Replaced by the deploy-pages CI workflow with the actual short commit SHA.
 const BUILD_ID = "__BUILD_ID__";
 
@@ -2227,47 +2229,9 @@ async function boot() {
 
   // Wire up init-phase progress messages before posting 'init'.
   const scannerReady = new Promise((resolve, reject) => {
-    const stageProgress = new Map();
     const bundledCatalogBytes = Object.values(manifest.catalog?.asset_sizes ?? {})
       .reduce((total, size) => total + (Number.isSafeInteger(size) && size > 0 ? size : 0), 0);
-
-    function displayProgress(data) {
-      const previous = stageProgress.get(data.stage);
-      const rawLoaded = Math.max(0, Number(data.loaded) || 0);
-      const rawTotal = Math.max(0, Number(data.total) || 0);
-      let loaded = rawLoaded;
-      let total = rawTotal;
-      let ratio = Math.max(0, Math.min(1, Number(data.ratio) || 0));
-      let offset = previous?.offset ?? 0;
-
-      // Older workers report each bundled catalog file independently. Combine
-      // those reports so the display does not jump from the embeddings size
-      // back down to the card-ID file size.
-      if (data.stage === "catalog" && catalogMode === "v1" && bundledCatalogBytes > 0) {
-        if (rawTotal === bundledCatalogBytes) {
-          offset = 0;
-        } else if (previous && rawLoaded < previous.rawLoaded) {
-          offset = previous.loaded;
-        }
-        loaded = Math.min(bundledCatalogBytes, offset + rawLoaded);
-        total = bundledCatalogBytes;
-        ratio = loaded / total;
-      }
-
-      // Completion-only events (Catalog v2 currently emits one) do not carry
-      // byte counts. Keep the last useful byte detail rather than flashing 0 B.
-      if (previous && loaded < previous.loaded) {
-        loaded = previous.loaded;
-        total = previous.total;
-      }
-      if (previous) {
-        ratio = Math.max(ratio, previous.ratio);
-      }
-
-      const progress = { loaded, total, ratio, rawLoaded, offset };
-      stageProgress.set(data.stage, progress);
-      return progress;
-    }
+    const displayProgress = createProgressTracker({ catalogMode, bundledCatalogBytes });
 
     function onInitMessage({ data }) {
       if (data.type === "progress") {
