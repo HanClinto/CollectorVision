@@ -1680,16 +1680,18 @@ class PerformanceOverlay {
     const threads = this.captureState?.numThreads ?? "—";
     const mode = this.captureState?.inferenceMode ?? "—";
     const resultGap = data?.resultGapMs ? formatMs(data.resultGapMs) : "—";
-    const resultFps = data?.resultGapMs ? `${(1000 / data.resultGapMs).toFixed(1)} FPS` : "— FPS";
+    const observedFps = data?.resultGapMs ? `${(1000 / data.resultGapMs).toFixed(1)} fps` : "— fps";
+    const calculatedFps = timing.totalMs ? `${(1000 / timing.totalMs).toFixed(1)} fps` : "— fps";
+    const threadLabel = String(mode).startsWith("WASM") ? "wasm_threads" : "threads";
     const score = Number.isFinite(data?.score) ? data.score.toFixed(3) : "—";
     const card = data?.cardPresent ? (data.cornersValid ? "card" : "bad-quad") : "no-card";
     const orientation = data?.orientation ? `  ${data.orientation}` : "";
     this.el.textContent = [
-      `minimum interval ${getScanIntervalMs()}ms  result ${resultGap}  ${resultFps}`,
+      `minimum interval ${getScanIntervalMs()}ms  result ${resultGap}  observed ${observedFps}  calculated ${calculatedFps}`,
       `total ${formatMs(timing.totalMs)}  det ${formatMs(timing.detectMs)} (run ${formatMs(timing.detectorRunMs)})`,
       `dew ${formatMs(timing.dewarpMs)} (warp ${formatMs(timing.dewarpWarpMs)})  emb ${formatMs(timing.embedMs)} (run ${formatMs(timing.embedRunMs)})`,
       `prep det ${formatMs(timing.detectorInputMs)}  prep emb ${formatMs(timing.embedInputMs)}  lookup ${formatMs(timing.searchMs)}`,
-      `${mode}  threads ${threads}  ${card}  score ${score}${orientation}`,
+      `${mode}  ${threadLabel} ${threads}  ${card}  score ${score}${orientation}`,
       `${this.memoryLine()}  catalog ${formatMiB(this.catalogBytes)}`,
     ].join("\n");
   }
