@@ -31,6 +31,7 @@ const ROTATION_INVARIANT_KEY = "cv_rotation_invariant_enabled";
 const MIN_MATCHES_DEFAULT = 2;
 const MATCHES_KEY = "cv_min_matches";
 const MIN_CORNER_CONFIDENCE_DEFAULT = 0.02;
+const MAX_CORNER_CONFIDENCE = 0.20;
 const SCAN_BUFFER_SIZE = 5;
 const SCANS_KEY = "cv_scans";
 const PERF_OVERLAY_KEY = "cv_perf_overlay_enabled";
@@ -1516,7 +1517,9 @@ function getScanIntervalMs() {
 
 function getMinCornerConfidence() {
   const stored = Number.parseFloat(localStorage.getItem(CORNER_CONFIDENCE_KEY));
-  return Number.isFinite(stored) ? Math.min(0.1, Math.max(0, stored)) : MIN_CORNER_CONFIDENCE_DEFAULT;
+  return Number.isFinite(stored)
+    ? Math.min(MAX_CORNER_CONFIDENCE, Math.max(0, stored))
+    : MIN_CORNER_CONFIDENCE_DEFAULT;
 }
 
 function getMinMatches() {
@@ -1535,13 +1538,13 @@ function setupMatchScoreSlider() {
 
   slider.value = getMinMatchScore();
   label.textContent = getMinMatchScore().toFixed(2);
-  updateThresholdMeter("match-score", getMinMatchScore(), null, 1);
+  updateThresholdMeter("match-score", getMinMatchScore(), null, 1, { preserveCurrent: true });
 
   slider.addEventListener("input", () => {
     const value = Number.parseFloat(slider.value);
     label.textContent = value.toFixed(2);
     localStorage.setItem(MATCH_SCORE_KEY, value);
-    updateThresholdMeter("match-score", value, null, 1);
+    updateThresholdMeter("match-score", value, null, 1, { preserveCurrent: true });
   });
 }
 
@@ -1574,16 +1577,17 @@ function setupCornerConfidenceSlider(scannerWorker = null) {
     label.textContent = value.toFixed(2);
     localStorage.setItem(CORNER_CONFIDENCE_KEY, value);
     scannerWorker?.postMessage({ type: "config", minCornerConfidence: value });
-    updateThresholdMeter("corner-confidence", value, null, 0.1);
+    updateThresholdMeter("corner-confidence", value, null, MAX_CORNER_CONFIDENCE, { preserveCurrent: true });
   };
 
+  slider.max = String(MAX_CORNER_CONFIDENCE);
   slider.value = getMinCornerConfidence();
   label.textContent = getMinCornerConfidence().toFixed(2);
-  updateThresholdMeter("corner-confidence", getMinCornerConfidence(), null, 0.1);
+  updateThresholdMeter("corner-confidence", getMinCornerConfidence(), null, MAX_CORNER_CONFIDENCE, { preserveCurrent: true });
   slider.addEventListener("input", update);
 }
 
-function updateThresholdMeter(name, threshold, current, maximum) {
+function updateThresholdMeter(name, threshold, current, maximum, options = {}) {
   const fill = document.getElementById(`${name}-signal-fill`);
   const marker = document.getElementById(`${name}-signal-threshold`);
   const value = document.getElementById(`${name}-signal-value`);
@@ -1591,8 +1595,10 @@ function updateThresholdMeter(name, threshold, current, maximum) {
 
   marker.style.left = `${(Math.min(1, Math.max(0, threshold / maximum)) * 100).toFixed(1)}%`;
   if (!Number.isFinite(current)) {
-    fill.style.width = "0%";
-    value.textContent = "Current —";
+    if (!options.preserveCurrent) {
+      fill.style.width = "0%";
+      value.textContent = "Current —";
+    }
     return;
   }
   fill.style.width = `${(Math.min(1, Math.max(0, current / maximum)) * 100).toFixed(1)}%`;
@@ -1935,7 +1941,7 @@ function createScannerLoop(
     diag.set("diag-detector-input", data.detectorInput ?? "—");
     diag.set("diag-raw-corners", data.rawCorners ?? "—");
     diag.set("diag-sharpness", `${data.sharpness?.toFixed(3) ?? "—"} (card ${data.cardPresent ? "yes" : "no"})`);
-    updateThresholdMeter("corner-confidence", getMinCornerConfidence(), data.sharpness, 0.1);
+    updateThresholdMeter("corner-confidence", getMinCornerConfidence(), data.sharpness, MAX_CORNER_CONFIDENCE);
     updateThresholdMeter("match-score", getMinMatchScore(), data.score, 1);
 
     if (data.timing) {

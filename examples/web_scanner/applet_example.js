@@ -183,7 +183,7 @@ function populateScanSettings() {
   cornerThresholdInput.value = cornerThreshold.toFixed(2);
   updateCornerThresholdUi(cornerThreshold);
   thresholdInput.value = settings.matchThreshold.toFixed(2);
-  updateMatchSignal(null);
+  updateMatchThresholdUi(settings.matchThreshold);
   consecutiveInput.value = String(settings.consecutiveMatches);
   intervalInput.value = String(Math.max(0, Math.round(Number(settings.scanIntervalMs) || 0)));
   intervalLabel.textContent = Number(intervalInput.value) <= 0 ? "Max speed" : `${intervalInput.value}ms`;
@@ -199,6 +199,11 @@ function updateCornerThresholdUi(value) {
   cornerSignalThreshold.style.left = `${(ratio * 100).toFixed(1)}%`;
 }
 
+function updateMatchThresholdUi(value) {
+  const threshold = clamp(Number(value), 0, 1);
+  matchSignalThreshold.style.left = `${(threshold * 100).toFixed(1)}%`;
+}
+
 function updateCornerSignal(confidence) {
   const raw = Math.max(0, Number(confidence) || 0);
   const current = clamp(raw, 0, MAX_GUI_CORNER_CONFIDENCE);
@@ -210,8 +215,7 @@ function updateCornerSignal(confidence) {
 }
 
 function updateMatchSignal(score) {
-  const threshold = clamp(Number(thresholdInput.value), 0, 1);
-  matchSignalThreshold.style.left = `${(threshold * 100).toFixed(1)}%`;
+  updateMatchThresholdUi(thresholdInput.value);
   if (!Number.isFinite(score)) {
     matchSignalFill.style.width = "0%";
     matchSignalValue.textContent = "Current —";
@@ -246,7 +250,7 @@ async function applyScanSettings({ announce = true } = {}) {
   cornerThresholdInput.value = settings.minCornerConfidence.toFixed(2);
   updateCornerThresholdUi(settings.minCornerConfidence);
   thresholdInput.value = settings.matchThreshold.toFixed(2);
-  updateMatchSignal(null);
+  updateMatchThresholdUi(settings.matchThreshold);
   consecutiveInput.value = String(settings.consecutiveMatches);
   intervalInput.value = String(settings.scanIntervalMs);
   intervalLabel.textContent = settings.scanIntervalMs <= 0 ? "Max speed" : `${settings.scanIntervalMs}ms`;
@@ -283,6 +287,10 @@ intervalInput.addEventListener("input", () => {
 
 cornerThresholdInput.addEventListener("input", () => {
   updateCornerThresholdUi(cornerThresholdInput.value);
+});
+
+thresholdInput.addEventListener("input", () => {
+  updateMatchThresholdUi(thresholdInput.value);
 });
 
 function highlightReadonlySignature() {

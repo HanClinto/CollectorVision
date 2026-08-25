@@ -135,6 +135,8 @@ function bindUi() {
   window.addEventListener("pointerup", endRoiDrag);
   window.addEventListener("resize", resizeCanvases);
   els.scanInterval.addEventListener("input", updateScanIntervalLabel);
+  els.matchThreshold.addEventListener("input", updateLiveThresholdMeters);
+  els.cornerThreshold.addEventListener("input", updateLiveThresholdMeters);
   for (const input of [
     els.matchThreshold,
     els.consecutiveMatches,
@@ -445,6 +447,26 @@ function updateLatestResult(data) {
   }
 }
 
+function latestMetricValue(element) {
+  const value = Number.parseFloat(element.textContent);
+  return Number.isFinite(value) ? value : null;
+}
+
+function updateLiveThresholdMeters() {
+  updateThresholdMeter(
+    "match",
+    clamp(Number(els.matchThreshold.value), 0, 1),
+    latestMetricValue(els.latestScore),
+    1,
+  );
+  updateThresholdMeter(
+    "corner",
+    clamp(Number(els.cornerThreshold.value), 0, 0.2),
+    latestMetricValue(els.latestSharpness),
+    0.2,
+  );
+}
+
 function isAcceptedDetection(data) {
   const score = Number(data.score);
   return data.cardPresent
@@ -719,8 +741,7 @@ function applySettingsToInputs() {
   els.cornerThreshold.value = settings.minCornerConfidence.toFixed(2);
   els.groupSecondary.checked = settings.groupBySecondaryId === true;
   els.showRejectedDetections.checked = settings.showRejectedDetections !== false;
-  updateThresholdMeter("match", settings.matchThreshold, null, 1);
-  updateThresholdMeter("corner", settings.minCornerConfidence, null, 0.2);
+  updateLiveThresholdMeters();
 }
 
 function updateScanIntervalLabel() {
