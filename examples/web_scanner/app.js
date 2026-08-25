@@ -1,3 +1,5 @@
+import { createProgressTracker } from "./lib/progress.mjs";
+
 // Replaced by the deploy-pages CI workflow with the actual short commit SHA.
 const BUILD_ID = "__BUILD_ID__";
 
@@ -1583,20 +1585,41 @@ function setupCornerConfidenceSlider(scannerWorker = null) {
   slider.addEventListener("input", update);
 }
 
+const thresholdMeterPeaks = new Map();
+
 function updateThresholdMeter(name, threshold, current, maximum) {
   const fill = document.getElementById(`${name}-signal-fill`);
+  const peakMarker = document.getElementById(`${name}-signal-peak`);
   const marker = document.getElementById(`${name}-signal-threshold`);
   const value = document.getElementById(`${name}-signal-value`);
-  if (!fill || !marker || !value) return;
+  if (!fill || !peakMarker || !marker || !value) return;
 
   marker.style.left = `${(Math.min(1, Math.max(0, threshold / maximum)) * 100).toFixed(1)}%`;
-  if (!Number.isFinite(current)) {
-    fill.style.width = "0%";
-    value.textContent = "Current —";
-    return;
+  const now = performance.now();
+  const signal = Number.isFinite(current) ? Math.min(maximum, Math.max(0, current)) : 0;
+  const previous = thresholdMeterPeaks.get(name) ?? {
+    value: 0,
+    holdUntil: 0,
+    updatedAt: now,
+  };
+  let peak = previous.value;
+  let holdUntil = previous.holdUntil;
+  if (signal >= peak) {
+    peak = signal;
+    holdUntil = now + 1200;
+  } else if (now > holdUntil) {
+    peak = Math.max(signal, peak - maximum * ((now - previous.updatedAt) / 2200));
   }
-  fill.style.width = `${(Math.min(1, Math.max(0, current / maximum)) * 100).toFixed(1)}%`;
-  value.textContent = `Current ${current.toFixed(3)}`;
+  thresholdMeterPeaks.set(name, { value: peak, holdUntil, updatedAt: now });
+
+  fill.style.width = `${(signal / maximum * 100).toFixed(1)}%`;
+  peakMarker.style.left = `${(peak / maximum * 100).toFixed(1)}%`;
+  peakMarker.style.opacity = peak > 0 ? "1" : "0";
+  value.textContent = Number.isFinite(current)
+    ? `Current ${current.toFixed(3)} · peak ${peak.toFixed(3)}`
+    : peak > 0
+    ? `Current — · peak ${peak.toFixed(3)}`
+    : "Current —";
 }
 
 function setupMinMatchesSlider() {
@@ -1674,12 +1697,16 @@ class PerformanceOverlay {
     const threads = this.captureState?.numThreads ?? "—";
     const mode = this.captureState?.inferenceMode ?? "—";
     const resultGap = data?.resultGapMs ? formatMs(data.resultGapMs) : "—";
-    const resultFps = data?.resultGapMs ? `${(1000 / data.resultGapMs).toFixed(1)} FPS` : "— FPS";
+    const observedFps = data?.resultGapMs ? (1000 / data.resultGapMs).toFixed(1) : "—";
+    const pipelineFps = timing.totalMs > 0 ? (1000 / timing.totalMs).toFixed(1) : "—";
+    const intervalMs = getScanIntervalMs();
+    const intervalCeiling = intervalMs > 0 ? (1000 / intervalMs).toFixed(1) : "max";
     const score = Number.isFinite(data?.score) ? data.score.toFixed(3) : "—";
     const card = data?.cardPresent ? (data.cornersValid ? "card" : "bad-quad") : "no-card";
     const orientation = data?.orientation ? `  ${data.orientation}` : "";
     this.el.textContent = [
-      `minimum interval ${getScanIntervalMs()}ms  result ${resultGap}  ${resultFps}`,
+      `FPS observed ${observedFps}  pipeline ${pipelineFps}  interval ceiling ${intervalCeiling}`,
+      `minimum interval ${intervalMs}ms  result gap ${resultGap}`,
       `total ${formatMs(timing.totalMs)}  det ${formatMs(timing.detectMs)} (run ${formatMs(timing.detectorRunMs)})`,
       `dew ${formatMs(timing.dewarpMs)} (warp ${formatMs(timing.dewarpWarpMs)})  emb ${formatMs(timing.embedMs)} (run ${formatMs(timing.embedRunMs)})`,
       `prep det ${formatMs(timing.detectorInputMs)}  prep emb ${formatMs(timing.embedInputMs)}  lookup ${formatMs(timing.searchMs)}`,
@@ -2050,6 +2077,18 @@ function resolveAssetChannel() {
   return Object.hasOwn(ASSET_CHANNELS, requested) ? requested : "stable";
 }
 
+function preserveAssetChannel(channel) {
+  for (const link of document.querySelectorAll("a[data-preserve-channel]")) {
+    const url = new URL(link.href, location.href);
+    if (channel === "testing") {
+      url.searchParams.set("channel", channel);
+    } else {
+      url.searchParams.delete("channel");
+    }
+    link.href = url.href;
+  }
+}
+
 function resolveCatalogMode() {
   const requested = new URLSearchParams(location.search).get("catalog") ?? "v2";
   if (requested !== "v1" && requested !== "v2") {
@@ -2156,6 +2195,7 @@ async function boot() {
   // Load the manifest on the main thread first — it drives both the loading
   // screen text and the worker init message.
   const channel = resolveAssetChannel();
+  preserveAssetChannel(channel);
   const catalogMode = resolveCatalogMode();
   const { assetBasePath, manifest } = await loadManifest(channel);
   const catalogLimit = getCatalogLimitFromQuery();
@@ -2189,6 +2229,10 @@ async function boot() {
 
   // Wire up init-phase progress messages before posting 'init'.
   const scannerReady = new Promise((resolve, reject) => {
+    const bundledCatalogBytes = Object.values(manifest.catalog?.asset_sizes ?? {})
+      .reduce((total, size) => total + (Number.isSafeInteger(size) && size > 0 ? size : 0), 0);
+    const displayProgress = createProgressTracker({ catalogMode, bundledCatalogBytes });
+
     function onInitMessage({ data }) {
       if (data.type === "progress") {
         recordBootTrace("worker:progress", data, { debugOnly: data.ratio < 1 });
@@ -2204,19 +2248,24 @@ async function boot() {
           debugLog.info("dewarp ready");
         } else {
           const ranges = { detector: [24, 44], embedder: [44, 60], catalog: [60, 96] };
+          const progress = displayProgress(data);
           const [start, end] = ranges[data.stage] ?? [0, 0];
-          const percent = start + (end - start) * data.ratio;
+          const percent = start + (end - start) * progress.ratio;
           const note = data.cached
             ? "Cached"
-            : data.total > 0
-            ? `${formatBytes(data.loaded)} / ${formatBytes(data.total)}`
-            : `${formatBytes(data.loaded)} downloaded`;
+            : progress.total > 0
+            ? `${formatBytes(progress.loaded)} / ${formatBytes(progress.total)}`
+            : progress.loaded > 0
+            ? `${formatBytes(progress.loaded)} downloaded`
+            : data.ratio >= 1
+            ? "Ready"
+            : "Starting";
           const label = {
             detector: "Loading corner detector",
             embedder: "Loading embedder",
             catalog: "Loading card catalog",
           }[data.stage];
-          setPhase(data.stage, percent, label, note, data.ratio >= 1 ? "done" : "active");
+          setPhase(data.stage, percent, label, note, progress.ratio >= 1 ? "done" : "active");
         }
       } else if (data.type === "ready") {
         recordBootTrace("worker:ready", {
@@ -2253,7 +2302,11 @@ async function boot() {
   loadingScreen.step("dewarp", "active", "Queued");
   loadingScreen.step("detector", "active", "Queued");
   loadingScreen.step("embedder", "active", "Queued");
-  loadingScreen.step("catalog", "active", "Waiting for models");
+  loadingScreen.step(
+    "catalog",
+    "active",
+    catalogMode === "v2" ? "Downloading and indexing" : "Waiting for models",
+  );
   setText("models-status", "Loading models");
 
   scannerWorker.postMessage({

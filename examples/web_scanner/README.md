@@ -18,7 +18,8 @@ Catalog v2 is the default:
 
 Append `?catalog=v1` to use the prepared static catalog bundle. This is the
 compatibility path, not the default. `?channel=testing` selects the separately
-published testing model bundle.
+published testing model bundle on the scanner, playground, and screen capture
+monitor. Links between those pages preserve the selected channel.
 
 The standalone [`catalog_v2_example.html`](./catalog_v2_example.html) loads any
 published game catalog and displays its first record.

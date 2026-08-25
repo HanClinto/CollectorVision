@@ -601,6 +601,12 @@ class WorkerRuntime {
 
   async load(onStage) {
     const version = this.manifest.version;
+    const catalogPromise = this.catalogMode === "v2"
+      ? this.loadCatalogV2(onStage).then(
+        () => null,
+        (error) => error,
+      )
+      : null;
     // Use per-model content hashes as cache keys when available so that a new
     // model weight file (same filename, different content) always busts the
     // IndexedDB entry, even if the bundle version string hasn't changed.
@@ -608,18 +614,20 @@ class WorkerRuntime {
     const modelSizes = this.manifest.model_sizes ?? {};
     const detectorVersion = hashes[this.detectorConfig.modelKey] ?? version;
     const embedderVersion = hashes.milo       ?? version;
-    const detectorBuffer = await fetchBufferCached(
-      `${this.assetBasePath}/${this.manifest.models[this.detectorConfig.modelKey]}`,
-      detectorVersion,
-      modelSizes[this.detectorConfig.modelKey],
-      (ratio, loaded, total, cached) => onStage?.("detector", ratio, loaded, total, cached),
-    );
-    const embedderBuffer = await fetchBufferCached(
-      `${this.assetBasePath}/${this.manifest.models.milo}`,
-      embedderVersion,
-      modelSizes.milo,
-      (ratio, loaded, total, cached) => onStage?.("embedder", ratio, loaded, total, cached),
-    );
+    const [detectorBuffer, embedderBuffer] = await Promise.all([
+      fetchBufferCached(
+        `${this.assetBasePath}/${this.manifest.models[this.detectorConfig.modelKey]}`,
+        detectorVersion,
+        modelSizes[this.detectorConfig.modelKey],
+        (ratio, loaded, total, cached) => onStage?.("detector", ratio, loaded, total, cached),
+      ),
+      fetchBufferCached(
+        `${this.assetBasePath}/${this.manifest.models.milo}`,
+        embedderVersion,
+        modelSizes.milo,
+        (ratio, loaded, total, cached) => onStage?.("embedder", ratio, loaded, total, cached),
+      ),
+    ]);
 
     // Use as many threads as the device has cores, capped at 4.
     // NOTE: multi-threaded WASM requires SharedArrayBuffer / COOP+COEP headers.
@@ -648,7 +656,8 @@ class WorkerRuntime {
     this.inputNames.embedder = this.embedder.inputNames[0];
 
     if (this.catalogMode === "v2") {
-      await this.loadCatalogV2(onStage);
+      const catalogError = await catalogPromise;
+      if (catalogError) throw catalogError;
       return;
     }
 

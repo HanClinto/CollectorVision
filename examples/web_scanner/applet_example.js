@@ -30,6 +30,16 @@ function resolveAssetChannel() {
 
 const assetChannel = resolveAssetChannel();
 const assetBasePath = ASSET_CHANNELS[assetChannel];
+document.getElementById("asset-channel").textContent = `${assetChannel} assets`;
+for (const link of document.querySelectorAll("a[data-preserve-channel]")) {
+  const url = new URL(link.href, location.href);
+  if (assetChannel === "testing") {
+    url.searchParams.set("channel", assetChannel);
+  } else {
+    url.searchParams.delete("channel");
+  }
+  link.href = url.href;
+}
 
 const PRESETS = [
   {
@@ -116,9 +126,11 @@ const presetSelect = document.getElementById("preset-code");
 const cornerThresholdInput = document.getElementById("scan-corner-threshold");
 const cornerThresholdLabel = document.getElementById("scan-corner-threshold-label");
 const cornerSignalFill = document.getElementById("scan-corner-signal-fill");
+const cornerSignalPeak = document.getElementById("scan-corner-signal-peak");
 const cornerSignalThreshold = document.getElementById("scan-corner-signal-threshold");
 const cornerSignalValue = document.getElementById("scan-corner-signal-value");
 const matchSignalFill = document.getElementById("scan-match-signal-fill");
+const matchSignalPeak = document.getElementById("scan-match-signal-peak");
 const matchSignalThreshold = document.getElementById("scan-match-signal-threshold");
 const matchSignalValue = document.getElementById("scan-match-signal-value");
 const thresholdInput = document.getElementById("scan-threshold");
@@ -199,27 +211,51 @@ function updateCornerThresholdUi(value) {
   cornerSignalThreshold.style.left = `${(ratio * 100).toFixed(1)}%`;
 }
 
+const signalPeaks = new Map();
+
+function updateSignalMeter(name, current, maximum, fill, peakMarker, value) {
+  const now = performance.now();
+  const signal = Number.isFinite(current) ? clamp(current, 0, maximum) : 0;
+  const previous = signalPeaks.get(name) ?? {
+    value: 0,
+    holdUntil: 0,
+    updatedAt: now,
+  };
+  let peak = previous.value;
+  let holdUntil = previous.holdUntil;
+  if (signal >= peak) {
+    peak = signal;
+    holdUntil = now + 1200;
+  } else if (now > holdUntil) {
+    peak = Math.max(signal, peak - maximum * ((now - previous.updatedAt) / 2200));
+  }
+  signalPeaks.set(name, { value: peak, holdUntil, updatedAt: now });
+
+  fill.style.width = `${(signal / maximum * 100).toFixed(1)}%`;
+  peakMarker.style.left = `${(peak / maximum * 100).toFixed(1)}%`;
+  peakMarker.style.opacity = peak > 0 ? "1" : "0";
+  value.textContent = Number.isFinite(current)
+    ? `Current ${current.toFixed(3)} · peak ${peak.toFixed(3)}`
+    : peak > 0
+    ? `Current — · peak ${peak.toFixed(3)}`
+    : "Current —";
+}
+
 function updateCornerSignal(confidence) {
-  const raw = Math.max(0, Number(confidence) || 0);
-  const current = clamp(raw, 0, MAX_GUI_CORNER_CONFIDENCE);
-  const ratio = current / MAX_GUI_CORNER_CONFIDENCE;
-  cornerSignalFill.style.width = `${(ratio * 100).toFixed(1)}%`;
-  cornerSignalValue.textContent = raw > MAX_GUI_CORNER_CONFIDENCE
-    ? `Current ${MAX_GUI_CORNER_CONFIDENCE.toFixed(2)}+`
-    : `Current ${current.toFixed(2)}`;
+  updateSignalMeter(
+    "corner",
+    Number(confidence),
+    MAX_GUI_CORNER_CONFIDENCE,
+    cornerSignalFill,
+    cornerSignalPeak,
+    cornerSignalValue,
+  );
 }
 
 function updateMatchSignal(score) {
   const threshold = clamp(Number(thresholdInput.value), 0, 1);
   matchSignalThreshold.style.left = `${(threshold * 100).toFixed(1)}%`;
-  if (!Number.isFinite(score)) {
-    matchSignalFill.style.width = "0%";
-    matchSignalValue.textContent = "Current —";
-    return;
-  }
-  const current = clamp(score, 0, 1);
-  matchSignalFill.style.width = `${(current * 100).toFixed(1)}%`;
-  matchSignalValue.textContent = `Current ${current.toFixed(3)}`;
+  updateSignalMeter("match", score, 1, matchSignalFill, matchSignalPeak, matchSignalValue);
 }
 
 function scanSettingsFromInputs() {
