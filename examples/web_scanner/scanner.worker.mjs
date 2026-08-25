@@ -411,13 +411,13 @@ async function fetchWithProgress(url, responseType, expectedTotal, onProgress) {
     loaded += value.length;
     // Fetch streams expose decoded bytes, while Content-Length can describe a
     // compressed HTTP response. Do not present an invalid total to the UI.
-    if (declaredTotal === 0 && total > 0 && loaded > total) {
+    if (total > 0 && loaded > total) {
       total = 0;
     }
     onProgress?.(total > 0 ? loaded / total : 0, loaded, total);
   }
 
-  onProgress?.(1, loaded, total);
+  onProgress?.(1, loaded, loaded);
   const blob = new Blob(chunks);
   if (responseType === "json") {
     return JSON.parse(await blob.text());

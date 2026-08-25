@@ -2206,9 +2206,10 @@ async function boot() {
           const ranges = { detector: [24, 44], embedder: [44, 60], catalog: [60, 96] };
           const [start, end] = ranges[data.stage] ?? [0, 0];
           const percent = start + (end - start) * data.ratio;
+          const validTotal = data.total > 0 && data.loaded <= data.total;
           const note = data.cached
             ? "Cached"
-            : data.total > 0
+            : validTotal
             ? `${formatBytes(data.loaded)} / ${formatBytes(data.total)}`
             : `${formatBytes(data.loaded)} downloaded`;
           const label = {
