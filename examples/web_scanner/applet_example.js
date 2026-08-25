@@ -12,11 +12,13 @@ const ASSET_CHANNELS = {
 };
 const LOG_LIMIT = 12;
 const SCRYFALL_CARD_URL = "https://api.scryfall.com/cards/${card.cardId}";
+const SCAN_INTERVAL_DEFAULT_MS = 50;
+const SCAN_INTERVAL_MAX_MS = 1000;
 const DEFAULT_SCAN_SETTINGS = {
   minCornerConfidence: 0.02,
   matchThreshold: 0.50,
   consecutiveMatches: 2,
-  scanIntervalMs: 900,
+  scanIntervalMs: SCAN_INTERVAL_DEFAULT_MS,
   enableWebGpu: false,
   showFpsOverlay: true,
   groupBySecondaryId: true,
@@ -185,7 +187,9 @@ function populateScanSettings() {
   thresholdInput.value = settings.matchThreshold.toFixed(2);
   updateMatchThresholdUi(settings.matchThreshold);
   consecutiveInput.value = String(settings.consecutiveMatches);
-  intervalInput.value = String(Math.max(0, Math.round(Number(settings.scanIntervalMs) || 0)));
+  intervalInput.value = String(
+    Math.min(SCAN_INTERVAL_MAX_MS, Math.max(0, Math.round(Number(settings.scanIntervalMs) || 0))),
+  );
   intervalLabel.textContent = Number(intervalInput.value) <= 0 ? "Max speed" : `${intervalInput.value}ms`;
   webGpuInput.checked = settings.enableWebGpu === true;
   fpsOverlayInput.checked = settings.showFpsOverlay !== false;
@@ -230,7 +234,10 @@ function scanSettingsFromInputs() {
   const minCornerConfidence = clamp(Number(cornerThresholdInput.value), 0, MAX_GUI_CORNER_CONFIDENCE);
   const matchThreshold = clamp(Number(thresholdInput.value), 0, 1);
   const consecutiveMatches = Math.max(1, Math.round(Number(consecutiveInput.value) || 1));
-  const scanIntervalMs = Math.max(0, Math.round(Number(intervalInput.value) || 0));
+  const scanIntervalMs = Math.min(
+    SCAN_INTERVAL_MAX_MS,
+    Math.max(0, Math.round(Number(intervalInput.value) || 0)),
+  );
   const enableWebGpu = webGpuInput.checked === true;
   const showFpsOverlay = fpsOverlayInput.checked === true;
   const groupBySecondaryId = groupSecondaryInput.checked === true;

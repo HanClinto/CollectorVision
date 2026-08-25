@@ -7,6 +7,8 @@ const ASSET_CHANNELS = {
 const ROI_KEY = "collectorvision_screen_monitor_roi";
 const SETTINGS_KEY = "collectorvision_screen_monitor_settings";
 const MAX_EVENTS = 250;
+const SCAN_INTERVAL_DEFAULT_MS = 50;
+const SCAN_INTERVAL_MAX_MS = 1000;
 const KNOWN_MODEL_VERSIONS = {
   cornelius: {
     "sha256:a90ee87a45781e09e9fc88508162dac87b0492162dff79a2627c52ae773e6a79": "1.205",
@@ -21,7 +23,7 @@ const KNOWN_MODEL_VERSIONS = {
 const DEFAULT_SETTINGS = {
   matchThreshold: 0.50,
   consecutiveMatches: 2,
-  scanIntervalMs: 500,
+  scanIntervalMs: SCAN_INTERVAL_DEFAULT_MS,
   minCornerConfidence: 0.02,
   groupBySecondaryId: true,
   showRejectedDetections: true,
@@ -736,7 +738,7 @@ function readSettings() {
 function applySettingsToInputs() {
   els.matchThreshold.value = settings.matchThreshold.toFixed(2);
   els.consecutiveMatches.value = String(settings.consecutiveMatches);
-  els.scanInterval.value = String(settings.scanIntervalMs);
+  els.scanInterval.value = String(Math.min(SCAN_INTERVAL_MAX_MS, Math.max(0, settings.scanIntervalMs)));
   updateScanIntervalLabel();
   els.cornerThreshold.value = settings.minCornerConfidence.toFixed(2);
   els.groupSecondary.checked = settings.groupBySecondaryId === true;
@@ -753,7 +755,10 @@ function updateSettingsFromInputs() {
   settings = {
     matchThreshold: clamp(Number(els.matchThreshold.value), 0, 1),
     consecutiveMatches: Math.max(1, Math.round(Number(els.consecutiveMatches.value) || 1)),
-    scanIntervalMs: Math.max(0, Math.round(Number(els.scanInterval.value) || 0)),
+    scanIntervalMs: Math.min(
+      SCAN_INTERVAL_MAX_MS,
+      Math.max(0, Math.round(Number(els.scanInterval.value) || 0)),
+    ),
     minCornerConfidence: clamp(Number(els.cornerThreshold.value), 0, 0.2),
     groupBySecondaryId: els.groupSecondary.checked === true,
     showRejectedDetections: els.showRejectedDetections.checked === true,

@@ -10,7 +10,7 @@ const DEFAULT_CONFIG = {
   workerUrl: versionedUrl("../scanner.worker.mjs"),
   enableWebGpu: false,
   autoStart: true,
-  scanIntervalMs: 900,
+  scanIntervalMs: 50,
   minCornerConfidence: 0.02,
   matchThreshold: 0.5,
   consecutiveMatches: 2,
