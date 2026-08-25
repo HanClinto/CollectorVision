@@ -1,0 +1,31 @@
+.DS_Store
+node_modules/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv*/
+# Model weights and catalog files are NOT stored in regular git.
+# Weights: tracked via git LFS (collector_vision/weights/*.pt).
+# Catalogs: distributed via HuggingFace (HanClinto/milo/catalogs/).
+# The built wheel DOES include the weights via package_data.
+*.npz
+*.db
+.env
+test_output/
+test_images/
+media/
+examples/web_scanner/assets/
+examples/web_scanner/vendor/
+examples/web_scanner/bundle-metadata.json
+# Capture bundles and generated manifests live in GitHub issue attachments.
+# Download with: python scripts/ingest_bug_reports.py
+cv_logs_*.json
+web_scanner_memory_report*.json
+# The .gitkeep preserves the directory; everything else is local-only.
+tests/fixtures/captures/*
+!tests/fixtures/captures/.gitkeep
+# Embedding JSON files are small and needed by test_pipeline_consistency.py
+!tests/fixtures/captures/*.python.json
+!tests/fixtures/captures/*.js-cpu.json

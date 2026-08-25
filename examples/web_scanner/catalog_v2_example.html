@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CollectorVision Catalog v2 Example</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+      body { margin: 0 auto; max-width: 48rem; padding: 2rem 1rem; }
+      form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; }
+      label { display: grid; gap: 0.25rem; }
+      button, select { font: inherit; padding: 0.5rem; }
+      pre { overflow: auto; padding: 1rem; background: CanvasText; color: Canvas; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Catalog v2 browser example</h1>
+      <p>
+        Load a live combined-record catalog through the same browser client used
+        by integrations. The newest compatible snapshot is cached in IndexedDB.
+      </p>
+      <form id="catalog-form">
+        <label>
+          Game
+          <select id="game">
+            <option value="mtg">Magic: The Gathering</option>
+            <option value="pokemon">Pokémon</option>
+            <option value="pokemon-japan">Pokémon Japan</option>
+            <option value="lorcana">Disney Lorcana</option>
+            <option value="one-piece">One Piece</option>
+            <option value="swu">Star Wars: Unlimited</option>
+            <option value="yugioh">Yu-Gi-Oh!</option>
+            <option value="fab">Flesh and Blood</option>
+            <option value="digimon">Digimon</option>
+            <option value="union-arena">Union Arena</option>
+            <option value="gundam-card-game">Gundam Card Game</option>
+            <option value="riftbound">Riftbound</option>
+          </select>
+        </label>
+        <label>
+          <span>Retain metadata</span>
+          <input id="metadata" type="checkbox" checked />
+        </label>
+        <button type="submit">Load catalog</button>
+      </form>
+      <p id="status" aria-live="polite">Choose a catalog to begin.</p>
+      <pre id="result" hidden></pre>
+    </main>
+    <script type="module">
+      import { BrowserCatalogV2 } from "./lib/collectorvision-catalog-v2.mjs?v=__BUILD_ID__";
+
+      const form = document.querySelector("#catalog-form");
+      const status = document.querySelector("#status");
+      const result = document.querySelector("#result");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const game = document.querySelector("#game").value;
+        const includeMetadata = document.querySelector("#metadata").checked;
+        status.textContent = `Loading ${game}...`;
+        result.hidden = true;
+        try {
+          const catalog = await BrowserCatalogV2.forGame(game, { includeMetadata });
+          const first = catalog.recordForIndex(0);
+          result.textContent = JSON.stringify({
+            catalogKey: catalog.catalogKey,
+            version: catalog.version,
+            rows: catalog.rows,
+            metadataLoaded: catalog.metadataLoaded,
+            firstRecord: first,
+          }, null, 2);
+          result.hidden = false;
+          status.textContent = `Loaded ${catalog.rows.toLocaleString()} rows at version ${catalog.version}.`;
+        } catch (error) {
+          status.textContent = error instanceof Error ? error.message : String(error);
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,2 @@
+# Track model weights via Git LFS
+collector_vision/weights/*.pt filter=lfs diff=lfs merge=lfs -text

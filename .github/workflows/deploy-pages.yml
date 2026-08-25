@@ -1,0 +1,97 @@
+name: Deploy Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/deploy-pages.yml"
+      - "examples/web_scanner/**"
+  schedule:
+    - cron: "47 11 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download prepared stable and testing scanner assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          STABLE_RELEASE="$(python - <<'PY'
+          import json
+          with open("examples/web_scanner/assets.bundle.json", "r", encoding="utf-8") as f:
+              print(json.load(f)["release"])
+          PY
+          )"
+          TESTING_RELEASE="$(python - <<'PY'
+          import json
+          with open("examples/web_scanner/assets.testing.bundle.json", "r", encoding="utf-8") as f:
+              print(json.load(f)["release"])
+          PY
+          )"
+          mkdir -p /tmp/web-scanner-assets/stable /tmp/web-scanner-assets/testing
+          gh release download "$STABLE_RELEASE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "web-scanner-assets.tar.zst" \
+            --pattern "web-scanner-assets-metadata.json" \
+            --dir /tmp/web-scanner-assets/stable
+          if gh release view "$TESTING_RELEASE" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release download "$TESTING_RELEASE" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "web-scanner-assets.tar.zst" \
+              --pattern "web-scanner-assets-metadata.json" \
+              --dir /tmp/web-scanner-assets/testing
+          else
+            echo "Testing asset release is not published yet; deploying stable assets only."
+          fi
+          rm -rf examples/web_scanner/assets examples/web_scanner/vendor examples/web_scanner/bundle-metadata.json examples/web_scanner/testing
+          tar --zstd -xf /tmp/web-scanner-assets/stable/web-scanner-assets.tar.zst -C examples/web_scanner
+          if [[ -f /tmp/web-scanner-assets/testing/web-scanner-assets.tar.zst ]]; then
+            mkdir -p examples/web_scanner/testing
+            tar --zstd -xf /tmp/web-scanner-assets/testing/web-scanner-assets.tar.zst \
+              -C examples/web_scanner/testing assets bundle-metadata.json
+          fi
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Stamp build ID
+        run: |
+          SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
+          git ls-files -z \
+            "examples/web_scanner/*.html" \
+            "examples/web_scanner/*.js" \
+            "examples/web_scanner/*.mjs" \
+            "examples/web_scanner/*.json" \
+            | xargs -0 sed -i "s/__BUILD_ID__/${SHORT_SHA}/g"
+          if git grep -n "__BUILD_ID__" -- examples/web_scanner; then
+            echo "Unstamped web scanner build ID placeholder remains."
+            exit 1
+          fi
+          echo "Stamped build ID: ${SHORT_SHA}"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: examples/web_scanner
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

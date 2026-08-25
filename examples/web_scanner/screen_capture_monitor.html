@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CollectorVision Screen Capture Monitor</title>
+    <script>
+      (function () {
+        if (!("serviceWorker" in navigator)) return;
+
+        var params = new URLSearchParams(location.search);
+        var skipFromQuery = params.get("coi") === "0" || params.get("skipCoi") === "1";
+
+        if (skipFromQuery) {
+          navigator.serviceWorker.getRegistration("./")
+            .then(function (reg) {
+              if (!reg) return;
+              return reg.unregister().then(function (removed) {
+                if (removed && navigator.serviceWorker.controller) {
+                  location.reload();
+                }
+              });
+            })
+            .catch(function (err) {
+              console.warn("COI service worker unregister failed:", err);
+            });
+          return;
+        }
+
+        if (self.crossOriginIsolated) return;
+
+        navigator.serviceWorker.register("./coi-serviceworker.js?v=__BUILD_ID__", { scope: "./" })
+          .then(function (reg) {
+            if (reg.active && !navigator.serviceWorker.controller) {
+              location.reload();
+            }
+          })
+          .catch(function (err) {
+            console.warn("COI service worker registration failed:", err);
+          });
+      })();
+    </script>
+    <link rel="stylesheet" href="./screen_capture_monitor.css?v=__BUILD_ID__" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Static utility</p>
+          <h1>Screen Capture Monitor</h1>
+          <p class="lede">Detect cards from any shared tab, window, or screen. Draw one region of interest, emit overlay events, and export what appeared.</p>
+        </div>
+        <div class="hero-aside">
+          <aside id="version-debug" class="version-debug" aria-label="CollectorVision asset versions">
+            <p>CollectorVision versions</p>
+            <dl>
+              <div><dt id="version-detector-label">Detector</dt><dd id="version-cornelius">loading…</dd></div>
+              <div><dt>Milo</dt><dd id="version-milo">loading…</dd></div>
+              <div><dt>Catalog</dt><dd id="version-catalog">loading…</dd></div>
+            </dl>
+          </aside>
+          <nav class="hero-links" aria-label="Related pages">
+            <a href="./">Scanner</a>
+            <a href="./applet_example.html">Playground</a>
+            <a href="./screen_capture_overlay.html" target="_blank" rel="noopener noreferrer">Overlay</a>
+          </nav>
+        </div>
+      </header>
+
+      <section class="stage-card" aria-label="Capture preview">
+        <div class="stage-toolbar">
+          <div>
+            <p class="label">Capture source</p>
+            <p id="source-meta" class="muted">No source selected</p>
+          </div>
+          <div class="toolbar-actions">
+            <button id="capture-toggle" type="button">Start capture</button>
+            <button id="reset-roi" class="secondary" type="button">Reset ROI</button>
+          </div>
+        </div>
+
+        <div class="capture-stage" id="capture-stage">
+          <video id="capture-video" playsinline muted></video>
+          <canvas id="preview-canvas"></canvas>
+          <canvas id="corner-overlay"></canvas>
+          <div id="roi-box" class="roi-box" role="img" aria-label="Detection region of interest">
+            <span class="roi-handle roi-handle--nw" data-handle="nw"></span>
+            <span class="roi-handle roi-handle--ne" data-handle="ne"></span>
+            <span class="roi-handle roi-handle--sw" data-handle="sw"></span>
+            <span class="roi-handle roi-handle--se" data-handle="se"></span>
+            <span class="roi-label">Detection ROI</span>
+          </div>
+          <div id="stage-status" class="stage-status">Choose a screen, window, or tab to begin.</div>
+        </div>
+      </section>
+
+      <section class="layout">
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="label">Detection</p>
+              <h2 id="live-result-title">Live result</h2>
+            </div>
+            <span id="worker-status" class="pill">Loading models…</span>
+          </div>
+          <div class="metric-grid">
+            <div class="metric">
+              <span class="metric-label">Latest</span>
+              <strong id="latest-card">—</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Score</span>
+              <strong id="latest-score">—</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Sharpness</span>
+              <strong id="latest-sharpness">—</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Confirmed</span>
+              <strong id="confirmed-count">0</strong>
+            </div>
+          </div>
+          <p id="latest-status" class="status-line">Waiting for the scanner worker.</p>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="label">Controls</p>
+              <h2>Recognition settings</h2>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <label>
+              Match threshold
+              <input id="match-threshold" type="number" min="0" max="1" step="0.01" value="0.50" />
+              <span class="threshold-meter" aria-live="polite">
+                <span class="threshold-meter__fill" id="match-signal-fill"></span>
+                <span class="threshold-meter__threshold" id="match-signal-threshold"></span>
+              </span>
+              <span class="threshold-meter__value" id="match-signal-value">Current —</span>
+            </label>
+            <label>
+              Consecutive matches
+              <input id="consecutive-matches" type="number" min="1" max="8" step="1" value="2" />
+            </label>
+            <label>
+              <span>Minimum frame interval <output id="scan-interval-value">500 ms</output></span>
+              <input id="scan-interval" type="range" min="0" max="2500" step="50" value="500" />
+            </label>
+            <label>
+              Corner threshold
+              <input id="corner-threshold" type="number" min="0" max="0.2" step="0.01" value="0.02" />
+              <span class="threshold-meter" aria-live="polite">
+                <span class="threshold-meter__fill" id="corner-signal-fill"></span>
+                <span class="threshold-meter__threshold" id="corner-signal-threshold"></span>
+              </span>
+              <span class="threshold-meter__value" id="corner-signal-value">Current —</span>
+            </label>
+          </div>
+          <label class="toggle-row">
+            <input id="group-secondary" type="checkbox" checked />
+            <span>Group alternate printings by secondary/oracle ID when available</span>
+          </label>
+          <label class="toggle-row">
+            <input id="show-rejected-detections" type="checkbox" checked />
+            <span>Show rejected detections</span>
+          </label>
+        </article>
+      </section>
+
+      <section class="panel overlay-settings">
+        <div class="panel-heading">
+          <div>
+            <p class="label">Stream overlay</p>
+            <h2>Browser source appearance</h2>
+          </div>
+          <div class="toolbar-actions">
+            <a id="open-overlay" class="button-link" href="./screen_capture_overlay.html" target="_blank" rel="noopener noreferrer">Open overlay</a>
+            <button id="copy-overlay-link" class="secondary" type="button">Copy link</button>
+          </div>
+        </div>
+        <div class="settings-grid overlay-settings-grid">
+          <label>
+            Card size
+            <select id="overlay-size">
+              <option value="medium">Medium</option>
+              <option value="large" selected>Large</option>
+              <option value="huge">Huge</option>
+            </select>
+          </label>
+          <label>
+            Position
+            <select id="overlay-position">
+              <option value="bottom-right" selected>Bottom right</option>
+              <option value="bottom-left">Bottom left</option>
+              <option value="top-right">Top right</option>
+              <option value="top-left">Top left</option>
+            </select>
+          </label>
+          <label>
+            Background
+            <select id="overlay-background">
+              <option value="glass" selected>Glass</option>
+              <option value="solid">Solid</option>
+              <option value="transparent">Transparent</option>
+            </select>
+          </label>
+          <label>
+            Display time (seconds; 0 stays on screen)
+            <input id="overlay-duration" type="number" min="0" max="120" step="1" value="8" />
+          </label>
+        </div>
+        <div class="overlay-toggles">
+          <label class="toggle-row"><input id="overlay-show-name" type="checkbox" checked /> <span>Card name</span></label>
+          <label class="toggle-row"><input id="overlay-show-set" type="checkbox" checked /> <span>Set name</span></label>
+          <label class="toggle-row"><input id="overlay-show-rarity" type="checkbox" checked /> <span>Rarity</span></label>
+          <label class="toggle-row"><input id="overlay-show-price" type="checkbox" checked /> <span>USD price</span></label>
+        </div>
+        <p class="muted">Use the generated link as a browser source. Appearance settings live in its URL; recognition alerts only send the identified card.</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="label">Outputs</p>
+            <h2>Confirmed cards</h2>
+          </div>
+          <div class="toolbar-actions">
+            <button id="copy-list" class="secondary" type="button">Copy list</button>
+            <button id="download-csv" class="secondary" type="button">CSV</button>
+            <button id="download-jsonl" class="secondary" type="button">JSONL</button>
+            <button id="clear-events" class="secondary danger" type="button">Clear</button>
+          </div>
+        </div>
+        <p class="muted">Confirmed events are dispatched as <code>collectorvision:card</code> DOM events and published on <code>BroadcastChannel("collectorvision-monitor")</code> for the overlay page.</p>
+        <div id="event-list" class="event-list" aria-live="polite">
+          <p class="empty">No confirmed cards yet.</p>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./screen_capture_monitor.js?v=__BUILD_ID__"></script>
+  </body>
+</html>

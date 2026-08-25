@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CollectorVision Web Scanner</title>
+    <!-- Strip the cache-busting ?v= param from the address bar immediately.
+         app.js fetches build.json on every boot; if it detects a stale page it
+         redirects to ?v=<newBuildId> so the browser bypasses its cache and
+         fetches a fresh index.html.  Once that fresh page loads we don't need
+         the param visible to users, so replaceState removes it silently. -->
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        if (params.has("v")) {
+          params.delete("v");
+          var rest = params.toString();
+          history.replaceState(null, "", location.pathname + (rest ? "?" + rest : "") + location.hash);
+        }
+      })();
+    </script>
+    <!-- COI service worker — injects COOP+COEP headers so SharedArrayBuffer
+         is available, which lets onnxruntime-web use multi-threaded WASM.
+         Must run synchronously before any module script so that the reload
+         (first visit only) happens before app.js starts booting. -->
+    <script>
+      (function () {
+        if (!("serviceWorker" in navigator)) return;
+
+        var params = new URLSearchParams(location.search);
+        var skipFromQuery = params.get("coi") === "0" || params.get("skipCoi") === "1";
+        var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+          || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+        // iOS runs the scanner single-threaded to reduce WebKit memory pressure,
+        // so the COI service worker no longer buys us usable WASM threads there.
+        // Also keep a private ?coi=0 / ?skipCoi=1 diagnostic escape hatch.
+        if (isIOS || skipFromQuery) {
+          navigator.serviceWorker.getRegistration("./")
+            .then(function (reg) {
+              if (!reg) {
+                sessionStorage.removeItem("cv-coi-unregistered");
+                return;
+              }
+              return reg.unregister().then(function (removed) {
+                if (removed && navigator.serviceWorker.controller && !sessionStorage.getItem("cv-coi-unregistered")) {
+                  sessionStorage.setItem("cv-coi-unregistered", "1");
+                  location.reload();
+                }
+              });
+            })
+            .catch(function (err) {
+              console.warn("COI service worker unregister failed:", err);
+            });
+          return;
+        }
+        sessionStorage.removeItem("cv-coi-unregistered");
+
+        // Already cross-origin isolated — SW is working or headers are set
+        // server-side.  Don't register again.
+        if (self.crossOriginIsolated) return;
+
+        navigator.serviceWorker.register("./coi-serviceworker.js?v=__BUILD_ID__", { scope: "./" })
+          .then(function (reg) {
+            // If the SW is newly installed (first visit) it will claim the
+            // page and we need one reload to pick up the headers it injects.
+            // Reloads after that find crossOriginIsolated = true at the top
+            // of this block and skip completely.
+            if (reg.active && !navigator.serviceWorker.controller) {
+              // SW was already active but didn't control this client (e.g.
+              // hard refresh).  Reload once to get it controlling.
+              location.reload();
+            }
+            reg.addEventListener("updatefound", function () {
+              var newWorker = reg.installing;
+              if (!newWorker) return;
+              newWorker.addEventListener("statechange", function () {
+                if (newWorker.state === "activated") {
+                  location.reload();
+                }
+              });
+            });
+          })
+          .catch(function (err) {
+            // Non-fatal — scanner still works single-threaded.
+            console.warn("COI service worker registration failed:", err);
+          });
+      })();
+    </script>
+    <link rel="stylesheet" href="./style.css?v=__BUILD_ID__" />
+  </head>
+  <body>
+    <div class="loading-screen" id="loading-screen" aria-live="polite">
+      <div class="loading-screen__card">
+        <p class="section-kicker">Loading</p>
+        <h1 class="loading-screen__title">CollectorVision</h1>
+        <p class="loading-screen__build" id="loading-build">build</p>
+        <p class="loading-screen__copy" id="loading-message">Preparing scanner runtime</p>
+        <div class="loading-screen__bar">
+          <div class="loading-screen__fill" id="loading-fill"></div>
+        </div>
+        <p class="loading-screen__percent" id="loading-percent">0%</p>
+        <ul class="loading-screen__steps" id="loading-steps"></ul>
+      </div>
+    </div>
+
+    <div class="app-shell">
+      <main class="page">
+        <header class="app-bar">
+          <div class="app-bar__identity">
+            <h1 class="app-bar__title">CollectorVision</h1>
+            <a class="channel-badge" id="channel-switch" href="./" aria-label="Switch asset channel">Stable</a>
+          </div>
+          <div class="app-bar__actions">
+            <button class="icon-button icon-button--debug" id="debug-toggle" type="button" aria-label="Show debug panel" aria-expanded="false">
+              Debug
+            </button>
+            <button class="icon-button icon-button--gear" id="settings-toggle" type="button" aria-label="Toggle settings">
+              ⚙
+            </button>
+          </div>
+        </header>
+
+        <section class="camera-shell">
+          <div class="camera-stage">
+            <div class="camera-placeholder">
+              <video id="camera-video" class="camera-video" playsinline muted></video>
+              <canvas id="camera-preview" class="camera-preview"></canvas>
+              <canvas id="camera-overlay" class="camera-canvas"></canvas>
+              <div class="perf-overlay" id="perf-overlay" hidden aria-live="polite"></div>
+              <div class="camera-overlay">
+                <button class="camera-badge" id="camera-badge" type="button" aria-label="Camera status — tap to start">Camera idle</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="camera-divider">
+          <button class="camera-chevron" id="view-toggle" type="button" aria-label="Toggle camera size">
+            <span class="camera-chevron__glyph" aria-hidden="true">⌄</span>
+          </button>
+        </div>
+
+        <section class="panel panel--list">
+          <header class="panel-header">
+            <div>
+              <p class="ledger-total" id="ledger-total">$0.00</p>
+              <h2>Scanned Cards</h2>
+            </div>
+            <div class="count-menu" id="count-menu">
+              <button class="count-badge count-badge--toggle" id="scan-count" type="button"
+                aria-haspopup="menu" aria-expanded="false">0 cards</button>
+              <div class="count-menu__dropdown" id="count-dropdown" hidden>
+                <button class="count-menu__item" id="copy-list" type="button">Copy</button>
+                <button class="count-menu__item" id="download-csv" type="button">CSV</button>
+                <button class="count-menu__item count-menu__item--danger" id="clear-list" type="button">Clear</button>
+              </div>
+            </div>
+          </header>
+
+          <ul class="scan-list" id="scan-list"></ul>
+        </section>
+
+        <aside class="settings-sheet" id="settings-sheet" hidden>
+          <div class="sheet-handle"></div>
+          <header class="panel-header">
+            <div>
+              <p class="section-kicker">Settings</p>
+              <h2>Scanner Runtime</h2>
+            </div>
+            <button class="sheet-close" id="settings-close" type="button">Close</button>
+          </header>
+
+          <section class="panel panel--nested panel--feedback">
+            <p class="feedback-cta">Enjoying CollectorVision? Found a bug? We’d love to hear from you.</p>
+            <a class="action-button action-button--block feedback-link"
+              href="https://github.com/HanClinto/CollectorVision/issues/new"
+              target="_blank" rel="noopener noreferrer">
+              ↗ Share feedback on GitHub
+            </a>
+          </section>
+
+          <section class="panel panel--nested" id="webgpu-toggle-section" hidden>
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Experimental</p>
+                <h2>Inference Backend</h2>
+              </div>
+            </header>
+            <label class="toggle-row" for="webgpu-toggle">
+              <span class="toggle-row__label">Use WebGPU acceleration</span>
+              <input type="checkbox" id="webgpu-toggle" class="toggle-row__input" />
+            </label>
+            <p class="capture-hint">
+              WASM is the safe default. WebGPU may improve performance but
+              produces wrong results on Android ARM.
+            </p>
+          </section>
+
+          <section class="panel panel--nested panel--capture">
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Optional — for bug reports</p>
+                <h2>Debug Bundle</h2>
+              </div>
+            </header>
+            <p class="capture-hint">If something isn’t scanning correctly, download a debug bundle and attach it to your GitHub issue for a faster fix.</p>
+            <div class="capture-actions">
+              <button class="action-button action-button--block" id="download-logs" type="button">⬇ Download Logs</button>
+              <button class="action-button action-button--block" id="capture-frame" type="button">⬇ Download Debug Bundle</button>
+              <a class="action-button action-button--block capture-report-link" id="report-issue" target="_blank" rel="noopener noreferrer" hidden>↗ Open GitHub Issue</a>
+            </div>
+          </section>
+
+          <section class="panel panel--nested">
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Diagnostics</p>
+                <h2>Performance Overlay</h2>
+              </div>
+            </header>
+            <label class="toggle-row" for="perf-overlay-toggle">
+              <span class="toggle-row__label">Show scan timing overlay</span>
+              <input type="checkbox" id="perf-overlay-toggle" class="toggle-row__input" />
+            </label>
+            <p class="capture-hint">Shows detector, dewarp, embed, lookup, thread, and memory estimates in the camera corner. You can also enable it with <code>?fps=1</code>.</p>
+          </section>
+
+          <section class="panel panel--nested">
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Experimental</p>
+                <h2>Screen Capture Monitor</h2>
+              </div>
+            </header>
+            <p class="capture-hint">Watch a shared tab, window, or screen, crop to a region of interest, and emit card events for overlays or CSV/JSONL export.</p>
+            <a class="action-button action-button--block" href="./screen_capture_monitor.html">▶ Open Screen Capture Monitor</a>
+          </section>
+
+          <section class="panel panel--nested">
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Diagnostics</p>
+                <h2>Model Benchmark</h2>
+              </div>
+            </header>
+            <p class="capture-hint">Runs the model benchmark and downloads a GitHub-ready Markdown report. WASM is recommended; WebGPU is experimental.</p>
+            <a class="action-button action-button--block" href="./model_benchmark.html?backend=wasm&amp;download=md">▶ Run WASM Benchmark</a>
+            <a class="action-button action-button--block" href="./model_benchmark.html?backend=webgpu&amp;download=md">▶ Run WebGPU Benchmark</a>
+          </section>
+
+          <section class="panel panel--nested">
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Recognition</p>
+                <h2>Match Threshold</h2>
+              </div>
+            </header>
+            <label class="slider-row" for="match-score-slider">
+              <span class="slider-row__label">Minimum match score</span>
+              <span class="slider-row__value" id="match-score-value">0.50</span>
+            </label>
+            <input type="range" id="match-score-slider"
+              class="threshold-slider"
+              min="0.40" max="0.85" step="0.01" value="0.50" />
+            <div class="threshold-meter" aria-live="polite">
+              <span class="threshold-meter__fill" id="match-score-signal-fill"></span>
+              <span class="threshold-meter__threshold" id="match-score-signal-threshold"></span>
+            </div>
+            <p class="threshold-meter__value" id="match-score-signal-value">Current —</p>
+            <p class="capture-hint">Lower values accept weaker matches (more false positives); higher values require a stronger match. Default 0.50.</p>
+            <label class="slider-row" for="corner-confidence-slider">
+              <span class="slider-row__label">Minimum corner sharpness</span>
+              <span class="slider-row__value" id="corner-confidence-value">0.02</span>
+            </label>
+            <input type="range" id="corner-confidence-slider"
+              class="threshold-slider"
+              min="0" max="0.10" step="0.01" value="0.02" />
+            <div class="threshold-meter" aria-live="polite">
+              <span class="threshold-meter__fill" id="corner-confidence-signal-fill"></span>
+              <span class="threshold-meter__threshold" id="corner-confidence-signal-threshold"></span>
+            </div>
+            <p class="threshold-meter__value" id="corner-confidence-signal-value">Current —</p>
+            <p class="capture-hint">Rejects frames whose corner detector is too uncertain. Lower values find more candidates; higher values require sharper card edges. Default 0.02.</p>
+            <label class="slider-row" for="min-matches-slider">
+              <span class="slider-row__label">Matches needed</span>
+              <span class="slider-row__value" id="min-matches-value">2</span>
+            </label>
+            <input type="range" id="min-matches-slider"
+              class="threshold-slider"
+              min="1" max="4" step="1" value="2" />
+            <p class="capture-hint">Recent frames that must agree before confirming. 1 = fastest; 4 = most reliable. Default 2.</p>
+            <label class="toggle-row" for="rotation-invariant-toggle">
+              <span class="toggle-row__label">Scan upside-down cards</span>
+              <input type="checkbox" id="rotation-invariant-toggle" class="toggle-row__input" />
+            </label>
+            <p class="capture-hint">Embeds the crop upright and rotated 180 degrees, then keeps the stronger match. Default on.</p>
+          </section>
+
+          <section class="panel panel--nested">
+            <header class="panel-header">
+              <div>
+                <p class="section-kicker">Performance</p>
+                <h2>Scan Rate</h2>
+              </div>
+            </header>
+            <label class="slider-row" for="scan-interval-slider">
+              <span class="slider-row__label">Minimum frame interval</span>
+              <span class="slider-row__value" id="scan-interval-value">50 ms</span>
+            </label>
+            <input type="range" id="scan-interval-slider"
+              class="threshold-slider"
+              min="0" max="1000" step="25" value="50" />
+            <p class="capture-hint">Lower values analyze more camera frames. Max speed sends the next frame as soon as the scanner worker is ready; the worker never queues overlapping inference.</p>
+          </section>
+
+          <dl class="settings-grid">
+            <div>
+              <dt>Asset channel</dt>
+              <dd id="settings-channel">—</dd>
+            </div>
+            <div>
+              <dt>Build</dt>
+              <dd id="settings-build">—</dd>
+            </div>
+            <div>
+              <dt>Inference threads</dt>
+              <dd id="settings-threads">—</dd>
+            </div>
+            <div>
+              <dt id="settings-detector-name">Detector (cornelius)</dt>
+              <dd id="settings-detector-hash">—</dd>
+            </div>
+            <div>
+              <dt>Embedder (milo)</dt>
+              <dd id="settings-milo-hash">—</dd>
+            </div>
+          </dl>
+
+          <section class="panel panel--nested">
+            <h2>Asset Contract</h2>
+            <pre class="code" id="asset-contract"></pre>
+          </section>
+
+          <section class="panel panel--nested">
+            <h2>Implementation Notes</h2>
+            <ul class="notes" id="notes"></ul>
+          </section>
+
+          <section class="panel panel--nested">
+            <header class="panel-header">
+              <h2>Sensor &amp; Layout</h2>
+              <button class="icon-button" id="copy-diag" type="button">Copy</button>
+            </header>
+            <dl class="settings-grid">
+              <div><dt>Video sensor</dt><dd id="diag-video">—</dd></div>
+              <div><dt>Video aspect</dt><dd id="diag-video-aspect">—</dd></div>
+              <div><dt>Source crop</dt><dd id="diag-source-crop">—</dd></div>
+              <div><dt>Process canvas</dt><dd id="diag-process-canvas">—</dd></div>
+              <div><dt>Display canvas</dt><dd id="diag-display-canvas">—</dd></div>
+              <div><dt>devicePixelRatio</dt><dd id="diag-dpr">—</dd></div>
+              <div><dt>Detector input</dt><dd id="diag-detector-input">—</dd></div>
+              <div><dt>Raw corners</dt><dd id="diag-raw-corners">—</dd></div>
+              <div><dt>Last corners</dt><dd id="diag-corners">—</dd></div>
+              <div><dt>Last sharpness</dt><dd id="diag-sharpness">—</dd></div>
+              <div><dt>Last frame</dt><dd id="diag-timing">—</dd></div>
+            </dl>
+          </section>
+
+        </aside>
+      </main>
+
+      <aside class="debug-dock" id="debug-dock" aria-label="Runtime debug log" hidden>
+        <header class="debug-dock__header">
+          <div>
+            <p class="section-kicker">Debug</p>
+            <h2>Runtime Log</h2>
+          </div>
+          <div class="debug-dock__actions">
+            <button class="icon-button debug-dock__hide" id="debug-hide" type="button">Hide</button>
+            <button class="icon-button debug-dock__clear" id="clear-debug" type="button">Clear</button>
+          </div>
+        </header>
+
+        <div class="crop-preview" id="crop-preview" hidden>
+          <p class="section-kicker">Last aligned crop (embedder input)</p>
+          <canvas class="crop-canvas" id="crop-canvas" width="448" height="448"></canvas>
+        </div>
+
+        <div class="crop-preview" id="detector-preview" hidden>
+          <p class="section-kicker">Detector input (384×384 squash)</p>
+          <canvas class="crop-canvas" id="detector-canvas" width="384" height="384"></canvas>
+        </div>
+
+        <ul class="debug-log" id="debug-log"></ul>
+      </aside>
+    </div>
+
+    <script type="module" src="./app.js?v=__BUILD_ID__"></script>
+  </body>
+</html>

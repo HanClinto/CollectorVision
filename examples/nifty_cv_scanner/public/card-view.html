@@ -1,0 +1,58 @@
+<html>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script> 
+var socket = io.connect('',{transports: ['websocket']});
+    
+    
+socket.on('card_image',function(msg){
+	if(msg.src == 'clear'){
+		$('#display').show().attr('src','http://gatherer.wizards.com/Handlers/Image.ashx?multiverseid=0&type=card');
+		$('#displayOverride').hide();
+	}
+	else if (msg.src == 'overrideStop') {
+		$('#displayOverride').hide();
+		$('#display').show();
+	}
+	else {
+		if(msg.auto){
+			if(msg.src != $('#display').attr('src')){
+				$('#displayOverride').hide();
+				$('#display').show().attr('src',msg.src);
+			}
+		}
+		else {
+		$('#display').hide()
+			$('#displayOverride').show().attr('src',msg.src);
+		}
+	}
+});
+</script>
+
+<style>
+body, html{
+	margin:0;height:100%;
+} 
+#displayImage {
+	width:100%;height:100%;
+	position:absolute;
+	top:0;
+	left:0;
+	} 
+#displayImage img {
+position:absolute;
+top:0;
+left:0;
+	height:100%;
+	max-width:100%;
+	    border-radius: 13px;
+-webkit-border-radius: 13px;
+}
+</style>
+   <body>
+   <div id="displayImage">
+   <img id="display" src="http://gatherer.wizards.com/Handlers/Image.ashx?multiverseid=0&type=card"/>
+   <img id="displayOverride" style="display:none"/>
+   </div>
+   </body>
+</html>

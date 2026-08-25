@@ -1,0 +1,7 @@
+{
+  "release": "web-scanner-assets",
+  "catalog_key": "hf://HanClinto/milo/scryfall-mtg",
+  "bundle_channel": "stable",
+  "model_channel": "stable",
+  "corner_detector_family": "cornelius"
+}

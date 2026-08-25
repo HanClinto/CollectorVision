@@ -1,0 +1,237 @@
+"""NeuralCornerDetector — ONNX-based learned card corner detector.
+
+Runs through ONNX Runtime providers — no PyTorch dependency required.
+
+Architecture: MobileViT-XXS backbone + SimCC coordinate heads trained on
+CCG card corners.  Input 384×384 RGB, outputs four normalised (x, y) corner
+coordinates, a card-presence logit, and a SimCC sharpness scalar.
+
+Card presence heuristic
+-----------------------
+For compatible SimCC architectures, including Cornelius and Fastweb, the exported
+ONNX model includes a *sharpness* output — the mean peak of the eight softmax
+coordinate distributions (4 corners × 2 axes). A high peak means the model has a
+sharp, confident prediction for each axis; a low peak means the distributions are
+flat (no card in view).
+
+In practice, the raw presence logit is unreliable: it fires strongly even on
+blank images.  Sharpness is a much better gate.  When the model emits a
+sharpness output, ``card_present`` is determined by ``sharpness >= min_sharpness``
+and the presence logit is recorded in ``extra`` for diagnostics only.
+
+When the model does not emit sharpness (older checkpoints or non-SimCC models),
+the detector falls back to ``sigmoid(presence_logit) >= presence_threshold``.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from warnings import warn
+
+import cv2
+import numpy as np
+
+from collector_vision.interfaces import DetectionResult
+from collector_vision.onnx_providers import Provider, create_inference_session
+
+_IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+_IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+_CPU_PROVIDER = "CPUExecutionProvider"
+
+
+def _preprocess(bgr: np.ndarray, size: int) -> np.ndarray:
+    """BGR uint8 ndarray → (1, 3, size, size) float32, ImageNet-normalised."""
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    rgb = cv2.resize(rgb, (size, size), interpolation=cv2.INTER_LINEAR)
+    x = rgb.astype(np.float32) / 255.0
+    x = (x - _IMAGENET_MEAN) / _IMAGENET_STD
+    return x.transpose(2, 0, 1)[np.newaxis].astype(np.float32)  # (1,3,H,W)
+
+
+def _orient_shortest_edge_top(corners: np.ndarray, image_shape: tuple[int, ...]) -> np.ndarray:
+    """Rotate corner order so the shortest original-space edge becomes the dewarped top."""
+    h, w = image_shape[:2]
+    pixel_corners = corners * np.array([w, h], dtype=np.float32)
+    edge_lengths = np.linalg.norm(pixel_corners - np.roll(pixel_corners, -1, axis=0), axis=1)
+    shortest_edge = int(np.argmin(edge_lengths))
+    return np.roll(corners, -shortest_edge, axis=0)
+
+
+def _order_corners(pts: np.ndarray, image_shape: tuple[int, ...] | None = None) -> np.ndarray:
+    """Reorder four (x,y) points to canonical TL, TR, BR, BL order."""
+    s = pts.sum(axis=1)
+    d = np.diff(pts, axis=1).ravel()
+    ordered = np.array(
+        [
+            pts[np.argmin(s)],  # TL: smallest x+y
+            pts[np.argmin(d)],  # TR: smallest x-y
+            pts[np.argmax(s)],  # BR: largest x+y
+            pts[np.argmax(d)],  # BL: largest x-y
+        ],
+        dtype=np.float32,
+    )
+    if image_shape is not None:
+        ordered = _orient_shortest_edge_top(ordered, image_shape)
+    return ordered
+
+
+class NeuralCornerDetector:
+    """SimCC card corner detector, runs via onnxruntime.
+
+    Parameters
+    ----------
+    checkpoint:
+        Path to the ``.onnx`` file. Defaults to the bundled Cornelius weights.
+    family:
+        Registry model family to download and cache, for example ``"cornelius"``.
+        Cannot be combined with ``checkpoint``.
+    version:
+        Exact version within ``family``. When omitted, resolves the selected channel.
+    channel:
+        Registry channel used when selecting a family without an exact version.
+    cache_dir:
+        Override the CollectorVision model cache root.
+    offline:
+        If ``True``, require a selected registry model to already be cached.
+    presence_threshold:
+        Fallback gate used when the model does not emit a sharpness output.
+        Minimum ``sigmoid(presence_logit)`` to treat a detection as valid.
+    num_threads:
+        Number of intra-op threads for onnxruntime.  Defaults to 4.
+    provider:
+        ONNX Runtime provider preference. ``"auto"`` prefers available
+        accelerators and falls back to CPU; use ``"cpu"`` or ``"gpu"`` to force
+        one path.
+    """
+
+    def __init__(
+        self,
+        checkpoint: str | Path | None = None,
+        presence_threshold: float = 0.5,
+        num_threads: int = 4,
+        provider: Provider = "auto",
+        *,
+        family: str | None = None,
+        version: str | None = None,
+        channel: str = "stable",
+        cache_dir: Path | None = None,
+        offline: bool = False,
+    ) -> None:
+        from collector_vision import weights as _w
+        from collector_vision.model_artifacts import resolve_registered_model
+
+        if checkpoint is not None and (family is not None or version is not None):
+            raise ValueError("Pass either checkpoint or family/version, not both")
+        if family is None and version is not None:
+            raise ValueError("Pass family when selecting a model version")
+        if checkpoint is None:
+            checkpoint = (
+                _w.CORNER_DETECTOR
+                if family is None
+                else resolve_registered_model(
+                    family,
+                    task="corner-detection",
+                    version=version,
+                    channel=channel,
+                    cache_dir=cache_dir,
+                    offline=offline,
+                )
+            )
+        checkpoint = Path(checkpoint)
+        if not checkpoint.exists():
+            raise FileNotFoundError(
+                f"Corner detector weights not found: {checkpoint}\n"
+                "Install the full package or supply a checkpoint path."
+            )
+
+        self._presence_threshold = presence_threshold
+        self._checkpoint = checkpoint
+        self._num_threads = num_threads
+        self._provider = provider
+        self._sess, self._input_name, self._input_size, self._has_sharpness = self._load(
+            checkpoint, num_threads, provider
+        )
+
+    @staticmethod
+    def _load(onnx_path: Path, num_threads: int, provider: Provider):
+        sess = create_inference_session(onnx_path, num_threads, provider)
+        input_meta = sess.get_inputs()[0]
+        input_name = input_meta.name
+        shape = input_meta.shape
+        input_size = int(shape[2]) if isinstance(shape[2], int) else 384
+        out_names = {o.name for o in sess.get_outputs()}
+        has_sharpness = "sharpness" in out_names
+        return sess, input_name, input_size, has_sharpness
+
+    def _session_uses_accelerator(self) -> bool:
+        return any(name != _CPU_PROVIDER for name in self._sess.get_providers())
+
+    def _run_session(self, x: np.ndarray):
+        try:
+            return self._sess.run(None, {self._input_name: x})
+        except Exception as exc:
+            if self._provider != "auto" or not self._session_uses_accelerator():
+                raise
+
+            warn(
+                "ONNX Runtime accelerator inference failed for the corner detector; "
+                f"falling back to CPUExecutionProvider. Original error: "
+                f"{type(exc).__name__}: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            self._sess, self._input_name, self._input_size, self._has_sharpness = self._load(
+                self._checkpoint, self._num_threads, "cpu"
+            )
+            return self._sess.run(None, {self._input_name: x})
+
+    def detect(self, image: np.ndarray, min_sharpness: float = 0.02) -> DetectionResult:
+        """Detect card corners in a BGR uint8 image.
+
+        Parameters
+        ----------
+        image:
+            BGR uint8 ndarray as returned by ``cv2.imread``.
+        min_sharpness:
+            Minimum SimCC mean-peak sharpness to treat a detection as valid.
+            When below this value, ``card_present`` is False and the frame
+            should be skipped.  Range [0, 1]; default 0.02 sits comfortably
+            between blank frames (≈0.008) and valid cards (≈0.03–0.07).
+            Pass ``0.0`` to disable the gate entirely.
+
+        Returns
+        -------
+        DetectionResult with normalised (x, y) corners in TL, TR, BR, BL order.
+        ``card_present`` is False when sharpness is below ``min_sharpness``.
+        ``result.sharpness`` holds the SimCC mean-peak value (or ``None`` for
+        older checkpoints).  ``extra["presence"]`` holds the raw presence logit
+        sigmoid for diagnostics.
+        """
+        x = _preprocess(image, self._input_size)
+        outs = self._run_session(x)
+
+        corners_flat = np.clip(outs[0].squeeze(), 0.0, 1.0)  # (8,)
+        presence_logit = float(outs[1].squeeze())
+        presence = float(1.0 / (1.0 + np.exp(-presence_logit)))  # sigmoid
+
+        sharpness: float | None = None
+        if self._has_sharpness:
+            sharpness = float(outs[2].squeeze())
+            card_present = sharpness >= min_sharpness
+            confidence = sharpness
+        else:
+            card_present = presence >= self._presence_threshold
+            confidence = presence
+
+        corners = _order_corners(corners_flat.reshape(4, 2).astype(np.float32), image.shape)
+
+        return DetectionResult(
+            corners=corners,
+            card_present=card_present,
+            confidence=confidence,
+            sharpness=sharpness,
+            extra={"presence": presence},
+        )
+
+    def __repr__(self) -> str:
+        return f"NeuralCornerDetector(input_size={self._input_size})"

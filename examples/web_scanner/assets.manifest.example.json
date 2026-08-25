@@ -1,0 +1,41 @@
+{
+  "version": "0.1.0",
+  "models": {
+    "detector": "assets/models/detector.onnx",
+    "milo": "assets/models/milo.onnx"
+  },
+  "model_sizes": {
+    "detector": 3200000,
+    "milo": 5200000
+  },
+  "model_hashes": {
+    "detector": "sha256:placeholder",
+    "milo": "sha256:placeholder"
+  },
+  "model_versions": {
+    "detector": "2.12",
+    "milo": "1.0.0"
+  },
+  "detector": {
+    "family": "cornelius",
+    "architecture": "mobilevit-xxs-simcc",
+    "input_size": 384,
+    "preprocess": "imagenet-rgb",
+    "outputs": {
+      "corners": "corners",
+      "presence": "presence",
+      "sharpness": "sharpness"
+    }
+  },
+  "catalog": {
+    "embeddings": "assets/catalog/scryfall-mtg-embeddings.f32",
+    "card_ids": "assets/catalog/scryfall-mtg-card-ids.json",
+    "asset_sizes": {
+      "embeddings": 55300000,
+      "card_ids": 4400000
+    },
+    "metadata": "assets/catalog/scryfall-mtg-metadata.json",
+    "rows": 108000,
+    "dims": 128
+  }
+}

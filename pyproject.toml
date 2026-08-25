@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "collectorvision"
+version = "0.1.0.dev0"
+description = "Card identification library for collectible card games (MTG, Pokémon, and more)"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.10"
+authors = [{ name = "HanClinto", email = "hanclinto@gmail.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Games/Entertainment",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "Pillow>=9.0",
+    "numpy>=1.24",
+    "opencv-python-headless>=4.7",
+]
+
+[project.optional-dependencies]
+# Hugging Face model and catalog artifact resolution.
+hf = ["huggingface_hub>=1.0,<2"]
+# Example server
+server = [
+    "fastapi>=0.110",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+    "uvicorn[standard]>=0.29",
+]
+dev = ["pytest", "ruff", "build", "twine"]
+
+[project.urls]
+Homepage = "https://github.com/HanClinto/CollectorVision"
+Repository = "https://github.com/HanClinto/CollectorVision"
+"Bug Tracker" = "https://github.com/HanClinto/CollectorVision/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["collector_vision*"]
+
+[tool.setuptools.package-data]
+# Single-file ONNX weights bundled in the wheel (cornelius.onnx, milo.onnx)
+# py.typed is the PEP 561 marker that tells type checkers this package has inline types.
+collector_vision = ["data/*.json", "weights/*.onnx", "py.typed"]
+
+[tool.ruff]
+line-length = 100
+exclude = [
+  "docs/animation",
+  "experiments",
+  "README.md",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]  # line length — enforced by formatter, not linter
+
+[tool.pytest.ini_options]
+markers = [
+    "hf: tests that download from HuggingFace (deselect with -m 'not hf')",
+]

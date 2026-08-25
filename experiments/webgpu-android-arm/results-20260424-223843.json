@@ -1,0 +1,87 @@
+{
+  "error": null,
+  "adapterInfo": {
+    "vendor": "unknown",
+    "architecture": "unknown",
+    "device": "unknown",
+    "description": ""
+  },
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
+  "tests": [
+    {
+      "name": "test_single_conv.onnx",
+      "status": "pass",
+      "wasmFirst8": [
+        0.1968671828508377,
+        0.4281277358531952,
+        0.4281277358531952,
+        0.4281277358531952,
+        0.4281277358531952,
+        0.4281277358531952,
+        0.4281277358531952,
+        0.4281277358531952
+      ],
+      "webgpuFirst8": null,
+      "wasmMaxDiff": 0,
+      "webgpuMaxDiff": null
+    },
+    {
+      "name": "test_conv_bn_relu.onnx",
+      "status": "pass",
+      "wasmFirst8": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "webgpuFirst8": null,
+      "wasmMaxDiff": 0,
+      "webgpuMaxDiff": null
+    },
+    {
+      "name": "test_two_conv.onnx",
+      "status": "pass",
+      "wasmFirst8": [
+        0.2907651662826538,
+        0.6605352163314819,
+        0.6605352163314819,
+        0.6605352163314819,
+        0.6605352163314819,
+        0.6605352163314819,
+        0.6605352163314819,
+        0.6605352163314819
+      ],
+      "webgpuFirst8": null,
+      "wasmMaxDiff": 5.960464477539063e-08,
+      "webgpuMaxDiff": null
+    },
+    {
+      "name": "test_global_avgpool_gemm.onnx",
+      "status": "pass",
+      "wasmFirst8": [
+        -0.0698729157447815,
+        -1.0586971044540405,
+        -0.27172228693962097,
+        0.7569694519042969,
+        0.49456340074539185,
+        -0.4088600277900696,
+        -0.15130098164081573,
+        -0.4536170959472656
+      ],
+      "webgpuFirst8": null,
+      "wasmMaxDiff": 1.1920928955078125e-07,
+      "webgpuMaxDiff": null
+    }
+  ],
+  "summary": {
+    "pass": 4,
+    "fail": 0,
+    "warn": 0,
+    "skip": 0
+  },
+  "capturedShaders": null
+}

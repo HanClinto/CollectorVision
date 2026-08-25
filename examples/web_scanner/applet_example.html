@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CollectorVision Scanner Playground</title>
+    <script>
+      (function () {
+        if (!("serviceWorker" in navigator)) return;
+
+        var params = new URLSearchParams(location.search);
+        var skipFromQuery = params.get("coi") === "0" || params.get("skipCoi") === "1";
+
+        if (skipFromQuery) {
+          navigator.serviceWorker.getRegistration("./")
+            .then(function (reg) {
+              if (!reg) return;
+              return reg.unregister().then(function (removed) {
+                if (removed && navigator.serviceWorker.controller) {
+                  location.reload();
+                }
+              });
+            })
+            .catch(function (err) {
+              console.warn("COI service worker unregister failed:", err);
+            });
+          return;
+        }
+
+        if (self.crossOriginIsolated) return;
+
+        navigator.serviceWorker.register("./coi-serviceworker.js?v=__BUILD_ID__", { scope: "./" })
+          .then(function (reg) {
+            if (reg.active && !navigator.serviceWorker.controller) {
+              location.reload();
+            }
+          })
+          .catch(function (err) {
+            console.warn("COI service worker registration failed:", err);
+          });
+      })();
+    </script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/themes/prism.min.css" />
+    <link rel="stylesheet" href="./applet_example.css?v=__BUILD_ID__" />
+  </head>
+  <body>
+    <div id="effects-layer" aria-hidden="true"></div>
+    <main>
+      <header>
+        <p class="eyebrow">Candidate API</p>
+        <h1>Scanner Playground</h1>
+        <p>Try preset card handlers, edit the JavaScript, and see how the applet can fit into your own page. This playground keeps everything local in your browser: apply a handler, then scan a card. Need to disable cross-origin isolation for debugging? Open with <code>?coi=0</code>.</p>
+      </header>
+
+      <section class="layout">
+        <div class="panel">
+          <div id="collectorvision"></div>
+          <details class="scan-settings">
+            <summary>Scan settings</summary>
+            <div class="scan-settings-grid">
+              <label class="scan-settings-mic" for="scan-corner-threshold">
+                <span>Corner threshold <span id="scan-corner-threshold-label">0.02</span></span>
+                <input id="scan-corner-threshold" type="range" min="0" max="0.1" step="0.01" />
+                <span class="scan-settings-meter" aria-hidden="true">
+                  <span id="scan-corner-signal-fill" class="scan-settings-meter__fill"></span>
+                  <span id="scan-corner-signal-threshold" class="scan-settings-meter__threshold"></span>
+                </span>
+                <span id="scan-corner-signal-value" class="scan-settings-meter-value">Current 0.00</span>
+              </label>
+              <label class="scan-settings-field">ID Threshold <input id="scan-threshold" type="number" min="0" max="1" step="0.01" /></label>
+              <div class="scan-settings-signal" aria-live="polite">
+                <span>Match score <span id="scan-match-signal-value">Current —</span></span>
+                <span class="scan-settings-meter" aria-hidden="true">
+                  <span id="scan-match-signal-fill" class="scan-settings-meter__fill"></span>
+                  <span id="scan-match-signal-threshold" class="scan-settings-meter__threshold"></span>
+                </span>
+              </div>
+              <label class="scan-settings-field">Consecutive scans <input id="scan-consecutive" type="number" min="1" max="6" step="1" /></label>
+              <label class="scan-settings-slider">
+                Scan interval <span id="scan-interval-label">900ms</span>
+                <input id="scan-interval" type="range" min="0" max="1200" step="25" />
+              </label>
+              <label class="scan-settings-toggle"><input id="scan-webgpu" type="checkbox" /> <span>Enable WebGPU (experimental)</span></label>
+              <label class="scan-settings-toggle"><input id="scan-fps-overlay" type="checkbox" /> <span>Show FPS debug overlay</span></label>
+              <label class="scan-settings-toggle"><input id="scan-group-secondary" type="checkbox" /> <span>Group printings by secondary ID (oracle)</span></label>
+              <div class="scan-settings-actions">
+                <button id="apply-scan-settings" class="secondary" type="button">Apply</button>
+              </div>
+            </div>
+          </details>
+          <pre id="events">Waiting for cards…</pre>
+        </div>
+
+        <div class="panel">
+          <div class="panel-heading">
+            <h2>Card handler JavaScript</h2>
+            <p>Start with the Scryfall example, or change the rows, logs, and fetches to fit your own page.</p>
+          </div>
+          <div class="handler-frame" aria-label="Card scan handler function">
+            <pre class="function-signature"><code class="language-javascript">async function onCardScanned(card, mygui) {</code></pre>
+            <div id="handler-code" class="editor-shell language-javascript" aria-label="Editable JavaScript function body"></div>
+            <pre class="function-signature"><code class="language-javascript">}</code></pre>
+          </div>
+          <div class="editor-meta">
+            <span class="pill">Card: <code>card.cardId</code> <code>card.score</code> <code>card.detectedAt</code> <code>card.raw</code></span>
+            <span class="pill">Secondary: <code>card.secondaryId</code> <code>card.secondaryIdField</code> (and <code>card[card.secondaryIdField]</code>)</span>
+            <span class="pill">Helpers: <code>mygui.addRow()</code> <code>mygui.log()</code> <code>mygui.fetchJson()</code> <code>mygui.cardImageUrl()</code> <code>mygui.cameraRect()</code></span>
+            <span class="pill">Fun: <code>mygui.bounceCard()</code> <code>mygui.priceBurst()</code> <code>mygui.addToTotal()</code></span>
+          </div>
+          <div class="toolbar">
+            <button id="apply-code" type="button">Apply handler</button>
+            <label class="preset-picker">Preset <select id="preset-code"></select></label>
+            <button id="reset-code" class="secondary" type="button">Load preset</button>
+            <button id="clear-table" class="secondary" type="button">Clear table</button>
+          </div>
+          <div class="tip-card">
+            <p><strong>Try this:</strong> choose a preset, click <strong>Load preset</strong>, then scan a card. The examples are starting points—edit them freely.</p>
+            <ul>
+              <li><code>card.cardId</code> is the confirmed CollectorVision card id.</li>
+              <li><code>card.secondaryId</code> is the optional grouped id.</li>
+              <li><code>card.secondaryIdField</code> is auto-detected from catalog metadata (for example <code>oracleId</code>).</li>
+              <li><code>card.score</code> is the match confidence.</li>
+              <li><code>mygui.bounceCard()</code> adds one bouncing image per scan.</li>
+              <li>When cross-origin isolation is enabled for max performance, cross-origin card art may render as a local fallback tile.</li>
+              <li>The handler runs only on your device; refreshing restores your saved code.</li>
+            </ul>
+          </div>
+          <div id="table-wrap"><p class="empty">Detected cards will appear here.</p></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-core.min.js" data-manual></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-clike.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-javascript.min.js"></script>
+    <script type="module" src="./applet_example.js?v=__BUILD_ID__"></script>
+  </body>
+</html>

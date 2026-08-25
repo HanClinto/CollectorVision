@@ -1,0 +1,7 @@
+{
+  "release": "web-scanner-assets-testing",
+  "catalog_key": "hf://HanClinto/milo/scryfall-mtg",
+  "bundle_channel": "testing",
+  "model_channel": "testing",
+  "corner_detector_family": "fastweb-single"
+}

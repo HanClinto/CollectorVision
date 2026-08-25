@@ -1,0 +1,570 @@
+/**
+ * Node.js regression tests for the CollectorVision JS detector pipeline.
+ *
+ * Runs the same fillInputTensor -> ONNX model -> orderCorners pipeline that
+ * the browser uses, via onnxruntime-node (CPU) and node-canvas.
+ *
+ * What this catches
+ * -----------------
+ * - Regressions in fillInputTensor (channel order, normalisation)
+ * - Regressions in orderCorners (TL/TR/BR/BL assignment)
+ * - Regressions in output parsing (wrong tensor index / shape)
+ * - Numerical drift between JS-CPU and Python preprocessing pipelines
+ *
+ * Usage
+ * -----
+ *   cd tests/js && npm install && npm test
+ */
+
+import { readFileSync }              from 'fs';
+import { resolve, dirname }          from 'path';
+import { fileURLToPath }             from 'url';
+import { createCanvas, loadImage }   from 'canvas';
+import * as ort                      from 'onnxruntime-node';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT      = resolve(__dirname, '../..');
+
+const CORNELIUS_PATH = resolve(ROOT, 'collector_vision/weights/cornelius.onnx');
+const MILO_PATH      = resolve(ROOT, 'collector_vision/weights/milo.onnx');
+const SAMPLE_IMAGE   = resolve(ROOT, 'examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg');
+
+// Must stay in sync with app.js constants.
+const DETECTOR_SIZE  = 384;
+const EMBEDDER_SIZE  = 448;
+const DEWARP_W       = 252;
+const DEWARP_H       = 352;
+const IMAGENET_MEAN  = [0.485, 0.456, 0.406];
+const IMAGENET_STD   = [0.229, 0.224, 0.225];
+const MIN_SHARPNESS  = 0.02;
+
+// ---------------------------------------------------------------------------
+// Minimal test runner
+// ---------------------------------------------------------------------------
+
+let _passed = 0, _failed = 0;
+const _failures = [];
+
+async function test(label, fn) {
+  try {
+    await fn();
+    _passed += 1;
+    console.log(`  PASS  ${label}`);
+  } catch (err) {
+    _failed += 1;
+    _failures.push({ label, err });
+    console.error(`  FAIL  ${label}`);
+    console.error(`        ${err.message}`);
+  }
+}
+
+function assert(cond, msg) {
+  if (!cond) throw new Error(msg);
+}
+
+// ---------------------------------------------------------------------------
+// JS pipeline -- verbatim port of critical functions from app.js.
+// Changes to these functions in app.js MUST be reflected here.
+// ---------------------------------------------------------------------------
+
+function fillInputTensor(rgbaData, size) {
+  const tensor = new Float32Array(3 * size * size);
+  const plane  = size * size;
+  for (let i = 0; i < plane; i += 1) {
+    const r = rgbaData[i * 4]     / 255;
+    const g = rgbaData[i * 4 + 1] / 255;
+    const b = rgbaData[i * 4 + 2] / 255;
+    tensor[i]             = (r - IMAGENET_MEAN[0]) / IMAGENET_STD[0];
+    tensor[plane + i]     = (g - IMAGENET_MEAN[1]) / IMAGENET_STD[1];
+    tensor[plane * 2 + i] = (b - IMAGENET_MEAN[2]) / IMAGENET_STD[2];
+  }
+  return tensor;
+}
+
+function orientShortestEdgeTop(corners, width, height) {
+  const edgeLengths = corners.map(([x1, y1], index) => {
+    const [x2, y2] = corners[(index + 1) % corners.length];
+    const dx = (x1 - x2) * width;
+    const dy = (y1 - y2) * height;
+    return Math.hypot(dx, dy);
+  });
+  let shortestEdge = 0;
+  for (let i = 1; i < edgeLengths.length; i += 1) {
+    if (edgeLengths[i] < edgeLengths[shortestEdge]) shortestEdge = i;
+  }
+  return corners.map((_, index) => corners[(index + shortestEdge) % corners.length]);
+}
+
+function orderCorners(points, width = null, height = null) {
+  const cx = points.reduce((s, [x]) => s + x, 0) / points.length;
+  const cy = points.reduce((s, [, y]) => s + y, 0) / points.length;
+  const sorted = [...points].sort(
+    ([ax, ay], [bx, by]) =>
+      Math.atan2(ay - cy, ax - cx) - Math.atan2(by - cy, bx - cx),
+  );
+  let start = 0, best = Infinity;
+  for (let i = 0; i < sorted.length; i += 1) {
+    const score = sorted[i][0] + sorted[i][1];
+    if (score < best) { best = score; start = i; }
+  }
+  const ordered = [0, 1, 2, 3].map((k) => sorted[(start + k) % 4]);
+  const signedArea = ordered.reduce((sum, [x1, y1], i) => {
+    const [x2, y2] = ordered[(i + 1) % 4];
+    return sum + (x1 * y2 - x2 * y1);
+  }, 0);
+  const canonical = signedArea < 0
+    ? [ordered[0], ordered[3], ordered[2], ordered[1]]
+    : ordered;
+  return width && height ? orientShortestEdgeTop(canonical, width, height) : canonical;
+}
+
+function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
+
+function chooseBetterMatch(current, candidate) {
+  return candidate.score > current.score ? candidate : current;
+}
+
+class ScanBucket {
+  constructor(minMatches = 2, windowSize = 5, cooldownMs = 3500) {
+    this.minMatches = minMatches;
+    this.windowSize = windowSize;
+    this.cooldownMs = cooldownMs;
+    this.records = [];
+    this.cooldowns = new Map();
+  }
+
+  push(rec, now = Date.now()) {
+    for (const [id, expiry] of this.cooldowns) {
+      if (now >= expiry) {
+        this.cooldowns.delete(id);
+      }
+    }
+
+    const entry = rec && !this.cooldowns.has(rec.cardId) ? { ...rec, at: now } : null;
+    this.records.push(entry);
+    if (this.records.length > this.windowSize) {
+      this.records.shift();
+    }
+
+    if (!entry) {
+      return null;
+    }
+
+    const matches = this.records.filter((record) => record?.cardId === entry.cardId);
+    if (matches.length < this.minMatches) {
+      return null;
+    }
+
+    const confirmed = matches.reduce(
+      (best, record) => (record.score > best.score ? record : best),
+      matches[0],
+    );
+    this.cooldowns.set(entry.cardId, now + this.cooldownMs);
+    this.records = [];
+    return confirmed;
+  }
+}
+
+function solveLinearSystem(matrix, vector) {
+  const size = vector.length;
+  const a = matrix.map((row, index) => [...row, vector[index]]);
+  for (let col = 0; col < size; col += 1) {
+    let pivot = col;
+    for (let row = col + 1; row < size; row += 1) {
+      if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row;
+    }
+    if (Math.abs(a[pivot][col]) < 1e-10) throw new Error('Singular matrix.');
+    if (pivot !== col) [a[col], a[pivot]] = [a[pivot], a[col]];
+    const scale = a[col][col];
+    for (let k = col; k <= size; k += 1) a[col][k] /= scale;
+    for (let row = 0; row < size; row += 1) {
+      if (row === col) continue;
+      const factor = a[row][col];
+      for (let k = col; k <= size; k += 1) a[row][k] -= factor * a[col][k];
+    }
+  }
+  return a.map((row) => row[size]);
+}
+
+function computeHomography(srcPoints, dstPoints) {
+  const matrix = [], vector = [];
+  for (let i = 0; i < 4; i += 1) {
+    const [x, y] = srcPoints[i];
+    const [u, v] = dstPoints[i];
+    matrix.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); vector.push(u);
+    matrix.push([0, 0, 0, x, y, 1, -v * x, -v * y]); vector.push(v);
+  }
+  const [h11, h12, h13, h21, h22, h23, h31, h32] = solveLinearSystem(matrix, vector);
+  return [h11, h12, h13, h21, h22, h23, h31, h32, 1];
+}
+
+function applyHomography(m, x, y) {
+  const d = m[6] * x + m[7] * y + m[8];
+  return [(m[0] * x + m[1] * y + m[2]) / d, (m[3] * x + m[4] * y + m[5]) / d];
+}
+
+function sampleBilinear(data, width, height, x, y, ch) {
+  const cx = Math.min(Math.max(x, 0), width - 1);
+  const cy = Math.min(Math.max(y, 0), height - 1);
+  const x0 = Math.floor(cx), y0 = Math.floor(cy);
+  const x1 = Math.min(x0 + 1, width - 1), y1 = Math.min(y0 + 1, height - 1);
+  const tx = cx - x0, ty = cy - y0;
+  const top    = data[(y0 * width + x0) * 4 + ch] * (1 - tx) + data[(y0 * width + x1) * 4 + ch] * tx;
+  const bottom = data[(y1 * width + x0) * 4 + ch] * (1 - tx) + data[(y1 * width + x1) * 4 + ch] * tx;
+  return top * (1 - ty) + bottom * ty;
+}
+
+function normalizeEmbedding(emb) {
+  let norm = 0;
+  for (const v of emb) norm += v * v;
+  norm = Math.sqrt(norm);
+  if (norm > 1e-8) for (let i = 0; i < emb.length; i += 1) emb[i] /= norm;
+  return emb;
+}
+
+function jsDeWarp(srcCanvas, corners) {
+  const { width, height } = srcCanvas;
+  const srcPts = corners.map(([x, y]) => [x * width, y * height]);
+  const dstPts = [[0, 0], [DEWARP_W - 1, 0], [DEWARP_W - 1, DEWARP_H - 1], [0, DEWARP_H - 1]];
+  const inv     = computeHomography(dstPts, srcPts);
+  const srcData = srcCanvas.getContext('2d', { willReadFrequently: true })
+    .getImageData(0, 0, width, height);
+  const dstCanvas = createCanvas(DEWARP_W, DEWARP_H);
+  const dstCtx    = dstCanvas.getContext('2d');
+  const dstData   = dstCtx.createImageData(DEWARP_W, DEWARP_H);
+  for (let y = 0; y < DEWARP_H; y += 1) {
+    for (let x = 0; x < DEWARP_W; x += 1) {
+      const [sx, sy] = applyHomography(inv, x, y);
+      const off = (y * DEWARP_W + x) * 4;
+      for (let c = 0; c < 3; c += 1)
+        dstData.data[off + c] = sampleBilinear(srcData.data, width, height, sx, sy, c);
+      dstData.data[off + 3] = 255;
+    }
+  }
+  dstCtx.putImageData(dstData, 0, 0);
+  return dstCanvas;
+}
+
+// ---------------------------------------------------------------------------
+// Load models
+// ---------------------------------------------------------------------------
+
+const detectorSession = await ort.InferenceSession.create(CORNELIUS_PATH, {
+  executionProviders: ['cpu'],
+});
+const embedderSession = await ort.InferenceSession.create(MILO_PATH, {
+  executionProviders: ['cpu'],
+});
+
+// ---------------------------------------------------------------------------
+// Pipeline helpers
+// ---------------------------------------------------------------------------
+
+async function runDetector(imgCanvas) {
+  const scaled = createCanvas(DETECTOR_SIZE, DETECTOR_SIZE);
+  scaled.getContext('2d').drawImage(imgCanvas, 0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
+  const { data } = scaled.getContext('2d').getImageData(0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
+  const flat  = fillInputTensor(data, DETECTOR_SIZE);
+  const feeds = { [detectorSession.inputNames[0]]: new ort.Tensor('float32', flat, [1, 3, DETECTOR_SIZE, DETECTOR_SIZE]) };
+  const out   = await detectorSession.run(feeds);
+
+  const cornersRaw    = Array.from(out[detectorSession.outputNames[0]].data).slice(0, 8);
+  const presenceLogit = out[detectorSession.outputNames[1]].data[0];
+  const sharpness     = detectorSession.outputNames[2]
+    ? Number(out[detectorSession.outputNames[2]].data[0]) : null;
+
+  const points = [];
+  for (let i = 0; i < 8; i += 2)
+    points.push([Math.min(Math.max(cornersRaw[i], 0), 1), Math.min(Math.max(cornersRaw[i + 1], 0), 1)]);
+
+  const confidence = sharpness ?? sigmoid(presenceLogit);
+  return {
+    corners: orderCorners(points, imgCanvas.width, imgCanvas.height),
+    sharpness,
+    cardPresent: confidence >= MIN_SHARPNESS,
+  };
+}
+
+async function runEmbedder(dewarpCanvas) {
+  const scaled = createCanvas(EMBEDDER_SIZE, EMBEDDER_SIZE);
+  scaled.getContext('2d').drawImage(dewarpCanvas, 0, 0, EMBEDDER_SIZE, EMBEDDER_SIZE);
+  const { data } = scaled.getContext('2d').getImageData(0, 0, EMBEDDER_SIZE, EMBEDDER_SIZE);
+  const flat  = fillInputTensor(data, EMBEDDER_SIZE);
+  const feeds = { [embedderSession.inputNames[0]]: new ort.Tensor('float32', flat, [1, 3, EMBEDDER_SIZE, EMBEDDER_SIZE]) };
+  const out   = await embedderSession.run(feeds);
+  const emb   = Float32Array.from(out[embedderSession.outputNames[0]].data);
+  return normalizeEmbedding(emb);
+}
+
+// ---------------------------------------------------------------------------
+// Tests against the bundled sample image
+// ---------------------------------------------------------------------------
+
+console.log(`\nSample: ${SAMPLE_IMAGE.replace(ROOT + '/', '')}`);
+
+const img       = await loadImage(readFileSync(SAMPLE_IMAGE));
+const srcCanvas = createCanvas(img.width, img.height);
+srcCanvas.getContext('2d').drawImage(img, 0, 0);
+
+const detection = await runDetector(srcCanvas);
+
+await test('detector finds card in sample image', () => {
+  assert(detection.cardPresent,
+    `Card not detected. sharpness=${detection.sharpness?.toFixed(3)}, threshold=${MIN_SHARPNESS}`);
+});
+
+await test('corners are in [0,1] and form a reasonable quad', () => {
+  assert(detection.corners.length === 4, 'Expected 4 corners');
+  for (const [x, y] of detection.corners) {
+    assert(x >= 0 && x <= 1 && y >= 0 && y <= 1, `Corner out of bounds: [${x}, ${y}]`);
+  }
+  // TL should have the smallest x+y sum among the four corners.
+  const [tlx, tly] = detection.corners[0];
+  for (const [x, y] of detection.corners.slice(1)) {
+    assert(tlx + tly <= x + y + 0.05, `TL corner [${tlx},${tly}] is not top-left`);
+  }
+});
+
+await test('dewarp and embed produce a valid embedding', async () => {
+  assert(detection.cardPresent, 'Card not detected -- cannot dewarp/embed');
+  const dewarp = jsDeWarp(srcCanvas, detection.corners);
+  assert(dewarp.width === DEWARP_W && dewarp.height === DEWARP_H,
+    `Unexpected dewarp size: ${dewarp.width}x${dewarp.height}`);
+
+  const emb = await runEmbedder(dewarp);
+  assert(emb.length === 128, `Expected 128-d embedding, got ${emb.length}`);
+
+  let norm = 0;
+  for (const v of emb) norm += v * v;
+  assert(Math.abs(Math.sqrt(norm) - 1.0) < 1e-4,
+    `Embedding not L2-normalised: norm=${Math.sqrt(norm).toFixed(6)}`);
+});
+
+// ---------------------------------------------------------------------------
+// orderCorners regression tests
+// ---------------------------------------------------------------------------
+
+console.log('\norderCorners');
+
+function assertCornersClose(actual, expected, label) {
+  assert(actual.length === expected.length, `${label}: corner count mismatch`);
+  for (let i = 0; i < expected.length; i += 1) {
+    assert(
+      Math.abs(actual[i][0] - expected[i][0]) < 1e-6
+        && Math.abs(actual[i][1] - expected[i][1]) < 1e-6,
+      `${label}: corner ${i} expected [${expected[i]}], got [${actual[i]}]`,
+    );
+  }
+}
+
+await test('uses original image space when choosing shortest top edge', () => {
+  const corners = [[0.4, 0.2], [0.6, 0.2], [0.6, 0.8], [0.4, 0.8]];
+  const ordered = orderCorners(corners, 2000, 500);
+  assertCornersClose(
+    ordered,
+    [[0.6, 0.2], [0.6, 0.8], [0.4, 0.8], [0.4, 0.2]],
+    'original-space shortest edge',
+  );
+});
+
+await test('rotates shortest edge to top from any side', () => {
+  const corners = [[0.0, 0.0], [0.8, 0.0], [0.7, 0.8], [0.0, 0.8]];
+  const ordered = orderCorners(corners, 1000, 1000);
+  assertCornersClose(
+    ordered,
+    [[0.7, 0.8], [0.0, 0.8], [0.0, 0.0], [0.8, 0.0]],
+    'shortest edge from any side',
+  );
+});
+
+await test('keeps the stronger orientation match', () => {
+  const upright = { cardId: 'upright-card', score: 0.70, orientation: 'upright' };
+  const rotated = { cardId: 'rotated-card', score: 0.92, orientation: 'rotated_180' };
+  const best = chooseBetterMatch(upright, rotated);
+  assert(best.cardId === 'rotated-card', `Expected rotated-card, got ${best.cardId}`);
+  assert(best.orientation === 'rotated_180', `Expected rotated_180, got ${best.orientation}`);
+});
+
+await test('rolling scan buffer confirms non-consecutive matches', () => {
+  const bucket = new ScanBucket(2, 5);
+  assert(bucket.push({ cardId: 'card-a', score: 0.72 }, 1000) === null);
+  assert(bucket.push(null, 1100) === null);
+  const confirmed = bucket.push({ cardId: 'card-a', score: 0.74 }, 1200);
+  assert(confirmed?.cardId === 'card-a', `Expected card-a, got ${confirmed?.cardId}`);
+});
+
+await test('rolling scan buffer groups rotated and upright hits by card', () => {
+  const bucket = new ScanBucket(2, 5);
+  assert(bucket.push({ cardId: 'card-a', score: 0.71, orientation: 'upright' }, 2000) === null);
+  const confirmed = bucket.push({ cardId: 'card-a', score: 0.88, orientation: 'rotated_180' }, 2100);
+  assert(confirmed?.cardId === 'card-a', `Expected card-a, got ${confirmed?.cardId}`);
+  assert(confirmed?.orientation === 'rotated_180', `Expected rotated_180, got ${confirmed?.orientation}`);
+});
+
+await test('rolling scan buffer preserves the confirmed catalog name', () => {
+  const bucket = new ScanBucket(2, 5);
+  assert(bucket.push({ cardId: 'card-a', cardName: 'Alpha', score: 0.71 }, 3000) === null);
+  const confirmed = bucket.push({ cardId: 'card-a', cardName: 'Alpha', score: 0.88 }, 3100);
+  assert(confirmed?.cardName === 'Alpha', `Expected Alpha, got ${confirmed?.cardName}`);
+});
+
+// ---------------------------------------------------------------------------
+// isUsableQuad regression tests
+// ---------------------------------------------------------------------------
+
+function quadArea(corners) {
+  let area = 0;
+  for (let i = 0; i < corners.length; i += 1) {
+    const [x1, y1] = corners[i];
+    const [x2, y2] = corners[(i + 1) % corners.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(area) * 0.5;
+}
+
+function isUsableQuad(corners) {
+  if (!corners || corners.length !== 4) return false;
+  const area = quadArea(corners);
+  if (!Number.isFinite(area) || area < 0.01) return false;
+  for (let i = 0; i < corners.length; i += 1) {
+    for (let j = i + 1; j < corners.length; j += 1) {
+      const dx = corners[i][0] - corners[j][0];
+      const dy = corners[i][1] - corners[j][1];
+      if ((dx * dx + dy * dy) < 0.0004) return false;
+    }
+  }
+  // Reject non-convex quads (mixed cross-product signs).
+  let pos = 0, neg = 0;
+  for (let i = 0; i < 4; i += 1) {
+    const prev = corners[(i + 3) % 4];
+    const curr = corners[i];
+    const next = corners[(i + 1) % 4];
+    const cross = (curr[0] - prev[0]) * (next[1] - curr[1])
+                - (curr[1] - prev[1]) * (next[0] - curr[0]);
+    if (cross > 0) pos += 1;
+    if (cross < 0) neg += 1;
+  }
+  if (pos > 0 && neg > 0) return false;
+  return true;
+}
+
+console.log('\nisUsableQuad');
+
+await test('rejects non-convex quad from issue #7 (portrait camera, 3 right-edge corners)', () => {
+  // Ordered corners captured from bug report cv_2026-04-24T21-19-49:
+  // three corners stacked on the right edge (model missed the top-left corner).
+  const bad = [
+    [0.8712919950, 0.1383170187],
+    [0.8652299642, 0.2562827169],
+    [0.8706384897, 0.5906347036],
+    [0.5520254373, 0.5551005601],
+  ];
+  assert(!isUsableQuad(bad), 'Expected non-convex quad to be rejected');
+});
+
+await test('accepts a well-formed card quad', () => {
+  const good = [[0.15, 0.10], [0.85, 0.12], [0.82, 0.88], [0.13, 0.86]];
+  assert(isUsableQuad(good), 'Expected valid quad to be accepted');
+});
+
+await test('rejects quad with area too small', () => {
+  const tiny = [[0.49, 0.49], [0.51, 0.49], [0.51, 0.51], [0.49, 0.51]];
+  assert(!isUsableQuad(tiny), 'Expected tiny quad to be rejected (area < 0.01)');
+});
+
+// ---------------------------------------------------------------------------
+// Packed float16 catalog search tests
+// ---------------------------------------------------------------------------
+
+function float16ToFloat32(value) {
+  const sign = (value & 0x8000) >> 15;
+  const exponent = (value & 0x7c00) >> 10;
+  const fraction = value & 0x03ff;
+
+  if (exponent === 0) {
+    if (fraction === 0) return sign ? -0 : 0;
+    return (sign ? -1 : 1) * 2 ** (-14) * (fraction / 1024);
+  }
+  if (exponent === 0x1f) {
+    return fraction ? Number.NaN : (sign ? -Infinity : Infinity);
+  }
+  return (sign ? -1 : 1) * 2 ** (exponent - 15) * (1 + fraction / 1024);
+}
+
+function createFloat16LookupTable() {
+  const table = new Float32Array(65536);
+  for (let value = 0; value < table.length; value += 1) {
+    table[value] = float16ToFloat32(value);
+  }
+  return table;
+}
+
+function searchFloat32Catalog(query, catalog, rows, dims) {
+  let bestScore = -Infinity;
+  let bestIndex = -1;
+  for (let row = 0; row < rows; row += 1) {
+    const offset = row * dims;
+    let score = 0;
+    for (let col = 0; col < dims; col += 1) {
+      score += catalog[offset + col] * query[col];
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = row;
+    }
+  }
+  return { bestIndex, bestScore };
+}
+
+function searchPackedFloat16Catalog(query, packedCatalog, rows, dims, lookup) {
+  let bestScore = -Infinity;
+  let bestIndex = -1;
+  for (let row = 0; row < rows; row += 1) {
+    const offset = row * dims;
+    let score = 0;
+    for (let col = 0; col < dims; col += 1) {
+      score += lookup[packedCatalog[offset + col]] * query[col];
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = row;
+    }
+  }
+  return { bestIndex, bestScore };
+}
+
+console.log('\nPacked float16 catalog search');
+
+await test('matches decoded float32 search on packed float16 data', () => {
+  const dims = 4;
+  const rows = 3;
+  // Raw IEEE-754 half precision bit patterns:
+  // 1.0, 0.5, -0.5, 0.25, 0.75, -1.0, 1.5, 2.0, 0.125, 0.25, 0.375, 0.5
+  const packed = new Uint16Array([
+    0x3c00, 0x3800, 0xb800, 0x3400,
+    0x3a00, 0xbc00, 0x3e00, 0x4000,
+    0x3000, 0x3400, 0x3600, 0x3800,
+  ]);
+  const decoded = Float32Array.from(packed, float16ToFloat32);
+  const query = new Float32Array([0.2, -0.4, 0.6, 0.8]);
+  const expected = searchFloat32Catalog(query, decoded, rows, dims);
+  const actual = searchPackedFloat16Catalog(query, packed, rows, dims, createFloat16LookupTable());
+
+  assert(actual.bestIndex === expected.bestIndex,
+    `Expected best row ${expected.bestIndex}, got ${actual.bestIndex}`);
+  assert(Math.abs(actual.bestScore - expected.bestScore) < 1e-7,
+    `Expected score ${expected.bestScore}, got ${actual.bestScore}`);
+});
+
+// ---------------------------------------------------------------------------
+// Summary
+// ---------------------------------------------------------------------------
+
+console.log(`\n${'='.repeat(50)}`);
+console.log(`Results: ${_passed} passed, ${_failed} failed`);
+if (_failures.length > 0) {
+  for (const { label, err } of _failures) {
+    console.error(`  FAIL  ${label}: ${err.message.split('\n')[0]}`);
+  }
+  process.exit(1);
+}

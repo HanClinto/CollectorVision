@@ -1,0 +1,147 @@
+:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: transparent;
+  color: #fff;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.overlay-card {
+  position: fixed;
+  display: grid;
+  justify-items: stretch;
+  width: min(31rem, calc(100vw - 4rem));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(244, 193, 93, 0.18), transparent 12rem),
+    rgba(17, 16, 15, 0.88);
+  box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(18px);
+  opacity: 0;
+  transform: translateY(1rem);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.overlay-card.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.position-top-left { top: 2rem; left: 2rem; }
+.position-top-right { top: 2rem; right: 2rem; }
+.position-bottom-left { bottom: 2rem; left: 2rem; }
+.position-bottom-right { right: 2rem; bottom: 2rem; }
+
+.size-medium { width: min(22rem, calc(100vw - 4rem)); }
+.size-large { width: min(31rem, calc(100vw - 4rem)); }
+.size-huge { width: min(42rem, calc(100vw - 4rem)); }
+
+.background-solid { background: #11100f; }
+
+.background-transparent {
+  border-color: transparent;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.card-art-shell {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 1.25rem;
+  background: #080808;
+  box-shadow: 0 0.8rem 2rem rgba(0, 0, 0, 0.28);
+}
+
+.card-art-shell::before {
+  display: block;
+  padding-top: 139.5%;
+  content: "";
+}
+
+.card-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.card-copy {
+  display: none;
+  min-width: 0;
+  padding: 0.7rem 0.35rem 0.2rem;
+  text-align: center;
+}
+
+.show-name .card-name,
+.show-set .card-set,
+.show-rarity .card-rarity,
+.show-price .card-price {
+  display: block;
+}
+
+.show-name .card-copy,
+.show-set .card-copy,
+.show-rarity .card-copy,
+.show-price .card-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.card-name {
+  margin: 0;
+  overflow: hidden;
+  color: #fff;
+  font-size: clamp(1.45rem, 2.4vw, 2.25rem);
+  font-weight: 900;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.card-set,
+.card-rarity,
+.card-price {
+  display: none;
+  margin: 0;
+  color: #d4c8b9;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.card-rarity { text-transform: capitalize; }
+
+.card-price { color: #f4c15d; }
+
+.background-transparent .card-copy { text-shadow: 0 0.15rem 0.5rem #000; }
+
+@media (max-width: 620px) {
+  .overlay-card {
+    width: min(25rem, calc(100vw - 2rem));
+  }
+
+  .position-top-left { top: 1rem; left: 1rem; }
+  .position-top-right { top: 1rem; right: 1rem; }
+  .position-bottom-left { bottom: 1rem; left: 1rem; }
+  .position-bottom-right { right: 1rem; bottom: 1rem; }
+
+  .size-medium,
+  .size-large,
+  .size-huge {
+    width: min(25rem, calc(100vw - 2rem));
+  }
+}

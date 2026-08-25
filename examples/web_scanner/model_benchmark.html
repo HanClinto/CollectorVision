@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CollectorVision Benchmark</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at top, #172033, #070a10 65%); color: #e6edf3; }
+      main { width: min(760px, 100%); }
+      .card { border: 1px solid #30363d; border-radius: 24px; padding: clamp(24px, 5vw, 44px); background: rgba(13, 17, 23, 0.88); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42); }
+      .eyebrow { margin: 0 0 10px; color: #8b949e; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; }
+      h1 { margin: 0; font-size: clamp(2rem, 7vw, 4rem); line-height: 0.95; }
+      p { color: #c9d1d9; line-height: 1.55; }
+      .status { margin: 24px 0; padding: 16px; border: 1px solid #30363d; border-radius: 16px; background: #010409; color: #c9d1d9; }
+      .status--error { color: #ffb4ab; border-color: #8e2727; background: rgba(142, 39, 39, 0.18); }
+      .actions { display: grid; gap: 12px; margin-top: 20px; }
+      button, a.button { box-sizing: border-box; width: 100%; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid #30363d; border-radius: 14px; padding: 12px 16px; background: #238636; color: #fff; font: inherit; font-weight: 800; text-decoration: none; cursor: pointer; }
+      button.secondary, a.button.secondary { background: #161b22; color: #e6edf3; }
+      button:disabled { cursor: wait; opacity: 0.65; }
+      table { width: 100%; border-collapse: collapse; margin-top: 20px; overflow: hidden; border-radius: 14px; }
+      th, td { border-bottom: 1px solid #30363d; padding: 10px 8px; text-align: right; }
+      th:first-child, td:first-child { text-align: left; }
+      textarea { width: 100%; min-height: 220px; box-sizing: border-box; margin-top: 14px; border: 1px solid #30363d; border-radius: 14px; padding: 14px; background: #010409; color: #e6edf3; font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .hidden { display: none; }
+      .muted { color: #8b949e; }
+      @media (min-width: 680px) { .actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .actions .wide { grid-column: 1 / -1; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <p class="eyebrow">CollectorVision</p>
+        <h1 id="title">Browser benchmark</h1>
+        <p id="intro">Running raw ONNX inference on this browser/device and preparing a GitHub-ready Markdown report.</p>
+        <div id="status" class="status">Starting benchmark…</div>
+        <div id="results"></div>
+        <div id="done" class="hidden">
+          <p class="muted">The Markdown report below includes the summary table and full JSON payload. Download it or copy it into the canonical benchmark issue.</p>
+          <div class="actions">
+            <button id="download-md" type="button">Download Markdown report</button>
+            <button id="copy-comment" type="button" class="secondary">Copy Markdown</button>
+            <button id="copy-open-issue" type="button" class="secondary wide">Copy Markdown and open GitHub to comment</button>
+            <a class="button secondary" href="./index.html">Back to scanner</a>
+            <a id="issue-link" class="button secondary" href="https://github.com/HanClinto/CollectorVision/issues/16#issuecomment-new" target="_blank" rel="noopener">Open GitHub issue</a>
+          </div>
+          <textarea id="comment" readonly></textarea>
+        </div>
+      </section>
+    </main>
+
+    <script type="module">
+      import * as ort from "./vendor/onnxruntime-web/ort.webgpu.min.mjs?v=__BUILD_ID__";
+
+      const BENCHMARK_ISSUE_URL = "https://github.com/HanClinto/CollectorVision/issues/16#issuecomment-new";
+      const params = new URLSearchParams(location.search);
+      const validBackends = ["webgpu", "webnn", "wasm"];
+      const backend = validBackends.includes(params.get("backend")) ? params.get("backend") : "wasm";
+      const requestedThreads = 4;
+      const maxWasmThreads = crossOriginIsolated && typeof SharedArrayBuffer !== "undefined"
+        ? Math.max(1, Math.min(requestedThreads, navigator.hardwareConcurrency || requestedThreads))
+        : 1;
+      const threadSweep = backend === "wasm" && maxWasmThreads > 1 ? [1, maxWasmThreads] : [1];
+      const warmup = 10;
+      const runs = 50;
+      const titleEl = document.getElementById("title");
+      const introEl = document.getElementById("intro");
+      const statusEl = document.getElementById("status");
+      const resultsEl = document.getElementById("results");
+      const doneEl = document.getElementById("done");
+      const commentEl = document.getElementById("comment");
+      const downloadButton = document.getElementById("download-md");
+      const copyCommentButton = document.getElementById("copy-comment");
+      const copyOpenIssueButton = document.getElementById("copy-open-issue");
+      const issueLink = document.getElementById("issue-link");
+      issueLink.href = BENCHMARK_ISSUE_URL;
+      titleEl.textContent = `${backend.toUpperCase()} browser benchmark`;
+      introEl.textContent = `Running the selected detector and Milo with ${backend.toUpperCase()} and preparing a GitHub-ready Markdown report.`;
+
+      let markdownReport = "";
+
+      function percentile(values, pct) {
+        const sorted = [...values].sort((a, b) => a - b);
+        const index = (sorted.length - 1) * pct / 100;
+        const low = Math.floor(index);
+        const high = Math.min(low + 1, sorted.length - 1);
+        const weight = index - low;
+        return sorted[low] * (1 - weight) + sorted[high] * weight;
+      }
+
+      function summarize(values) {
+        const sum = values.reduce((total, value) => total + value, 0);
+        return {
+          runs: values.length,
+          mean: sum / values.length,
+          median: percentile(values, 50),
+          p90: percentile(values, 90),
+          p95: percentile(values, 95),
+          min: Math.min(...values),
+          max: Math.max(...values),
+        };
+      }
+
+      function roundStats(stats) {
+        return Object.fromEntries(Object.entries(stats).map(([key, value]) => [
+          key,
+          typeof value === "number" ? Math.round(value * 1000) / 1000 : value,
+        ]));
+      }
+
+      function makeTensor(shape) {
+        const size = shape.reduce((product, value) => product * value, 1);
+        const data = new Float32Array(size);
+        for (let i = 0; i < data.length; i += 1) {
+          data[i] = Math.sin(i * 0.013) * 1.2;
+        }
+        return data;
+      }
+
+      async function collectBuildInfo() {
+        try {
+          const response = await fetch("./build.json", { cache: "no-store" });
+          if (!response.ok) {
+            return { buildId: "unknown" };
+          }
+          return await response.json();
+        } catch {
+          return { buildId: "unknown" };
+        }
+      }
+
+      async function loadModels() {
+        const response = await fetch("./assets/manifest.json", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`Failed to load asset manifest: ${response.status}`);
+        }
+        const manifest = await response.json();
+        const detectorKey = manifest.models?.detector ? "detector" : "cornelius";
+        const detectorSize = Number(manifest.detector?.input_size ?? 384);
+        if (!Number.isInteger(detectorSize) || detectorSize <= 0) {
+          throw new Error(`Invalid detector input size: ${manifest.detector?.input_size}`);
+        }
+        const detectorFamily = manifest.detector?.family ?? "cornelius";
+        const versions = manifest.model_versions ?? {};
+        return [
+          {
+            name: detectorFamily,
+            version: versions[detectorKey] ?? "unknown",
+            path: `./assets/${manifest.models[detectorKey]}`,
+            shape: [1, 3, detectorSize, detectorSize],
+          },
+          {
+            name: "milo",
+            version: versions.milo ?? "unknown",
+            path: `./assets/${manifest.models.milo}`,
+            shape: [1, 3, 448, 448],
+          },
+        ];
+      }
+
+      async function modelSizeMiB(path) {
+        try {
+          const response = await fetch(path, { method: "HEAD", cache: "force-cache" });
+          const length = Number(response.headers.get("content-length"));
+          return Number.isFinite(length) && length > 0 ? Math.round(length / 1024 / 1024 * 100) / 100 : null;
+        } catch {
+          return null;
+        }
+      }
+
+      async function configureBackend(threadCount) {
+        ort.env.wasm.numThreads = threadCount;
+        if (backend === "webgpu") {
+          if (!("gpu" in navigator)) {
+            throw new Error("WebGPU is unavailable on this browser/device.");
+          }
+          const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+          if (!adapter) {
+            throw new Error("No WebGPU adapter available.");
+          }
+          ort.env.webgpu.adapter = adapter;
+          ort.env.webgpu.forceFp16 = false;
+        } else if (backend === "webnn") {
+          if (!("ml" in navigator)) {
+            throw new Error("WebNN is unavailable on this browser/device. Use Chrome 113+ or Safari 16.4+.");
+          }
+        }
+      }
+
+      async function benchmarkModel(model, threadCount) {
+        statusEl.textContent = `Loading ${model.name} with ${threadCount} thread${threadCount === 1 ? "" : "s"}…`;
+        const createStart = performance.now();
+        // WebNN session options: prefer NPU (Neural Engine on Apple) then GPU then CPU
+        const epOptions = backend === "webnn"
+          ? [{ name: "webnn", deviceType: "npu" }, { name: "webnn", deviceType: "gpu" }, { name: "webnn", deviceType: "cpu" }]
+          : [backend];
+        const session = await ort.InferenceSession.create(model.path, { executionProviders: epOptions });
+        const sessionCreateMs = performance.now() - createStart;
+        const sizeMiB = await modelSizeMiB(model.path);
+        const inputName = session.inputNames[0];
+        const feeds = { [inputName]: new ort.Tensor("float32", makeTensor(model.shape), model.shape) };
+
+        statusEl.textContent = `Running first ${model.name} pass with ${threadCount} thread${threadCount === 1 ? "" : "s"}…`;
+        const firstStart = performance.now();
+        await session.run(feeds);
+        const firstRunMs = performance.now() - firstStart;
+
+        statusEl.textContent = `Warming ${model.name} with ${threadCount} thread${threadCount === 1 ? "" : "s"}…`;
+        for (let i = 0; i < warmup; i += 1) {
+          await session.run(feeds);
+        }
+
+        const timings = [];
+        for (let i = 0; i < runs; i += 1) {
+          statusEl.textContent = `Measuring ${model.name} ${i + 1}/${runs} with ${threadCount} thread${threadCount === 1 ? "" : "s"}…`;
+          const start = performance.now();
+          await session.run(feeds);
+          timings.push(performance.now() - start);
+        }
+
+        return {
+          name: model.name,
+          path: model.path,
+          version: model.version,
+          sizeMiB,
+          backend,
+          provider: backend,
+          threads: threadCount,
+          inputShape: model.shape,
+          outputNames: session.outputNames,
+          sessionCreateMs,
+          firstRunMs,
+          latencyMs: summarize(timings),
+        };
+      }
+
+      function renderSummary(report) {
+        const rows = report.benchmarks.map((result) => {
+          const stats = result.latencyMs;
+          return `<tr><td>${result.name}</td><td>${result.threads}</td><td>${result.provider}</td><td>${stats.mean.toFixed(1)}</td><td>${stats.p90.toFixed(1)}</td></tr>`;
+        }).join("");
+        resultsEl.innerHTML = `<table><thead><tr><th>Model</th><th>Threads</th><th>Provider</th><th>Mean ms</th><th>P90 ms</th></tr></thead><tbody>${rows}</tbody></table>`;
+      }
+
+      function roundedReport(report) {
+        return {
+          ...report,
+          benchmarks: report.benchmarks.map((result) => ({
+            ...result,
+            sessionCreateMs: Math.round(result.sessionCreateMs * 1000) / 1000,
+            firstRunMs: Math.round(result.firstRunMs * 1000) / 1000,
+            latencyMs: roundStats(result.latencyMs),
+          })),
+        };
+      }
+
+      function formatMarkdownReport(report) {
+        const rows = report.benchmarks.map((result) => {
+          const stats = result.latencyMs;
+          const size = result.sizeMiB === null ? "—" : result.sizeMiB.toFixed(2);
+          return `| ${result.name} | ${result.version} | ${result.threads} | ${result.provider} | ${stats.mean.toFixed(2)} | ${stats.median.toFixed(2)} | ${stats.p90.toFixed(2)} | ${result.firstRunMs.toFixed(2)} | ${size} |`;
+        }).join("\n");
+        const threadSummary = report.backend === "webgpu"
+          ? "1 reported thread"
+          : report.wasmThreadSweep.length === 1
+          ? `${report.wasmThreadSweep[0]} WASM thread`
+          : `WASM thread sweep ${report.wasmThreadSweep.join(", ")}`;
+        return [
+          "## ONNX browser benchmark",
+          "",
+          `- **Source:** \`${report.source.buildId}\``,
+          `- **System:** \`${report.userAgent}\` · \`${report.hardwareConcurrency ?? "unknown"} logical threads\``,
+          `- **Runtime:** ONNX Runtime Web · \`${report.backend}\` · \`${threadSummary}\``,
+          `- **Isolation:** cross-origin isolated \`${report.crossOriginIsolated}\``,
+          "",
+          "Mean/median/P90 are steady-state ms; first run and warmups are excluded.",
+          "",
+          "| Model | Version | Threads | Provider | Mean ms | Median ms | P90 ms | First ms | Size MiB |",
+          "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+          rows,
+          "",
+          "<details>",
+          "<summary>Full JSON report</summary>",
+          "",
+          "```json",
+          JSON.stringify(report, null, 2),
+          "```",
+          "</details>",
+        ].join("\n");
+      }
+
+      function downloadMarkdown() {
+        if (!markdownReport) {
+          return;
+        }
+        const blob = new Blob([markdownReport], { type: "text/markdown" });
+        const url = URL.createObjectURL(blob);
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `collectorvision-model-benchmark-${backend}-${stamp}.md`;
+        document.body.append(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      async function copyMarkdown() {
+        if (!markdownReport) {
+          return;
+        }
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(markdownReport);
+        } else {
+          commentEl.focus();
+          commentEl.select();
+          document.execCommand("copy");
+        }
+        statusEl.className = "status";
+        statusEl.textContent = "Copied Markdown to clipboard.";
+      }
+
+      async function copyAndOpenIssue() {
+        await copyMarkdown();
+        window.open(BENCHMARK_ISSUE_URL, "_blank", "noopener");
+      }
+
+      async function runBenchmark() {
+        try {
+          const models = await loadModels();
+          const report = {
+            createdAt: new Date().toISOString(),
+            source: await collectBuildInfo(),
+            userAgent: navigator.userAgent,
+            crossOriginIsolated,
+            sharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
+            hardwareConcurrency: navigator.hardwareConcurrency,
+            benchmarkMode: backend === "wasm" ? "wasm-thread-sweep" : "single-backend",
+            backend,
+            requestedWasmThreads: requestedThreads,
+            wasmThreads: threadSweep.length === 1 ? threadSweep[0] : threadSweep,
+            wasmThreadSweep: threadSweep,
+            warmupRuns: warmup,
+            measuredRuns: runs,
+            benchmarks: [],
+          };
+          for (const threadCount of threadSweep) {
+            await configureBackend(threadCount);
+            for (const model of models) {
+              report.benchmarks.push(await benchmarkModel(model, threadCount));
+              renderSummary(report);
+            }
+          }
+          const rounded = roundedReport(report);
+          markdownReport = formatMarkdownReport(rounded);
+          commentEl.value = markdownReport;
+          doneEl.classList.remove("hidden");
+          statusEl.textContent = "Done. Download or copy the Markdown report, then post it to GitHub.";
+          if (params.get("download") === "1" || params.get("download") === "md") {
+            downloadMarkdown();
+          }
+        } catch (error) {
+          statusEl.className = "status status--error";
+          statusEl.textContent = error instanceof Error ? error.message : String(error);
+        }
+      }
+
+      downloadButton.addEventListener("click", downloadMarkdown);
+      copyCommentButton.addEventListener("click", copyMarkdown);
+      copyOpenIssueButton.addEventListener("click", copyAndOpenIssue);
+      runBenchmark();
+    </script>
+  </body>
+</html>
