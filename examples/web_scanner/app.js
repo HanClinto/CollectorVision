@@ -2189,6 +2189,48 @@ async function boot() {
 
   // Wire up init-phase progress messages before posting 'init'.
   const scannerReady = new Promise((resolve, reject) => {
+    const stageProgress = new Map();
+    const bundledCatalogBytes = Object.values(manifest.catalog?.asset_sizes ?? {})
+      .reduce((total, size) => total + (Number.isSafeInteger(size) && size > 0 ? size : 0), 0);
+
+    function displayProgress(data) {
+      const previous = stageProgress.get(data.stage);
+      const rawLoaded = Math.max(0, Number(data.loaded) || 0);
+      const rawTotal = Math.max(0, Number(data.total) || 0);
+      let loaded = rawLoaded;
+      let total = rawTotal;
+      let ratio = Math.max(0, Math.min(1, Number(data.ratio) || 0));
+      let offset = previous?.offset ?? 0;
+
+      // Older workers report each bundled catalog file independently. Combine
+      // those reports so the display does not jump from the embeddings size
+      // back down to the card-ID file size.
+      if (data.stage === "catalog" && catalogMode === "v1" && bundledCatalogBytes > 0) {
+        if (rawTotal === bundledCatalogBytes) {
+          offset = 0;
+        } else if (previous && rawLoaded < previous.rawLoaded) {
+          offset = previous.loaded;
+        }
+        loaded = Math.min(bundledCatalogBytes, offset + rawLoaded);
+        total = bundledCatalogBytes;
+        ratio = loaded / total;
+      }
+
+      // Completion-only events (Catalog v2 currently emits one) do not carry
+      // byte counts. Keep the last useful byte detail rather than flashing 0 B.
+      if (previous && loaded < previous.loaded) {
+        loaded = previous.loaded;
+        total = previous.total;
+      }
+      if (previous) {
+        ratio = Math.max(ratio, previous.ratio);
+      }
+
+      const progress = { loaded, total, ratio, rawLoaded, offset };
+      stageProgress.set(data.stage, progress);
+      return progress;
+    }
+
     function onInitMessage({ data }) {
       if (data.type === "progress") {
         recordBootTrace("worker:progress", data, { debugOnly: data.ratio < 1 });
@@ -2204,19 +2246,24 @@ async function boot() {
           debugLog.info("dewarp ready");
         } else {
           const ranges = { detector: [24, 44], embedder: [44, 60], catalog: [60, 96] };
+          const progress = displayProgress(data);
           const [start, end] = ranges[data.stage] ?? [0, 0];
-          const percent = start + (end - start) * data.ratio;
+          const percent = start + (end - start) * progress.ratio;
           const note = data.cached
             ? "Cached"
-            : data.total > 0
-            ? `${formatBytes(data.loaded)} / ${formatBytes(data.total)}`
-            : `${formatBytes(data.loaded)} downloaded`;
+            : progress.total > 0
+            ? `${formatBytes(progress.loaded)} / ${formatBytes(progress.total)}`
+            : progress.loaded > 0
+            ? `${formatBytes(progress.loaded)} downloaded`
+            : data.ratio >= 1
+            ? "Ready"
+            : "Starting";
           const label = {
             detector: "Loading corner detector",
             embedder: "Loading embedder",
             catalog: "Loading card catalog",
           }[data.stage];
-          setPhase(data.stage, percent, label, note, data.ratio >= 1 ? "done" : "active");
+          setPhase(data.stage, percent, label, note, progress.ratio >= 1 ? "done" : "active");
         }
       } else if (data.type === "ready") {
         recordBootTrace("worker:ready", {
