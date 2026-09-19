@@ -24,6 +24,9 @@ python server.py --hfd HanClinto/milo scryfall-mtg
 # Pre-cropped images (skip corner detection)
 python server.py --catalog ./catalog.npz --detector-none
 
+# Catalog lookup only — no ONNX vision models or image endpoints
+python server.py --catalog mtg:tcgplayer --embeddings-only
+
 # Filter blurry / no-card frames in a video pipeline
 python server.py --catalog ./catalog.npz --min-sharpness 0.02
 
@@ -88,6 +91,9 @@ curl -X POST http://localhost:8000/identify/upload \
 
 - The catalog and detector are lazy-loaded on the first request and reused for
   all subsequent calls — startup is fast, first request takes ~1–2 s.
+- `--embeddings-only` is intended for clients that run detection and embedding
+  locally. It disables the image endpoints and does not load the ONNX detector
+  or embedder; `/identify/embeddings` remains available for catalog lookup.
 - `sharpness` in the response is the SimCC mean-peak score; low values (< 0.02)
   indicate no card is visible in the frame.  Set `--min-sharpness 0.02` to
   automatically skip these frames.
