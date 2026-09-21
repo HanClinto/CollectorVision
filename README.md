@@ -1,3 +1,5 @@
+
+
 # CollectorVision
 
 Card identification library for collectible card games. Feed it a photo, get back a card identity.
@@ -230,6 +232,9 @@ uv pip install -e '.[dev]'
 
 The browser scanner lives in `examples/web_scanner` and is deployed at
 <https://hanclinto.github.io/CollectorVision/>.
+
+It uses Catalog v2 by default; append `?catalog=v1` to the URL to exercise the
+bundled Catalog v1 compatibility path.
 
 ## Playground
 
