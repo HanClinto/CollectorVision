@@ -20,10 +20,31 @@ _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
+def _ensure_portrait(img: Image.Image) -> Image.Image:
+    """Return the image unchanged or rotated 90 degrees into portrait orientation."""
+    if img.width <= img.height:
+        return img
+    return img.transpose(Image.Transpose.ROTATE_90)
+
+
 def _preprocess_pil(img: Image.Image, size: int) -> np.ndarray:
     """PIL Image (any mode) → (1, 3, size, size) float32, ImageNet-normalised."""
-    rgb = img.convert("RGB").resize((size, size), Image.BILINEAR)
-    x = np.array(rgb, dtype=np.float32) / 255.0
+    oriented = _ensure_portrait(img)
+    try:
+        rgb = oriented.convert("RGB")
+        try:
+            resized = rgb.resize((size, size), Image.BILINEAR)
+            try:
+                x = np.array(resized, dtype=np.float32) / 255.0
+            finally:
+                if resized is not rgb:
+                    resized.close()
+        finally:
+            if rgb is not oriented:
+                rgb.close()
+    finally:
+        if oriented is not img:
+            oriented.close()
     x = (x - _IMAGENET_MEAN) / _IMAGENET_STD
     return x.transpose(2, 0, 1)[np.newaxis].astype(np.float32)  # (1,3,H,W)
 

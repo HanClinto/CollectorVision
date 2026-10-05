@@ -7,6 +7,8 @@ This is the generic second half of adding a new game:
 2. Name each image file with the ID you want CollectorVision to return.
 3. Run this script against the image root.
 
+Milo normalizes landscape inputs to portrait orientation before embedding.
+
 Example:
         python catalog/build_catalog_from_images.py \
             --image-dir catalog/swccg/build/images \
