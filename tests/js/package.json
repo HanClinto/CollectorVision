@@ -8,7 +8,7 @@
   },
   "private": true,
   "scripts": {
-    "test": "node --input-type=module --check < ../../examples/web_scanner/app.js && node --check ../../examples/web_scanner/scanner.worker.mjs && node --check ../../examples/web_scanner/lib/collectorvision-catalog-v2.mjs && node test_catalog_v2.mjs && node test_pipeline.mjs"
+    "test": "node --input-type=module --check < ../../examples/web_scanner/app.js && node --check ../../examples/web_scanner/scanner.worker.mjs && node --check ../../examples/web_scanner/lib/collectorvision-catalog-v2.mjs && node test_progress.mjs && node test_catalog_v2.mjs && node test_pipeline.mjs"
   },
   "dependencies": {
     "canvas": "^2.11.2",
