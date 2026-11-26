@@ -188,7 +188,6 @@ class QuickstartIntegrationTests(unittest.TestCase):
         class FakeDetection:
             corners = np.array([[0.1, 0.1], [0.8, 0.1], [0.8, 0.8], [0.1, 0.8]], dtype=np.float32)
             card_present = True
-            confidence = 0.91
             sharpness = 0.06
             extra = {"presence": 0.99}
 

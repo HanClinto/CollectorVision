@@ -42,6 +42,7 @@ def detect_canny(bgr: np.ndarray):
 
     Works well on cards against clean or high-contrast backgrounds.
     Falls back to card_present=False when no clear rectangle is found.
+    The accepted contour's fraction of the image area is in extra["contour_area_ratio"].
     """
     from collector_vision.interfaces import DetectionResult
 
@@ -65,11 +66,20 @@ def detect_canny(bgr: np.ndarray):
             [pts[np.argmin(s)], pts[np.argmin(d)], pts[np.argmax(s)], pts[np.argmax(d)]],
             dtype=np.float32,
         )
+        area_ratio = area / (h * w)
         return DetectionResult(
-            corners=ordered / [w, h], card_present=True, confidence=area / (h * w)
+            corners=ordered / [w, h],
+            card_present=True,
+            confidence=area_ratio,
+            extra={"contour_area_ratio": area_ratio},
         )
 
-    return DetectionResult(corners=None, card_present=False, confidence=0.0)
+    return DetectionResult(
+        corners=None,
+        card_present=False,
+        confidence=0.0,
+        extra={"contour_area_ratio": 0.0},
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -94,7 +94,7 @@ def print_verbose_result(
 
 
 def draw_corner_overlay(bgr, detection):
-    """Return an image annotated with detector corners and confidence details."""
+    """Return an image annotated with detector corners and diagnostics."""
     out = bgr.copy()
     if detection.corners is not None:
         h, w = bgr.shape[:2]
@@ -114,7 +114,7 @@ def draw_corner_overlay(bgr, detection):
             )
 
     status = "CARD" if detection.card_present else "NO CARD"
-    details = [status, f"confidence={detection.confidence:.4f}"]
+    details = [status]
     if detection.sharpness is not None:
         details.append(f"sharpness={detection.sharpness:.4f}")
     presence = detection.extra.get("presence")

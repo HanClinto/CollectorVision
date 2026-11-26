@@ -66,7 +66,6 @@ def main():
         "image_size": [w, h],
         "corners_normalized": detection.corners.tolist(),  # [[x,y], ...] TL TR BR BL
         "sharpness": float(detection.sharpness) if detection.sharpness is not None else None,
-        "confidence": float(detection.confidence),
         "card_present": bool(detection.card_present),
         "dewarp_size": list(crop.size),
         "embedding": embedding_values,

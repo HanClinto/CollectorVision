@@ -1,4 +1,5 @@
 import unittest
+import warnings
 from pathlib import Path
 from unittest import mock
 
@@ -11,6 +12,23 @@ from collector_vision.interfaces import DetectionResult
 
 
 class DetectionResultTests(unittest.TestCase):
+    def test_confidence_warns_on_read_and_preserves_legacy_value(self) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            result = DetectionResult(corners=None, card_present=False, confidence=0.06)
+
+        with self.assertWarnsRegex(
+            DeprecationWarning, r"DetectionResult\.confidence.*card_present"
+        ):
+            self.assertEqual(result.confidence, 0.06)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            result.confidence = 0.04
+
+        with self.assertWarns(DeprecationWarning):
+            self.assertEqual(result.confidence, 0.04)
+
     def test_dewarp_outputs_embedder_sized_square_crop(self) -> None:
         bgr = np.zeros((60, 80, 3), dtype=np.uint8)
         corners = np.array(

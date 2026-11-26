@@ -10,6 +10,7 @@ a DetectionResult with your own corners and call dewarp() on it.
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
@@ -38,9 +39,15 @@ class CornerDetector(Protocol):
 
 
 class DetectionResult:
-    """Output of a CornerDetector.detect() call."""
+    """Output of a CornerDetector.detect() call.
 
-    __slots__ = ("corners", "card_present", "confidence", "sharpness", "extra")
+    Use ``card_present`` to decide whether to process a detection. ``sharpness``
+    is the raw SimCC corner score when available, or ``None`` otherwise.
+    ``confidence`` is deprecated: its meaning depends on the detector and
+    checkpoint, so it is not a probability or a portable threshold.
+    """
+
+    __slots__ = ("corners", "card_present", "_confidence", "sharpness", "extra")
 
     def __init__(
         self,
@@ -52,9 +59,24 @@ class DetectionResult:
     ) -> None:
         self.corners = corners
         self.card_present = card_present
-        self.confidence = confidence
+        self._confidence = confidence
         self.sharpness = sharpness
         self.extra = extra or {}
+
+    @property
+    def confidence(self) -> float:
+        """Deprecated detector-specific score; use ``card_present`` to gate detections."""
+        warnings.warn(
+            "DetectionResult.confidence is deprecated. Use card_present to accept or reject "
+            "detections and sharpness for SimCC corner quality when available.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._confidence
+
+    @confidence.setter
+    def confidence(self, value: float) -> None:
+        self._confidence = value
 
     def dewarp(self, bgr: np.ndarray) -> Image:
         """Perspective-warp the card region to a flat rectangle.

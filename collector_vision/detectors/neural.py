@@ -202,10 +202,11 @@ class NeuralCornerDetector:
         Returns
         -------
         DetectionResult with normalised (x, y) corners in TL, TR, BR, BL order.
-        ``card_present`` is False when sharpness is below ``min_sharpness``.
-        ``result.sharpness`` holds the SimCC mean-peak value (or ``None`` for
-        older checkpoints).  ``extra["presence"]`` holds the raw presence logit
-        sigmoid for diagnostics.
+        Use ``card_present`` to decide whether to process the detection. It
+        uses ``min_sharpness`` when the model emits SimCC mean-peak sharpness
+        and ``presence_threshold`` otherwise. ``result.sharpness`` is ``None``
+        when the model does not emit it. ``extra["presence"]`` holds the
+        sigmoid of the presence logit for diagnostics.
         """
         x = _preprocess(image, self._input_size)
         outs = self._run_session(x)

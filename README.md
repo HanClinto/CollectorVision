@@ -102,6 +102,8 @@ catalog = cvg.Catalog.load("mtg")
 image = cv2.imread("examples/images/7286819f-6c57-4503-898c-528786ad86e9_sample.jpg")
 detector = cvg.NeuralCornerDetector()
 detection = detector.detect(image)
+if not detection.card_present:
+    raise SystemExit("No card detected. Try a clearer photo.")
 
 # 2. Dewarp to aligned crop
 crop = detection.dewarp(image)          # PIL Image, 448×448 px
@@ -113,6 +115,11 @@ hits = catalog.search(emb, top_k=5)    # [(score, card_id), ...]
 score, card_id = hits[0]
 print(card_id, score)   # "abc123-...", 0.94
 ```
+
+For a webcam feed, skip frames where `detection.card_present` is false. To tune
+the Cornelius detector's cutoff, set `min_sharpness` on `detect()`. The
+`detection.sharpness` score measures corner prediction sharpness, not the
+probability that a card is present. `DetectionResult.confidence` is deprecated.
 
 ---
 
