@@ -112,8 +112,8 @@
             <button class="icon-button icon-button--debug" id="debug-toggle" type="button" aria-label="Show debug panel" aria-expanded="false">
               Debug
             </button>
-            <button class="icon-button icon-button--gear" id="settings-toggle" type="button" aria-label="Toggle settings">
-              ⚙
+            <button class="icon-button icon-button--gear" id="settings-toggle" type="button" aria-label="Open scanner settings">
+              <span aria-hidden="true">⚙</span> Settings
             </button>
           </div>
         </header>
@@ -220,7 +220,7 @@
               <span class="toggle-row__label">Show scan timing overlay</span>
               <input type="checkbox" id="perf-overlay-toggle" class="toggle-row__input" />
             </label>
-            <p class="capture-hint">Shows detector, dewarp, embed, lookup, thread, and memory estimates in the camera corner. You can also enable it with <code>?fps=1</code>.</p>
+            <p class="capture-hint">Shows observed and pipeline FPS plus detector, dewarp, embed, lookup, thread, and memory estimates in the camera corner. You can also enable it with <code>?fps=1</code>.</p>
           </section>
 
           <section class="panel panel--nested">
@@ -231,7 +231,8 @@
               </div>
             </header>
             <p class="capture-hint">Watch a shared tab, window, or screen, crop to a region of interest, and emit card events for overlays or CSV/JSONL export.</p>
-            <a class="action-button action-button--block" href="./screen_capture_monitor.html">▶ Open Screen Capture Monitor</a>
+            <a class="action-button action-button--block" data-preserve-channel href="./screen_capture_monitor.html">▶ Open Screen Capture Monitor</a>
+            <a class="action-button action-button--block" data-preserve-channel href="./applet_example.html">▶ Open Scanner Playground</a>
           </section>
 
           <section class="panel panel--nested">
@@ -249,8 +250,8 @@
           <section class="panel panel--nested">
             <header class="panel-header">
               <div>
-                <p class="section-kicker">Recognition</p>
-                <h2>Match Threshold</h2>
+                <p class="section-kicker">Detector and recognition</p>
+                <h2>Detection Thresholds</h2>
               </div>
             </header>
             <label class="slider-row" for="match-score-slider">
@@ -262,6 +263,7 @@
               min="0.40" max="0.85" step="0.01" value="0.50" />
             <div class="threshold-meter" aria-live="polite">
               <span class="threshold-meter__fill" id="match-score-signal-fill"></span>
+              <span class="threshold-meter__peak" id="match-score-signal-peak"></span>
               <span class="threshold-meter__threshold" id="match-score-signal-threshold"></span>
             </div>
             <p class="threshold-meter__value" id="match-score-signal-value">Current —</p>
@@ -275,6 +277,7 @@
               min="0" max="0.10" step="0.01" value="0.02" />
             <div class="threshold-meter" aria-live="polite">
               <span class="threshold-meter__fill" id="corner-confidence-signal-fill"></span>
+              <span class="threshold-meter__peak" id="corner-confidence-signal-peak"></span>
               <span class="threshold-meter__threshold" id="corner-confidence-signal-threshold"></span>
             </div>
             <p class="threshold-meter__value" id="corner-confidence-signal-value">Current —</p>

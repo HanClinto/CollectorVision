@@ -192,9 +192,11 @@ body[data-loading="true"] .loading-screen {
 }
 
 .icon-button--gear {
-  font-size: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   line-height: 1;
-  padding: 0.35rem 0.5rem;
+  padding: 0.5rem 0.65rem;
 }
 
 .camera-shell {
@@ -336,7 +338,7 @@ h2 {
   top: 0.65rem;
   right: 0.65rem;
   z-index: 3;
-  width: min(26rem, calc(100% - 1.3rem));
+  width: min(42rem, calc(100vw - 1.3rem));
   padding: 0.55rem 0.65rem;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 0.75rem;
@@ -345,7 +347,8 @@ h2 {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.7rem;
   line-height: 1.35;
-  white-space: pre-line;
+  overflow-x: auto;
+  white-space: pre;
   pointer-events: none;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
 }
@@ -688,6 +691,19 @@ dd {
   width: 2px;
   background: #332f29;
   transform: translateX(-1px);
+}
+
+.threshold-meter__peak {
+  position: absolute;
+  top: 0.06rem;
+  bottom: 0.06rem;
+  left: 0;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.65);
+  opacity: 0;
+  transform: translateX(-1px);
+  transition: left 100ms linear, opacity 100ms linear;
 }
 
 .threshold-meter__value {

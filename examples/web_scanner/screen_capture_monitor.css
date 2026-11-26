@@ -416,6 +416,19 @@ input[type="range"] {
   transform: translateX(-1px);
 }
 
+.threshold-meter__peak {
+  position: absolute;
+  top: 0.05rem;
+  bottom: 0.05rem;
+  left: 0;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  transform: translateX(-1px);
+  transition: left 100ms linear, opacity 100ms linear;
+}
+
 .threshold-meter__value {
   color: #c8bbab;
   font-size: 0.76rem;
